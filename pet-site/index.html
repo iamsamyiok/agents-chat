@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>萌宠之家 · 宠物领养平台</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <h1>🐾 萌宠之家</h1>
+    <p>用爱给每一个小生命一个家 · 模拟数据演示</p>
+  </header>
+
+  <div class="toolbar">
+    <input type="search" id="search" placeholder="搜索名字 / 品种 / 城市…">
+    <div class="filters" id="filters"></div>
+  </div>
+
+  <main class="grid" id="grid"></main>
+
+  <footer>© 2026 萌宠之家 · 本网站为前端演示，数据均为模拟，无真实后端。</footer>
+
+  <!-- 详情弹窗 -->
+  <div class="modal-mask" id="modal-mask">
+    <div class="modal" id="modal">
+      <button class="modal-close" id="modal-close">×</button>
+      <div class="avatar">🐶</div>
+      <div class="detail">
+        <div class="top">
+          <h2 id="d-name">名字</h2>
+          <span class="price" id="d-price">¥0</span>
+        </div>
+        <div class="info" id="d-info"></div>
+        <div class="tags" id="d-tags"></div>
+        <div class="desc" id="d-desc"></div>
+        <div class="actions">
+          <button class="btn-primary" id="adopt-btn">申请领养</button>
+          <button class="btn-ghost" id="close-btn">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    document.getElementById("close-btn").addEventListener("click", function () {
+      document.getElementById("modal-mask").classList.remove("show");
+    });
+  </script>
+</body>
+</html>

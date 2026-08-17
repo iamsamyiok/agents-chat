@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
+  <rect width="400" height="400" fill="#ECEFF1"/>
+  <circle cx="200" cy="210" r="120" fill="#37474F"/>
+  <polygon points="110,120 150,60 180,130" fill="#37474F"/>
+  <polygon points="290,120 250,60 220,130" fill="#37474F"/>
+  <circle cx="162" cy="195" r="20" fill="#FFEE58"/>
+  <circle cx="238" cy="195" r="20" fill="#FFEE58"/>
+  <circle cx="162" cy="195" r="7" fill="#212121"/>
+  <circle cx="238" cy="195" r="7" fill="#212121"/>
+  <polygon points="200,225 188,245 212,245" fill="#F48FB1"/>
+  <path d="M200 245 Q185 262 170 252" stroke="#F48FB1" stroke-width="4" fill="none"/>
+  <path d="M200 245 Q215 262 230 252" stroke="#F48FB1" stroke-width="4" fill="none"/>
+  <line x1="120" y1="180" x2="95" y2="175" stroke="#90A4AE" stroke-width="3"/>
+  <line x1="120" y1="195" x2="95" y2="198" stroke="#90A4AE" stroke-width="3"/>
+  <line x1="280" y1="180" x2="305" y2="175" stroke="#90A4AE" stroke-width="3"/>
+  <line x1="280" y1="195" x2="305" y2="198" stroke="#90A4AE" stroke-width="3"/>
+  <text x="200" y="370" font-family="sans-serif" font-size="28" fill="#212121" text-anchor="middle">🐱 煤球</text>
+</svg>
