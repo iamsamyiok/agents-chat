@@ -218,6 +218,18 @@ function updateTask(id, patch) {
   return t;
 }
 
+// 孤儿状态修复：服务异常退出后仍标记 running 的任务复位为待执行
+// 启动与退出时调用，避免任务永远卡在「执行中」
+function resetRunningTasks() {
+  const tasks = getTasks();
+  let n = 0;
+  for (const t of tasks) {
+    if (t.status === 'running') { t.status = 'pending'; t.result = '服务重启，已复位为待执行'; n++; }
+  }
+  if (n > 0) saveTasks(tasks);
+  return n;
+}
+
 function getTask(id) {
   return getTasks().find(x => x.id === id) || null;
 }
@@ -243,6 +255,7 @@ function addMessage(msg) {
     actor: msg.actor || '',
     taskId: msg.taskId || '',
     plan: msg.plan || undefined,
+    outputPath: msg.outputPath || '',
     epoch: msg.taskId ? undefined : (msg.epoch !== undefined ? msg.epoch : (Number(getConfig().mainEpoch) || 0)),
     timestamp: msg.timestamp || new Date().toISOString()
   };
@@ -267,6 +280,7 @@ module.exports = {
   reorderTasks,
   deleteTask,
   updateTask,
+  resetRunningTasks,
   getTask,
   parseTasksFromText,
   getMessages,

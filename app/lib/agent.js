@@ -55,17 +55,57 @@ const MISSING_HINT = [
 ].join('\n');
 
 // ---------- NDJSON 事件 → 文本流 ----------
+// 从工具入参提取操作对象摘要（路径/命令/网址等），让用户知道工具到底动了什么
+function toolTarget(part) {
+  const state = (part && part.state) || {};
+  const input = state.input || part.input;
+  if (!input || typeof input !== 'object') return '';
+  const keys = ['filePath', 'path', 'file_path', 'command', 'cmd', 'url', 'pattern', 'query', 'name', 'content'];
+  for (const k of keys) {
+    const v = input[k];
+    if (typeof v === 'string' && v.trim()) return `（${v.slice(0, 60)}）`;
+  }
+  const first = Object.values(input).find(v => typeof v === 'string' && v.trim());
+  return first ? `（${first.slice(0, 60)}）` : '';
+}
+
 function describeTool(part) {
   const name = part && part.tool ? part.tool : 'tool';
   const state = (part && part.state) || {};
   if (state.status === 'error') {
     return `[工具] ${name} 失败：${String(state.error || '').slice(0, 300)}`;
   }
-  return `[工具] ${name} 执行完成`;
+  return `[工具] ${name}${toolTarget(part)} 执行完成`;
 }
 
-// 运行一次 agent，流式回调 onChunk({content, done, error})
-function runAgent(agent, prompt, onChunk) {
+// ---------- 运行中的子进程登记（手动停止 / 退出清理用） ----------
+const activeChildren = new Map(); // child -> scope（'chat' | 'tasks'）
+function registerChild(child, scope) {
+  if (!child) return;
+  activeChildren.set(child, scope || 'chat');
+  child.on('close', () => activeChildren.delete(child));
+}
+
+// 停止某作用域的全部子进程：标记后强杀进程树，close 回调会给出友好提示
+function stopScope(scope) {
+  let n = 0;
+  for (const [child, s] of activeChildren) {
+    if (s !== scope) continue;
+    child._stopped = true;
+    killTree(child);
+    n++;
+  }
+  return n;
+}
+
+function stopAllChildren() {
+  let n = 0;
+  for (const [child] of activeChildren) { child._stopped = true; killTree(child); n++; }
+  return n;
+}
+
+// 运行一次 agent，流式回调 onChunk({content, done, error})；scope 用于停止定位
+function runAgent(agent, prompt, onChunk, scope) {
   const runner = resolveRunner();
 
   if (runner.kind === 'missing') {
@@ -79,7 +119,7 @@ function runAgent(agent, prompt, onChunk) {
       MOCK_BEHAVIOR: agent.behavior || 'echo',
       MOCK_AGENT_ID: agent.id
     };
-    return spawnMock([MOCK_SCRIPT, prompt], agent, env, onChunk);
+    return spawnMock([MOCK_SCRIPT, prompt], agent, env, onChunk, scope);
   }
 
   // ---------- opencode 真实执行 ----------
@@ -104,7 +144,7 @@ function runAgent(agent, prompt, onChunk) {
     ? `${agent.systemPrompt}\n\n${prompt}`
     : prompt;
 
-  return spawnOpenCode(runner, args, fullPrompt, agent, onChunk);
+  return spawnOpenCode(runner, args, fullPrompt, agent, onChunk, scope);
 }
 
 // 智能体工作目录：
@@ -120,7 +160,7 @@ function resolveCwd(agent) {
   return dir;
 }
 
-function spawnOpenCode(runner, args, prompt, agent, onChunk) {
+function spawnOpenCode(runner, args, prompt, agent, onChunk, scope) {
   let child;
   try {
     child = spawn(runner.cmd, args, {
@@ -133,6 +173,7 @@ function spawnOpenCode(runner, args, prompt, agent, onChunk) {
     onChunk({ content: '', done: true, error: `启动 OpenCode 失败：${error.message}` });
     return null;
   }
+  registerChild(child, scope);
 
   // prompt 全文经 stdin 传入：任意字符都安全
   child.stdin.on('error', () => { /* stdin 已关闭则忽略 */ });
@@ -176,7 +217,9 @@ function spawnOpenCode(runner, args, prompt, agent, onChunk) {
     // 处理没有换行结尾的残留行
     if (stdoutBuf.trim()) handleEventLine(stdoutBuf.trim(), onChunk, errEvents);
     let error;
-    if (killed) {
+    if (child._stopped) {
+      error = '已手动停止';
+    } else if (killed) {
       error = `执行超时（超过 ${Math.round(timeoutMs / 1000)} 秒已强制终止）。可在 .env 调大 AGENTS_CHAT_TIMEOUT_MS`;
     } else if (errEvents.length > 0) {
       error = errEvents.join('\n').slice(0, 2000);
@@ -231,7 +274,7 @@ function killTree(child) {
 }
 
 // ---------- 演示模式 ----------
-function spawnMock(args, agent, env, onChunk) {
+function spawnMock(args, agent, env, onChunk, scope) {
   let child;
   try {
     child = spawn(process.execPath, args, {
@@ -243,6 +286,7 @@ function spawnMock(args, agent, env, onChunk) {
     onChunk({ content: '', done: true, error: String(error) });
     return null;
   }
+  registerChild(child, scope);
 
   let stderrBuf = '';
   child.stdout.on('data', (data) => {
@@ -256,10 +300,12 @@ function spawnMock(args, agent, env, onChunk) {
     onChunk({
       content: '',
       done: true,
-      error: code !== 0 && stderrBuf.trim() ? stderrBuf.trim().slice(0, 2000) : undefined
+      error: child._stopped
+        ? '已手动停止'
+        : (code !== 0 && stderrBuf.trim() ? stderrBuf.trim().slice(0, 2000) : undefined)
     });
   });
   return child;
 }
 
-module.exports = { runAgent, resolveRunner, findOpenCode, describeTool, MISSING_HINT };
+module.exports = { runAgent, resolveRunner, findOpenCode, describeTool, stopScope, stopAllChildren, MISSING_HINT };

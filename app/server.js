@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.2.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.3.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -33,8 +33,15 @@ process.on('unhandledRejection', (err) => {
 const PORT = Number(process.argv.includes('--port') ? process.argv[process.argv.indexOf('--port') + 1] : (process.env.PORT || 3456));
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const store = require('./lib/store');
-const { runAgent } = require('./lib/agent');
+const { runAgent, stopScope, stopAllChildren } = require('./lib/agent');
 const { runButler, runMentioned, runTasks } = require('./lib/orchestrator');
+
+// ---------- 执行互斥与停止控制 ----------
+// chat / tasks 两个作用域各自单飞（防止双击或 API 直调并发执行）；
+// 任务执行中仍可正常聊天，互不阻塞
+const runLocks = { chat: false, tasks: false };
+// 停止令牌：每次停止递增，编排循环通过对比快照感知「执行期间被要求停止」
+const stopTokens = { chat: 0, tasks: 0 };
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -157,6 +164,16 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (p === '/api/stop' && req.method === 'POST') {
+    // 手动停止：kill 对应作用域的全部子进程；编排循环检测令牌后跳过剩余工作
+    const body = await readBody(req);
+    const scope = body.scope === 'tasks' ? 'tasks' : 'chat';
+    stopTokens[scope]++;
+    const n = stopScope(scope);
+    json(res, 200, { success: true, scope, stopped: n });
+    return;
+  }
+
   if (p === '/api/agents' && req.method === 'GET') {
     json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id });
     return;
@@ -262,18 +279,26 @@ const server = http.createServer(async (req, res) => {
 
   if (p === '/api/tasks/run' && req.method === 'POST') {
     // 顺序执行任务：每个任务 = 独立会话 + 一次完整管家调度
+    if (runLocks.tasks) {
+      json(res, 409, { success: false, error: '已有一批任务正在执行，请等待完成或先停止' });
+      return;
+    }
+    runLocks.tasks = true;
+    const myToken = stopTokens.tasks; // 执行期间令牌变化 = 用户请求了停止
     const body = await readBody(req);
     const all = store.getTasks().slice().sort((a, b) => a.createdAt - b.createdAt);
     const selected = Array.isArray(body.taskIds) && body.taskIds.length > 0
       ? all.filter(t => body.taskIds.includes(t.id))
       : all.filter(t => t.status === 'pending' || t.status === 'failed');
     if (selected.length === 0) {
+      runLocks.tasks = false;
       json(res, 400, { success: false, error: '没有可执行的任务' });
       return;
     }
     const agents = store.getAgents();
     const butler = agents.find(a => a.id === 'butler');
     if (!butler) {
+      runLocks.tasks = false;
       json(res, 400, { success: false, error: '管家智能体缺失，配置异常' });
       return;
     }
@@ -288,7 +313,7 @@ const server = http.createServer(async (req, res) => {
     try {
       await runTasks(
         selected, butler, subAgents,
-        { getHistory: (tid) => buildHistoryText(tid), resolveAssign },
+        { getHistory: (tid) => buildHistoryText(tid), resolveAssign, scope: 'tasks', isStopped: () => stopTokens.tasks !== myToken },
         send, persist,
         // 任务会话首条消息：任务本身（用户视角）
         (task) => {
@@ -307,6 +332,7 @@ const server = http.createServer(async (req, res) => {
       console.error('[tasks/run] 编排异常:', err && (err.stack || err));
       send({ type: 'error', content: `任务编排异常：${err && err.message || err}` });
     } finally {
+      runLocks.tasks = false;
       try { res.end(); } catch { /* closed */ }
     }
     return;
@@ -315,21 +341,31 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/chat' && req.method === 'POST') {
     // 聊天：@点名 → 点名智能体串行流水线；未点名 → 管家调度
     // taskId 非空时为任务会话内聊天（携带该会话历史背景）
+    // 任务批量执行中仍可聊天（互不阻塞），但同时只允许一个聊天编排
+    if (runLocks.chat) {
+      json(res, 409, { success: false, error: '上一条消息还在处理中，请等待完成或点「停止」' });
+      return;
+    }
+    runLocks.chat = true;
+    const myToken = stopTokens.chat;
     const body = await readBody(req);
     const message = String(body.message || '').trim();
     const taskId = String(body.taskId || '');
     if (!message) {
+      runLocks.chat = false;
       json(res, 400, { success: false, error: 'message 不能为空' });
       return;
     }
     const agents = store.getAgents();
     if (agents.length === 0) {
+      runLocks.chat = false;
       json(res, 400, { success: false, error: '没有可用的 Agent，请先配置' });
       return;
     }
     const butler = agents.find(a => a.id === 'butler');
     const subAgents = agents.filter(a => a.id !== 'butler');
     if (!butler) {
+      runLocks.chat = false;
       json(res, 400, { success: false, error: '管家智能体缺失，配置异常' });
       return;
     }
@@ -338,7 +374,7 @@ const server = http.createServer(async (req, res) => {
     const clean = stripMentions(message) || message;
 
     // 先构建历史背景（此时还不含当前消息），再落库当前用户消息
-    const opts = { taskId, history: buildHistoryText(taskId) };
+    const opts = { taskId, history: buildHistoryText(taskId), scope: 'chat', isStopped: () => stopTokens.chat !== myToken };
     store.addMessage({ role: 'user', content: message, taskId, timestamp: new Date().toISOString() });
 
     const send = sse(req, res);
@@ -352,6 +388,7 @@ const server = http.createServer(async (req, res) => {
       console.error('[chat] 编排异常:', err && (err.stack || err));
       send({ type: 'error', content: `编排异常：${err && err.message || err}` });
     } finally {
+      runLocks.chat = false;
       try { res.end(); } catch { /* closed */ }
     }
     return;
@@ -375,6 +412,20 @@ const server = http.createServer(async (req, res) => {
   res.end('Not Found');
 });
 
+// 优雅退出：停掉全部子进程、把执行中任务复位为待执行，避免残留与假死状态
+function shutdown(code) {
+  try {
+    const n = stopAllChildren();
+    const m = store.resetRunningTasks();
+    if (n || m) console.log(`退出清理：终止 ${n} 个子进程，复位 ${m} 个执行中任务`);
+  } catch (err) {
+    console.error('[shutdown] 清理失败:', err && (err.stack || err));
+  }
+  process.exit(code);
+}
+process.on('SIGINT', () => shutdown(0));
+process.on('SIGTERM', () => shutdown(0));
+
 server.on('error', (err) => {
   if (err && err.code === 'EADDRINUSE') {
     console.error(`\n❌ 端口 ${PORT} 已被占用：很可能有一个旧版 Agents Chat 进程还在运行！`);
@@ -396,6 +447,9 @@ server.listen(PORT, () => {
     : runner.kind === 'demo'
       ? '演示模式（AGENTS_CHAT_MOCK=1，输出为模拟结果）'
       : '未检测到 OpenCode！任务将报错，请先安装 opencode 并重启';
+  // 启动即修复孤儿状态：上次异常退出时仍标记「执行中」的任务复位为待执行
+  const orphan = store.resetRunningTasks();
+  if (orphan > 0) console.log(`检测到 ${orphan} 个上次未正常结束的任务，已复位为待执行`);
   console.log(`Agents Chat 已启动: http://localhost:${PORT}`);
   console.log(`运行内核: ${kindText}`);
   console.log(`数据目录: ${store.DATA_DIR}`);

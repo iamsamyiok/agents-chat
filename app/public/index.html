@@ -99,6 +99,9 @@
   #input:focus { border-color: #07c160; }
   #sendBtn { background: #07c160; color: #fff; border: none; border-radius: 6px; padding: 0 22px; font-size: 14px; cursor: pointer; }
   #sendBtn:disabled { background: #9ff0c1; cursor: not-allowed; }
+  #sendBtn.stop, .run-all.stop { background: #fa5151; color: #fff; }
+  #sendBtn.stop:hover, .run-all.stop:hover { background: #e04840; }
+  .msg-file { font-size: 11px; color: #8a6fe8; background: #f4f1fd; border-radius: 4px; padding: 3px 8px; margin-top: 4px; max-width: 100%; word-break: break-all; cursor: default; }
 
   /* @ 智能体补全菜单 */
   #atMenu { display: none; position: absolute; bottom: 100%; left: 14px; right: 14px; margin-bottom: 6px; background: #fff; border: 1px solid #e2e2e2; border-radius: 8px; box-shadow: 0 -4px 20px rgba(0,0,0,.12); max-height: 264px; overflow-y: auto; z-index: 20; }
@@ -163,7 +166,7 @@
     </div>
     <div id="sessionList"></div>
     <div class="side-footer">
-      <button class="run-all" id="runAllBtn" onclick="runAllTasks()">按时间顺序执行全部待办</button>
+      <button class="run-all" id="runAllBtn" onclick="onRunAllBtn()">按时间顺序执行全部待办</button>
     </div>
   </aside>
 
@@ -188,7 +191,7 @@
       <div class="hint-row">输入 <b>@</b> 点名智能体（可多个，按顺序串行）；不点名则由<b>管家</b>自动调度子智能体并行/串行完成</div>
       <div class="input-row">
         <input id="input" placeholder="输入消息，@ 可点名智能体…" autocomplete="off">
-        <button id="sendBtn" onclick="send()">发送</button>
+        <button id="sendBtn" onclick="onSendBtn()">发送</button>
       </div>
       <div id="atMenu"></div>
     </footer>
@@ -236,11 +239,14 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const PAGE_VERSION = '3.2.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.3.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', task: '任务执行' };
 
-let agents = [], butlerId = 'butler', tasks = [], busy = false;
+let agents = [], butlerId = 'butler', tasks = [];
+let chatBusy = false;          // 聊天编排进行中（发送按钮变「停止」）
+let taskBusy = false;          // 任务批量执行进行中（执行按钮变「停止执行」）
+let stopAsked = false;         // 本次流中已请求过停止，避免重复点击
 let curTaskId = '';            // '' = 主会话；否则为任务会话
 const sessions = new Map();    // key: 'main' | taskId → 消息数组
 
@@ -339,7 +345,7 @@ function renderSidebar() {
     tasksHtml = tasks.map((t, i) => {
       const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : '•';
       const assign = t.assign && t.assign !== butlerId ? ` · @${esc(assignName(t.assign))}` : '';
-      return `<div class="task-item ${curTaskId === t.id ? 'active' : ''}" draggable="${!busy && t.status !== 'running'}" ondragstart="onDragStart(${i},event)" ondragover="onDragOver(${i},event)" ondragleave="this.classList.remove('drag-over')" ondrop="onDrop(${i},event)" onclick="switchSession('${t.id}')">
+      return `<div class="task-item ${curTaskId === t.id ? 'active' : ''}" draggable="${!taskBusy && t.status !== 'running'}" ondragstart="onDragStart(${i},event)" ondragover="onDragOver(${i},event)" ondragleave="this.classList.remove('drag-over')" ondrop="onDrop(${i},event)" onclick="switchSession('${t.id}')">
         <div class="task-avatar st-${t.status}">${icon}</div>
         <div class="task-main">
           <div class="task-title">${esc(t.title)}</div>
@@ -468,6 +474,7 @@ function msgNode(m) {
     <div class="msg-body">
       <div class="msg-name">${esc(m.agentName || m.agentId || 'AI')}${m.agentId === butlerId ? ' · 管家' : ''}</div>
       <div class="bubble left">${tag}<span class="tx"></span></div>
+      ${m.outputPath ? `<div class="msg-file" title="完整产出已保存到此文件，后续智能体会直接读取完整版">📄 ${esc(m.outputPath)}</div>` : ''}
     </div>`;
   row.querySelector('.tx').textContent = m.content;
   m._tx = row.querySelector('.tx');
@@ -537,6 +544,27 @@ function onStreamText(ev) {
   ensureMsgDom(m);
 }
 
+// 正式产出已落盘：给对应消息气泡附上完整产出文件路径
+function onSaved(ev) {
+  const key = sessKey(ev.taskId || '');
+  const arr = getSess(key);
+  for (let i = arr.length - 1; i >= 0; i--) {
+    const m = arr[i];
+    if (m._live && m.agentId === ev.agentId && m.phase === ev.phase && !m.outputPath) {
+      m.outputPath = ev.path;
+      if (m._dom && document.contains(m._dom) && !m._dom.querySelector('.msg-file')) {
+        const file = document.createElement('div');
+        file.className = 'msg-file';
+        file.title = '完整产出已保存到此文件，后续智能体会直接读取完整版';
+        file.textContent = '📄 ' + ev.path;
+        m._dom.querySelector('.msg-body').appendChild(file);
+        scrollBottom();
+      }
+      return;
+    }
+  }
+}
+
 function removeMsg(m) {
   if (!m) return;
   const arr = getSess(sessKey(m.taskId));
@@ -580,11 +608,41 @@ async function streamSSE(path, body, onEvent) {
 }
 
 // ---------- 聊天 ----------
+// 发送按钮双重身份：空闲=发送；处理中=停止当前编排
+function setSendBtn() {
+  const btn = document.getElementById('sendBtn');
+  if (chatBusy) {
+    btn.textContent = stopAsked ? '停止中…' : '停止';
+    btn.classList.add('stop');
+    btn.disabled = stopAsked;
+  } else {
+    btn.textContent = '发送';
+    btn.classList.remove('stop');
+    btn.disabled = false;
+  }
+}
+
+async function onSendBtn() {
+  if (chatBusy) { await stopRun('chat'); return; }
+  send();
+}
+
+async function stopRun(scope) {
+  stopAsked = true;
+  setSendBtn();
+  updateRunAllBtn();
+  try {
+    await api('/api/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope }) });
+    toast('已请求停止，正在等待进程结束…');
+  } catch { toast('停止请求失败，请重试'); }
+}
+
 async function send() {
   const text = input.value.trim();
-  if (!text || busy) return;
-  busy = true;
-  document.getElementById('sendBtn').disabled = true;
+  if (!text || chatBusy) return;
+  chatBusy = true;
+  stopAsked = false;
+  setSendBtn();
   let typing = null;
   try {
     input.value = '';
@@ -600,8 +658,9 @@ async function send() {
     addSys('处理异常：' + (err && err.message || err));
   } finally {
     if (typing) removeMsg(typing);
-    busy = false;
-    document.getElementById('sendBtn').disabled = false;
+    chatBusy = false;
+    stopAsked = false;
+    setSendBtn();
   }
 }
 
@@ -618,6 +677,8 @@ function handleStreamEvent(e) {
     addSys(e.accepted ? `✅ 验收通过（第 ${e.round} 轮）` : `⚠ ${e.note || '验收未通过'}`, e.taskId);
   } else if (e.type === 'text') {
     onStreamText(e);
+  } else if (e.type === 'saved') {
+    onSaved(e);
   } else if (e.type === 'notice') {
     addSys(e.content, e.taskId);
   } else if (e.type === 'error') {
@@ -634,10 +695,31 @@ async function runAllTasks() {
   await execTasks(pending.map(t => t.id));
 }
 
+// 执行按钮双重身份：空闲=执行全部；执行中=停止
+function updateRunAllBtn() {
+  const btn = document.getElementById('runAllBtn');
+  if (taskBusy) {
+    btn.textContent = stopAsked ? '停止中…' : '停止执行';
+    btn.classList.add('stop');
+    btn.disabled = stopAsked;
+  } else {
+    btn.textContent = '按时间顺序执行全部待办';
+    btn.classList.remove('stop');
+    btn.disabled = false;
+  }
+}
+
+async function onRunAllBtn() {
+  if (taskBusy) { await stopRun('tasks'); return; }
+  runAllTasks();
+}
+
 async function execTasks(taskIds) {
-  if (busy) { toast('正在执行中，请稍候'); return; }
-  busy = true;
-  document.getElementById('runAllBtn').disabled = true;
+  if (taskBusy) { toast('正在执行中，请先停止当前批次'); return; }
+  taskBusy = true;
+  stopAsked = false;
+  updateRunAllBtn();
+  let gotAllDone = false; // 流意外中断（服务重启/网络断开）时向用户明确说明
   try {
     taskIds.forEach(id => { const t = tasks.find(x => x.id === id); if (t) t.status = 'running'; });
     renderSidebar();
@@ -651,18 +733,21 @@ async function execTasks(taskIds) {
         const t = tasks.find(x => x.id === e.taskId);
         if (t) t.status = e.status;
         renderSidebar();
-        addSys(`任务${e.status === 'done' ? '完成' : '失败'}：${e.title}`, e.taskId);
+        addSys(`任务${e.status === 'done' ? '完成' : e.status === 'pending' ? '已停止（可重新执行）' : '失败'}：${e.title}`, e.taskId);
       } else if (e.type === 'all_done') {
+        gotAllDone = true;
         addSys('全部任务执行完毕');
       } else {
         handleStreamEvent(e);
       }
     });
+    if (!gotAllDone) addSys('⚠ 与服务的连接中断，任务可能仍在后台执行；刷新页面可查看最新进度');
   } catch (err) {
     addSys('处理异常：' + (err && err.message || err));
   } finally {
-    busy = false;
-    document.getElementById('runAllBtn').disabled = false;
+    taskBusy = false;
+    stopAsked = false;
+    updateRunAllBtn();
   }
   await loadTasks();
   renderHeader();
@@ -670,7 +755,7 @@ async function execTasks(taskIds) {
 
 // ---------- 开启新会话（清空当前聊天显示，旧内容可在「历史」中查看，不再纳入上下文） ----------
 async function newSession() {
-  if (busy) { toast('正在执行中，请稍候'); return; }
+  if (chatBusy) { toast('当前消息处理中，请等待或停止后再开新会话'); return; }
   const data = await api('/api/session/new', { method: 'POST' });
   if (data.success) {
     sessions.set('main', []);
@@ -702,7 +787,8 @@ async function openHistory() {
         html += `<div class="msg-row"><div class="avatar butler">管</div><div class="msg-body"><div class="msg-name">${esc(m.agentName || '管家')} · 调度规划</div><div class="bubble left plan-card"><div class="plan-thought">${esc(m.plan.thought || '')}</div>${(m.plan.phases || []).map((g, gi) => `<div class="plan-phase"><b>阶段 ${gi + 1}</b>（${g.length > 1 ? g.length + ' 项并行' : '单执行'}）${g.map(s => `<div class="plan-step">▸ <b>${esc(s.agentName)}</b>：${esc(s.instruction)}</div>`).join('')}</div>`).join('')}</div></div></div>`;
       } else {
         const tag = m.phase && PHASE_LABEL[m.phase] ? `<span class="ph">【${PHASE_LABEL[m.phase]}】</span>` : '';
-        html += `<div class="msg-row"><div class="avatar ${m.agentId === butlerId ? 'butler' : ''}" style="${m.agentId === butlerId ? '' : `background:${colorOf(m.agentId || 'x')}`}">${esc((m.agentName || 'AI').slice(0, 2))}</div><div class="msg-body"><div class="msg-name">${esc(m.agentName || m.agentId || 'AI')}</div><div class="bubble left">${tag}${esc(m.content)}</div></div></div>`;
+        const fileTag = m.outputPath ? `<div class="msg-file">📄 ${esc(m.outputPath)}</div>` : '';
+        html += `<div class="msg-row"><div class="avatar ${m.agentId === butlerId ? 'butler' : ''}" style="${m.agentId === butlerId ? '' : `background:${colorOf(m.agentId || 'x')}`}">${esc((m.agentName || 'AI').slice(0, 2))}</div><div class="msg-body"><div class="msg-name">${esc(m.agentName || m.agentId || 'AI')}</div><div class="bubble left">${tag}${esc(m.content)}</div>${fileTag}</div></div>`;
       }
     }
     el.innerHTML = html;
@@ -747,7 +833,7 @@ async function loadMessages() {
   for (const m of data.messages || []) {
     getSess(sessKey(m.taskId)).push({
       role: m.role, content: m.content, agentId: m.agentId, agentName: m.agentName,
-      phase: m.phase, plan: m.plan, taskId: m.taskId, ts: m.timestamp
+      phase: m.phase, plan: m.plan, taskId: m.taskId, outputPath: m.outputPath, ts: m.timestamp
     });
   }
   renderMessages();

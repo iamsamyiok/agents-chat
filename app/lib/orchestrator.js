@@ -6,6 +6,8 @@
 // 上下文规则：子智能体的正式产出作为「工作背景」传给后续智能体；
 // 调度过程（规划卡片/阶段提示/验收意见）只展示在界面上，不进入上下文。
 const { runAgent } = require('./agent');
+const fs = require('fs');
+const path = require('path');
 
 const CTX_PER_OUTPUT = 4000;  // 单份产出作为背景的截断长度
 const CTX_TOTAL = 12000;      // 背景累计截断长度
@@ -13,9 +15,42 @@ const PARALLEL_CAP = 3;       // 阶段内并行进程上限
 const MAX_REWORK = Number(process.env.AGENTS_CHAT_MAX_VERIFY) > 0
   ? Number(process.env.AGENTS_CHAT_MAX_VERIFY) : 2; // 验收不通过时最大返工轮数
 
+// ---------- 产出归档：正式产出落盘，后续智能体与用户都能拿到完整版 ----------
+const OUT_ROOT = path.join(process.env.AGENTS_CHAT_DATA || path.join(__dirname, '..', '..', '.data'), 'outputs');
+const dirCounters = new Map(); // 会话目录 -> 已写文件数（重启后基于现有文件续编）
+
+function sessionOutDir(taskId) {
+  const name = taskId ? String(taskId).replace(/[^\w-]/g, '_') : 'main';
+  return path.join(OUT_ROOT, name);
+}
+
+function saveOutput(sessionDir, agentName, phase, text) {
+  try {
+    if (!text || !String(text).trim()) return '';
+    fs.mkdirSync(sessionDir, { recursive: true });
+    if (!dirCounters.has(sessionDir)) {
+      let max = 0;
+      try {
+        for (const f of fs.readdirSync(sessionDir)) {
+          const m = f.match(/^(\d+)-/);
+          if (m) max = Math.max(max, Number(m[1]));
+        }
+      } catch { /* 空目录 */ }
+      dirCounters.set(sessionDir, max);
+    }
+    const n = dirCounters.get(sessionDir) + 1;
+    dirCounters.set(sessionDir, n);
+    const safeName = String(agentName).replace(/[\\/:*?"<>|\s]/g, '_').slice(0, 30);
+    const file = path.join(sessionDir, `${String(n).padStart(2, '0')}-${safeName}-${phase}.md`);
+    fs.writeFileSync(file, `【${agentName} · ${phase} 阶段产出】\n\n${text}\n`);
+    return file;
+  } catch { return ''; }
+}
+
 // ---------- 基础：运行单个 agent 一轮，流式回调 ----------
 // 错误绝不静默：出错时把错误文本作为消息流入聊天流，用户必须能看到
-function runAgentOnce(agent, prompt, emit, phase, role, taskId) {
+// 正式产出落盘后通过 saved 事件告知前端完整文件路径
+function runAgentOnce(agent, prompt, emit, phase, role, taskId, sessionDir, scope) {
   return new Promise((resolve) => {
     let output = '';
     let error = undefined;
@@ -30,9 +65,11 @@ function runAgentOnce(agent, prompt, emit, phase, role, taskId) {
           error = chunk.error;
           emit({ type: 'text', content: `\n[执行出错]\n${chunk.error}\n`, phase, role, agentId: agent.id, agentName: agent.name, taskId: taskId || '' });
         }
-        resolve({ output, error });
+        const outputPath = error ? '' : saveOutput(sessionDir, agent.name, phase, output);
+        if (outputPath) emit({ type: 'saved', path: outputPath, agentId: agent.id, agentName: agent.name, phase, taskId: taskId || '' });
+        resolve({ output, error, outputPath });
       }
-    });
+    }, scope);
   });
 }
 
@@ -54,7 +91,9 @@ function buildContext(results) {
 function appendWorkContext(prompt, results, history) {
   let p = prompt;
   const ctx = buildContext(results);
-  if (ctx) p += `\n\n【工作背景：前序智能体的产出（供参考，避免重复劳动）】\n${ctx}`;
+  if (ctx) p += `\n\n【工作背景：前序智能体的产出摘要（完整版见下方文件）】\n${ctx}`;
+  const files = results.filter(r => r.outputPath).map(r => `- ${r.agent.name}（${r.phase || 'work'}）：${r.outputPath}`);
+  if (files.length) p += `\n\n【完整产出文件】上方摘要可能被截断，以下文件是前序智能体的完整产出，建议直接读取后再开工：\n${files.join('\n')}`;
   if (history) p += `\n\n【会话背景（本会话此前的对话）】\n${history}`;
   return p;
 }
@@ -174,6 +213,9 @@ function parseVerdict(text, agents, warn) {
 // ---------- 管家调度主流程 ----------
 async function runButler(butler, subAgents, message, opts, emit, onMessage) {
   const taskId = opts.taskId || '';
+  const scope = opts.scope || 'chat';
+  const isStopped = opts.isStopped || (() => false);
+  const sessionDir = sessionOutDir(taskId);
   const warnings = [];
   const warn = (w) => { warnings.push(w); emit({ type: 'notice', content: `⚠ ${w}`, taskId }); };
 
@@ -208,7 +250,7 @@ agent 字段只填智能体名称或 ID 之一（如 "工程师" 或 "oc-2"，�
 
   // 规划阶段文本不直接流式展示（避免计划展示两次）：内部缓冲，解析后只展示一次
   const planEmit = (e) => { if (e.type === 'text') return; emit(e); };
-  let planRes = await runAgentOnce(butler, planPrompt, planEmit, 'plan', 'butler', taskId);
+  let planRes = await runAgentOnce(butler, planPrompt, planEmit, 'plan', 'butler', taskId, sessionDir, scope);
   let rawPlan = planRes.output ? extractPlanJSON(planRes.output) : null;
   let phases = planRes.output ? normalizePhases(rawPlan, subAgents, warn) : [];
 
@@ -225,7 +267,7 @@ ${message}
 请重新输出：先用 1~3 句中文说明计划，再输出 JSON 代码块：
 {"steps": [[{"agent": "智能体名称", "instruction": "具体指令"}]]}
 若确实无需子智能体（闲聊/澄清），输出 {"steps": []} 并直接回答。`;
-    const retryRes = await runAgentOnce(butler, retryPrompt, planEmit, 'plan', 'butler', taskId);
+    const retryRes = await runAgentOnce(butler, retryPrompt, planEmit, 'plan', 'butler', taskId, sessionDir, scope);
     if (retryRes.output) {
       const raw2 = extractPlanJSON(retryRes.output);
       const phases2 = normalizePhases(raw2, subAgents, warn);
@@ -257,14 +299,18 @@ ${message}
 
   // results 按 agent 维度保存最新产出
   const results = [];
-  const setResult = (agent, output, error, instruction) => {
+  const setResult = (agent, output, error, instruction, phase, outputPath) => {
     const i = results.findIndex(r => r.agent.id === agent.id);
-    const entry = { agent, output, error, instruction };
+    const entry = { agent, output, error, instruction, phase: phase || 'work', outputPath: outputPath || '' };
     if (i >= 0) results[i] = entry; else results.push(entry);
   };
 
   // ---- 2. 执行各阶段（阶段内并行，分批限流） ----
   for (let i = 0; i < phases.length; i++) {
+    if (isStopped()) {
+      emit({ type: 'notice', content: '已手动停止，跳过剩余阶段', taskId });
+      break;
+    }
     const group = phases[i];
     emit({ type: 'phase', index: i + 1, total: phases.length, parallel: group.length > 1, names: group.map(s => s.agentName).join('、'), taskId });
     for (let j = 0; j < group.length; j += PARALLEL_CAP) {
@@ -274,17 +320,22 @@ ${message}
         let p = `【来自管家的指派】\n${step.instruction}\n\n【用户原始需求】\n${message}`;
         p = appendWorkContext(p, results, opts.history);
         p += '\n\n请输出你的正式结果。';
-        const res = await runAgentOnce(agent, p, emit, 'work', 'worker', taskId);
-        setResult(agent, res.output, res.error, step.instruction);
-        onMessage({ role: 'assistant', agentId: agent.id, agentName: agent.name, actor: 'assistant', phase: 'work', content: (res.output || `[执行出错] ${res.error}`).slice(0, 20000) });
+        const res = await runAgentOnce(agent, p, emit, 'work', 'worker', taskId, sessionDir, scope);
+        setResult(agent, res.output, res.error, step.instruction, 'work', res.outputPath);
+        onMessage({ role: 'assistant', agentId: agent.id, agentName: agent.name, actor: 'assistant', phase: 'work', content: (res.output || `[执行出错] ${res.error}`).slice(0, 20000), outputPath: res.outputPath || '' });
       })()));
     }
+    if (isStopped()) break;
   }
 
   // ---- 3. 验收 → 返工循环 ----
   let accepted = false;
   let reworks = 0;
   while (true) {
+    if (isStopped()) {
+      emit({ type: 'notice', content: '已手动停止，跳过验收与汇总', taskId });
+      return { ok: false, finalText: '已手动停止（各智能体的阶段产出已保存在会话产出目录）', stopped: true };
+    }
     const round = reworks + 1;
     const workText = results.map(r =>
       `【${r.agent.name} 的任务】\n${r.instruction}\n【${r.agent.name} 的产出】\n${(r.output || `（执行失败：${r.error}）`).slice(0, CTX_PER_OUTPUT)}`
@@ -303,8 +354,8 @@ ${reworks > 0 ? '\n（注：此前已反馈过问题，请重点核对是否已�
 2. 再输出 JSON：全部合格输出 {"verdict":"ACCEPT"}；存在问题输出 {"verdict":"REJECT","issues":[{"agent":"智能体名称","requirement":"必须满足的要求","suggestion":"具体完善建议"}]}
 只有确有问题才 REJECT；issues 只列需要返工的智能体，不要把合格的也列进去。`;
 
-    const verifyRes = await runAgentOnce(butler, verifyPrompt, emit, 'review', 'butler', taskId);
-    onMessage({ role: 'assistant', agentId: butler.id, agentName: butler.name, actor: 'butler', phase: 'review', content: (verifyRes.output || `[验收出错] ${verifyRes.error}`).slice(0, 20000) });
+    const verifyRes = await runAgentOnce(butler, verifyPrompt, emit, 'review', 'butler', taskId, sessionDir, scope);
+    onMessage({ role: 'assistant', agentId: butler.id, agentName: butler.name, actor: 'butler', phase: 'review', content: (verifyRes.output || `[验收出错] ${verifyRes.error}`).slice(0, 20000), outputPath: verifyRes.outputPath || '' });
     if (!verifyRes.output) break; // 验收失败无法判定，直接交付
 
     const verdict = parseVerdict(verifyRes.output, subAgents, warn);
@@ -343,10 +394,12 @@ ${reworks > 0 ? '\n（注：此前已反馈过问题，请重点核对是否已�
       let p = `【来自管家的返工要求】${it.requirement}\n【完善建议】${it.suggestion}\n\n【你上次的产出】\n${(r.output || `（执行失败：${r.error}）`).slice(0, CTX_PER_OUTPUT)}\n\n【你上次的任务】\n${it.instruction}\n\n【用户原始需求】\n${message}`;
       const ctxOthers = buildContext(results.filter(x => x.agent.id !== it.agentId));
       if (ctxOthers) p += `\n\n【工作背景：其他智能体的产出】\n${ctxOthers}`;
+      const otherFiles = results.filter(x => x.agent.id !== it.agentId && x.outputPath).map(x => `- ${x.agent.name}：${x.outputPath}`);
+      if (otherFiles.length) p += `\n\n【其他智能体的完整产出文件】\n${otherFiles.join('\n')}`;
       p += '\n\n请在原有产出基础上完善，不要从零重复劳动。';
-      const res = await runAgentOnce(r.agent, p, emit, 'work', 'worker', taskId);
-      setResult(r.agent, res.output || r.output, res.output ? undefined : (res.error || r.error), it.instruction);
-      onMessage({ role: 'assistant', agentId: r.agent.id, agentName: r.agent.name, actor: 'assistant', phase: 'work', content: (res.output || `[返工出错] ${res.error}`).slice(0, 20000) });
+      const res = await runAgentOnce(r.agent, p, emit, 'work', 'worker', taskId, sessionDir, scope);
+      setResult(r.agent, res.output || r.output, res.output ? undefined : (res.error || r.error), it.instruction, 'work', res.outputPath || r.outputPath);
+      onMessage({ role: 'assistant', agentId: r.agent.id, agentName: r.agent.name, actor: 'assistant', phase: 'work', content: (res.output || `[返工出错] ${res.error}`).slice(0, 20000), outputPath: res.outputPath || '' });
     }
   }
 
@@ -359,32 +412,45 @@ ${message}
 
 【各智能体产出】
 ${outs.slice(0, 24000)}`;
-  const sumRes = await runAgentOnce(butler, sumPrompt, emit, 'report', 'butler', taskId);
+  const sumRes = await runAgentOnce(butler, sumPrompt, emit, 'report', 'butler', taskId, sessionDir, scope);
   const finalText = sumRes.output || outs || sumRes.error || '';
-  onMessage({ role: 'assistant', agentId: butler.id, agentName: butler.name, actor: 'butler', phase: 'report', content: (finalText || '（无输出）').slice(0, 20000) });
+  onMessage({ role: 'assistant', agentId: butler.id, agentName: butler.name, actor: 'butler', phase: 'report', content: (finalText || '（无输出）').slice(0, 20000), outputPath: sumRes.outputPath || '' });
   return { ok: !sumRes.error || results.some(r => r.output), finalText };
 }
 
 // ---------- @点名：按点名顺序串行流水线（产出作为后续背景） ----------
 async function runMentioned(mentionAgents, message, opts, emit, onMessage) {
   const taskId = opts.taskId || '';
+  const scope = opts.scope || 'chat';
+  const isStopped = opts.isStopped || (() => false);
+  const sessionDir = sessionOutDir(taskId);
   const results = [];
   for (const agent of mentionAgents) {
+    if (isStopped()) {
+      emit({ type: 'notice', content: '已手动停止，跳过剩余智能体', taskId });
+      break;
+    }
     const role = agent.id === 'butler' ? 'butler' : 'worker';
     const p = appendWorkContext(message, results, opts.history);
-    const res = await runAgentOnce(agent, p, emit, 'work', role, taskId);
-    results.push({ agent, output: res.output, error: res.error });
+    const res = await runAgentOnce(agent, p, emit, 'work', role, taskId, sessionDir, scope);
+    results.push({ agent, output: res.output, error: res.error, phase: 'work', outputPath: res.outputPath });
     if (res.output || res.error) {
-      onMessage({ role: 'assistant', agentId: agent.id, agentName: agent.name, actor: 'assistant', phase: 'work', content: (res.output || `[执行出错] ${res.error}`).slice(0, 20000) });
+      onMessage({ role: 'assistant', agentId: agent.id, agentName: agent.name, actor: 'assistant', phase: 'work', content: (res.output || `[执行出错] ${res.error}`).slice(0, 20000), outputPath: res.outputPath || '' });
     }
   }
-  return { ok: results.some(r => r.output), finalText: results.map(r => r.output).filter(Boolean).join('\n\n') };
+  return { ok: results.some(r => r.output), finalText: results.map(r => r.output).filter(Boolean).join('\n\n'), stopped: isStopped() };
 }
 
 // ---------- 任务队列：每个任务一次完整调度（独立会话） ----------
 // 末尾 @子智能体 的任务由该智能体独立完成；未指派/@管家 则由管家调度
+// 手动停止：当前任务复位为待执行，剩余任务不再启动
 async function runTasks(tasks, butler, subAgents, opts, emit, onMessage, onTaskStart, onTaskDone) {
+  const isStopped = opts.isStopped || (() => false);
   for (const task of tasks) {
+    if (isStopped()) {
+      emit({ type: 'notice', content: '已手动停止，剩余任务保持待执行状态' });
+      break;
+    }
     const prompt = `请完成以下任务并给出结果：\n${task.title}${task.notes ? `\n\n补充说明：${task.notes}` : ''}`;
     // 先建历史背景（不含本任务的起始消息），再写入任务会话首条消息
     const history = opts.getHistory ? opts.getHistory(task.id) : '';
@@ -398,14 +464,19 @@ async function runTasks(tasks, butler, subAgents, opts, emit, onMessage, onTaskS
       // 指派子智能体：独立完成，无管家编排
       emit({ type: 'task_start', taskId: task.id, title: task.title, agentName: assigned.name });
       emit({ type: 'notice', content: `本任务由 @${assigned.name} 独立完成（无管家调度）`, taskId: task.id });
-      r = await runMentioned([assigned], prompt, { taskId: task.id, history }, emit, persistTask);
+      r = await runMentioned([assigned], prompt, { taskId: task.id, history, scope: opts.scope, isStopped }, emit, persistTask);
     } else {
       emit({ type: 'task_start', taskId: task.id, title: task.title, agentName: butler.name });
-      r = await runButler(butler, subAgents, prompt, { taskId: task.id, history }, emit, persistTask);
+      r = await runButler(butler, subAgents, prompt, { taskId: task.id, history, scope: opts.scope, isStopped }, emit, persistTask);
     }
-    const resultText = (r.finalText || '').trim() || '执行失败';
-    onTaskDone(task.id, { status: r.ok ? 'done' : 'failed', result: resultText.slice(0, 10000) });
-    emit({ type: 'task_done', taskId: task.id, status: r.ok ? 'done' : 'failed', title: task.title });
+    let status = r.ok ? 'done' : 'failed';
+    let resultText = (r.finalText || '').trim() || '执行失败';
+    if (isStopped() && !r.ok) {
+      status = 'pending'; // 手动停止的任务回到待执行，可随时重跑
+      resultText = '已手动停止，可重新执行';
+    }
+    onTaskDone(task.id, { status, result: resultText.slice(0, 10000) });
+    emit({ type: 'task_done', taskId: task.id, status, title: task.title });
   }
   emit({ type: 'all_done' });
 }
