@@ -6,6 +6,7 @@
 // 上下文规则：子智能体的正式产出作为「工作背景」传给后续智能体；
 // 调度过程（规划卡片/阶段提示/验收意见）只展示在界面上，不进入上下文。
 const { runAgent, resolveCwd } = require('./agent');
+const memory = require('./memory');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -412,6 +413,23 @@ async function runButler(butler, subAgents, message, opts, emit, onMessage) {
   const runId = newRunId();
   const handoffDoc = HANDOFF_MODE() !== 'full';
   const resume = opts.resume && Array.isArray(opts.resume.phases) && opts.resume.phases.length ? opts.resume : null;
+
+  // 管家长期记忆开启时：超长会话背景先经辅助小模型压缩（失败自动确定性截断），
+  // 压缩结果写回 opts.history 供后续工作背景复用，全链路只压一次
+  const memOn = memory.memoryEnabled();
+  if (memOn && opts.history && String(opts.history).length > 4000) {
+    const c = await memory.compressHistory(opts.history, { limit: 1200, minLen: 4000 });
+    opts.history = c.text;
+  }
+  // 跨会话回忆：从全部历史消息按关键词检索相关片段（确定性、零 token）
+  let recallText = '';
+  if (memOn) {
+    try {
+      const all = (storeFlow && storeFlow.getMessages && storeFlow.getMessages('')) || [];
+      const curEpoch = taskId ? undefined : (Number((storeFlow && storeFlow.getConfig && storeFlow.getConfig().mainEpoch)) || 0);
+      recallText = memory.recallFromMessages(all, message, { excludeTaskId: taskId, excludeEpoch: curEpoch });
+    } catch { /* 检索失败静默跳过 */ }
+  }
   logFlow({
     run: runId, type: 'start', from: butler.name, summary: String(message).replace(/\s+/g, ' ').slice(0, 200),
     detail: { taskId, mode: resume ? 'rerun' : 'butler', baseRun: resume ? resume.baseRun : undefined, message: String(message).slice(0, 20000) }
@@ -456,6 +474,11 @@ ${roster}
 - 例如「先方案设计→再编码实现→最后审查」必须拆为多个串行阶段，严禁合并进同一阶段
 - 你只负责规划与调度，自己不动手干活：不要调用任何工具、不要写代码或文件，只输出计划文本与 JSON
 `;
+  if (memOn) {
+    const memText = memory.memoryBlock(['memory', 'user']);
+    if (memText) planPrompt += `\n【管家记忆（跨会话积累的笔记与用户偏好，规划时参考）】\n${memText}\n`;
+  }
+  if (recallText) planPrompt += `\n【历史回忆（关键词检索到的往期相关片段，仅供背景参考，其结论可能已过时）】\n${recallText}\n`;
   if (opts.history) planPrompt += `\n【会话背景（本会话此前的对话）】\n${opts.history}\n`;
   planPrompt += `
 输出格式（严格遵守）：
@@ -507,6 +530,13 @@ ${message}
     const answer = planThought(planRes.output) || planRes.output;
     emit({ type: 'text', content: answer, phase: 'report', role: 'butler', agentId: butler.id, agentName: butler.name, taskId });
     onMessage({ role: 'assistant', agentId: butler.id, agentName: butler.name, actor: 'butler', phase: 'report', content: answer.slice(0, 20000) });
+    // 直答也自省：用户偏好常在闲聊/澄清中表达（失败静默）
+    if (memOn) {
+      try {
+        const r = await memory.reflectOnRun(`用户消息：${String(message).slice(0, 800)}\n\n管家直答（节选）：${String(answer).slice(0, 800)}`);
+        if (r && r.applied) emit({ type: 'notice', content: `💾 管家记忆已更新：${r.note || `记录 ${r.applied} 条`}`, taskId });
+      } catch { /* 自省失败静默 */ }
+    }
     return { ok: true, finalText: answer };
   }
 
@@ -599,7 +629,7 @@ ${message}
 
 【用户原始需求】
 ${message}
-
+${memOn && memory.memoryBlock(['user']) ? `\n【用户偏好（验收标准参考，如语言、格式、风格偏好）】\n${memory.memoryBlock(['user'])}\n` : ''}
 【各智能体的任务与产出】
 ${workText.slice(0, 24000)}
 ${filesSection}${autoText}
@@ -701,6 +731,15 @@ ${realSection}`;
     files: realFiles.length ? realFiles : deliverFiles.map(r => r.outputPath),
     detail: { accepted, reworks, realFiles }
   });
+
+  // ---- 5. 自省：辅助小模型从本轮提取值得长期记住的偏好/事实（失败静默，绝不阻塞交付） ----
+  if (memOn) {
+    try {
+      const digest = `用户需求：${String(message).slice(0, 800)}\n\n调度安排：${phases.map((st, i) => `第${i + 1}阶段 ${st.map(s => s.agent).join('、')}`).join('；').slice(0, 300)}\n\n最终交付（节选）：${String(finalText).slice(0, 1200)}\n\n验收情况：${accepted ? '通过' : '未完全通过'}`;
+      const r = await memory.reflectOnRun(digest);
+      if (r && r.applied) emit({ type: 'notice', content: `💾 管家记忆已更新：${r.note || `记录 ${r.applied} 条`}`, taskId });
+    } catch { /* 自省失败静默 */ }
+  }
   return { ok: !sumRes.error || results.some(r => r.output), finalText };
 }
 
@@ -785,7 +824,9 @@ async function runRoundtable(butler, participants, message, opts, emit, onMessag
   const runId = newRunId();
   const members = participants.map(a => a.name);
 
+  const memBlockRT = memory.memoryEnabled() ? memory.memoryBlock(['memory', 'user']) : '';
   const topicBlock = `【讨论主题】\n${message}`
+    + (memBlockRT ? `\n\n【管家记忆（跨会话笔记与用户偏好，讨论时参考）】\n${memBlockRT}` : '')
     + (opts.history ? `\n\n【会话背景（本会话此前的对话）】\n${String(opts.history).slice(0, 3000)}` : '');
 
   logFlow({
