@@ -479,4 +479,4 @@ function spawnMock(args, agent, env, onChunk, scope) {
   return child;
 }
 
-module.exports = { runAgent, resolveRunner, detectKernels, KERNEL_DEFS, missingHint, describeTool, stopScope, stopAllChildren };
+module.exports = { runAgent, resolveRunner, detectKernels, KERNEL_DEFS, missingHint, describeTool, stopScope, stopAllChildren, resolveCwd };

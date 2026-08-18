@@ -5,15 +5,120 @@
 // 3) 任务队列 → 每个任务一次完整管家调度（任务会话独立）
 // 上下文规则：子智能体的正式产出作为「工作背景」传给后续智能体；
 // 调度过程（规划卡片/阶段提示/验收意见）只展示在界面上，不进入上下文。
-const { runAgent } = require('./agent');
+const { runAgent, resolveCwd } = require('./agent');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const { execFile, exec } = require('child_process');
 
 const CTX_PER_OUTPUT = 4000;  // 单份产出作为背景的截断长度
 const CTX_TOTAL = 12000;      // 背景累计截断长度
 const PARALLEL_CAP = 3;       // 阶段内并行进程上限
 const MAX_REWORK = Number(process.env.AGENTS_CHAT_MAX_VERIFY) > 0
   ? Number(process.env.AGENTS_CHAT_MAX_VERIFY) : 2; // 验收不通过时最大返工轮数
+
+// ---------- 自动核查：验收前由系统本地执行的确定性检查（不依赖任何智能体自述） ----------
+// 检查项：产出文件存在性/非空、产出中 JS 代码块语法（node --check）、JSON 代码块可解析、
+//         占位符残留（TODO/此处省略等）、自定义验证命令（.env AGENTS_CHAT_VERIFY_CMD）
+// 全部检查只读不写（临时文件除外），语法检查不执行代码；.env AGENTS_CHAT_AUTOVERIFY=0 可整体关闭
+function nodeSyntaxCheck(code, tag) {
+  return new Promise((resolve) => {
+    try {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-'));
+      const file = path.join(dir, `block.${tag || 'js'}`);
+      fs.writeFileSync(file, code);
+      execFile(process.execPath, ['--check', file], { timeout: 15000 }, (err, _so, se) => {
+        try { fs.unlinkSync(file); fs.rmdirSync(dir); } catch { /* ignore */ }
+        resolve({ pass: !err, note: err ? String(se || err.message).split('\n')[0].slice(0, 300) : '语法正确' });
+      });
+    } catch (e) {
+      resolve({ pass: true, note: `检查器异常（跳过）：${String(e.message || e).slice(0, 120)}` });
+    }
+  });
+}
+
+function runVerifyCmd(cmd) {
+  return new Promise((resolve) => {
+    const timeoutMs = Number(process.env.AGENTS_CHAT_VERIFY_TIMEOUT_MS) > 0
+      ? Number(process.env.AGENTS_CHAT_VERIFY_TIMEOUT_MS) : 120000;
+    try {
+      exec(cmd, { cwd: resolveCwd(), timeout: timeoutMs, maxBuffer: 512 * 1024, killSignal: 'SIGKILL' }, (err, so, se) => {
+        const tail = String((so || '') + (se || '')).trim().slice(-1200);
+        const code = err ? (err.code === undefined ? 1 : err.code) : 0;
+        const killed = err && err.killed ? '（超时被终止）' : '';
+        resolve({ pass: !err, note: `退出码 ${code}${killed}${tail ? `，输出末尾：\n${tail}` : '（无输出）'}` });
+      });
+    } catch (e) {
+      resolve({ pass: true, note: `命令无法启动（跳过）：${String(e.message || e).slice(0, 120)}` });
+    }
+  });
+}
+
+// 从产出文本提取带语言标注的代码块
+function codeBlocks(output) {
+  const out = [];
+  const re = /```([a-zA-Z0-9+#-]*)\r?\n([\s\S]*?)```/g;
+  let m;
+  while ((m = re.exec(String(output || ''))) !== null) out.push({ lang: (m[1] || '').toLowerCase(), code: m[2] });
+  return out;
+}
+
+const PLACEHOLDER_RE = /(此处省略|此处略|内容略|TODO[:：]?\s*待补|待补充[:：]?\s*$|«+\s*略\s*»+|\.{6,}省略)/;
+
+async function runAutoChecks(results) {
+  if (process.env.AGENTS_CHAT_AUTOVERIFY === '0') return null;
+  const items = []; // {name, pass, note}
+  const add = (name, pass, note) => items.push({ name, pass: !!pass, note: String(note).slice(0, 800) });
+
+  for (const r of results) {
+    const label = r.agent && r.agent.name;
+    // 1) 产出文件
+    if (r.outputPath) {
+      try {
+        const st = fs.statSync(r.outputPath);
+        const content = st.size <= 2 * 1024 * 1024 ? fs.readFileSync(r.outputPath, 'utf8') : '';
+        const lines = content ? content.split('\n').length : 0;
+        add(`产出文件[${label}]`, st.size > 0, `${r.outputPath}（${st.size} 字节，${lines} 行）`);
+      } catch (e) {
+        add(`产出文件[${label}]`, false, `无法读取 ${r.outputPath}：${String(e.message || e).slice(0, 120)}`);
+      }
+    } else if (r.output) {
+      add(`产出文件[${label}]`, true, '纯文本产出（无落盘文件，仅记录于会话）');
+    }
+    if (!r.output) continue;
+    // 2) 代码块：JS 语法 + JSON 可解析（每份产出最多查 6 块，防大产出拖慢）
+    const blocks = codeBlocks(r.output).slice(0, 6);
+    let jsN = 0, jsonN = 0;
+    for (const b of blocks) {
+      if (['js', 'javascript', 'mjs', 'cjs', 'node'].includes(b.lang) && b.code.trim()) {
+        jsN++;
+        const c = await nodeSyntaxCheck(b.code, b.lang === 'mjs' ? 'mjs' : 'js');
+        add(`JS 语法[${label}·第${jsN}块]`, c.pass, c.note);
+      } else if (b.lang === 'json' && b.code.trim()) {
+        jsonN++;
+        try { JSON.parse(b.code); add(`JSON 校验[${label}·第${jsonN}块]`, true, '合法 JSON'); }
+        catch (e) { add(`JSON 校验[${label}·第${jsonN}块]`, false, `解析失败：${String(e.message || e).slice(0, 200)}`); }
+      }
+    }
+    // 3) 占位符残留（未完成的信号）
+    const ph = String(r.output).match(PLACEHOLDER_RE);
+    if (ph) add(`完整性[${label}]`, false, `产出中疑似存在未完成占位内容：「${ph[0]}」`);
+  }
+
+  // 4) 自定义验证命令（用户在 .env 配置，如 npm test；在工作目录执行）
+  const cmd = String(process.env.AGENTS_CHAT_VERIFY_CMD || '').trim();
+  if (cmd) {
+    const c = await runVerifyCmd(cmd);
+    add(`验证命令（${cmd.slice(0, 60)}）`, c.pass, c.note);
+  }
+
+  const passCount = items.filter(i => i.pass).length;
+  const failCount = items.length - passCount;
+  const text = items.length
+    ? items.map(i => `- ${i.pass ? '✅' : '❌'} ${i.name}：${i.note}`).join('\n') + `\n（共 ${passCount} 项通过、${failCount} 项未通过）`
+    : '';
+  return { items, text, passCount, failCount };
+}
 
 // ---------- 产出归档：正式产出落盘，后续智能体与用户都能拿到完整版 ----------
 const OUT_ROOT = path.join(process.env.AGENTS_CHAT_DATA || path.join(__dirname, '..', '..', '.data'), 'outputs');
@@ -260,6 +365,8 @@ function parseVerdict(text, agents, warn) {
 }
 
 // ---------- 管家调度主流程 ----------
+// opts.resume（断点重跑）：{ phases, priorResults, fromStage, baseRun }
+// 跳过规划，前 fromStage-1 个阶段的产出直接复用（priorResults 从落盘文件读回），从 fromStage 起重新执行
 async function runButler(butler, subAgents, message, opts, emit, onMessage) {
   const taskId = opts.taskId || '';
   const scope = opts.scope || 'chat';
@@ -269,13 +376,37 @@ async function runButler(butler, subAgents, message, opts, emit, onMessage) {
   const warn = (w) => { warnings.push(w); emit({ type: 'notice', content: `⚠ ${w}`, taskId }); };
   const runId = newRunId();
   const handoffDoc = HANDOFF_MODE() !== 'full';
-  logFlow({ run: runId, type: 'start', from: butler.name, summary: String(message).replace(/\s+/g, ' ').slice(0, 200), detail: { taskId, mode: 'butler' } });
+  const resume = opts.resume && Array.isArray(opts.resume.phases) && opts.resume.phases.length ? opts.resume : null;
+  logFlow({
+    run: runId, type: 'start', from: butler.name, summary: String(message).replace(/\s+/g, ' ').slice(0, 200),
+    detail: { taskId, mode: resume ? 'rerun' : 'butler', baseRun: resume ? resume.baseRun : undefined, message: String(message).slice(0, 20000) }
+  });
 
   const roster = subAgents.length
     ? subAgents.map(a => `- ${a.name}（${a.id}）：${a.desc || String(a.systemPrompt || '').slice(0, 60) || '（无描述）'}`).join('\n')
     : '（当前没有任何子智能体，可在右上角「智能体配置」中添加）';
 
-  // ---- 1. 规划：先向用户简洁交付工作计划，再输出结构化调度方案 ----
+  // results 按 agent 维度保存最新产出
+  const results = [];
+  const setResult = (agent, output, error, instruction, phase, outputPath) => {
+    const i = results.findIndex(r => r.agent.id === agent.id);
+    const entry = { agent, output, error, instruction, phase: phase || 'work', outputPath: outputPath || '' };
+    if (i >= 0) results[i] = entry; else results.push(entry);
+  };
+
+  // ---- 1. 规划（resume 时跳过：直接复用原方案与前置产出） ----
+  let phases = [];
+  let startStage = 1;
+  if (resume) {
+    phases = resume.phases;
+    results.push(...(resume.priorResults || []));
+    startStage = Math.min(Math.max(1, resume.fromStage || 1), phases.length);
+    const thought = `从第 ${startStage} 阶段重跑：前 ${startStage - 1} 个阶段的 ${results.length} 份产出直接复用，本阶段起重新执行并验收`;
+    emit({ type: 'plan', agentId: butler.id, agentName: butler.name, taskId, thought, phases });
+    onMessage({ role: 'assistant', agentId: butler.id, agentName: butler.name, actor: 'butler', phase: 'plan', content: thought, plan: { thought, phases } });
+    logFlow({ run: runId, type: 'plan', from: butler.name, summary: thought.replace(/\s+/g, ' ').slice(0, 200), detail: { phases, rerun: true, baseRun: resume.baseRun } });
+  } else {
+
   let planPrompt = `你是「管家」调度智能体。请针对下面的用户需求制定调度方案。
 
 【用户需求】
@@ -304,7 +435,7 @@ agent 字段只填智能体名称或 ID 之一（如 "工程师" 或 "oc-2"，�
   const planEmit = (e) => { if (e.type === 'text') return; emit(e); };
   let planRes = await runAgentOnce(butler, planPrompt, planEmit, 'plan', 'butler', taskId, sessionDir, scope);
   let rawPlan = planRes.output ? extractPlanJSON(planRes.output) : null;
-  let phases = planRes.output ? normalizePhases(rawPlan, subAgents, warn) : [];
+  phases = planRes.output ? normalizePhases(rawPlan, subAgents, warn) : [];
 
   // 解析失败或引用全部无效（原始 steps 非空）→ 纠正提示重试一次，避免零阶段直接跳汇总
   const rawHadSteps = !!(rawPlan && Array.isArray(rawPlan.steps) && rawPlan.steps.length > 0);
@@ -348,18 +479,11 @@ ${message}
   const planMsg = { thought: planThought(planRes.output), phases };
   emit({ type: 'plan', agentId: butler.id, agentName: butler.name, taskId, thought: planMsg.thought, phases: planMsg.phases });
   onMessage({ role: 'assistant', agentId: butler.id, agentName: butler.name, actor: 'butler', phase: 'plan', content: planToText(planMsg), plan: planMsg });
-  logFlow({ run: runId, type: 'plan', from: butler.name, summary: (planMsg.thought || '').replace(/\s+/g, ' ').slice(0, 200), detail: { phases: planMsg.phases.map(g => g.map(s => `${s.agentName}: ${s.instruction.slice(0, 100)}`)) } });
+  logFlow({ run: runId, type: 'plan', from: butler.name, summary: (planMsg.thought || '').replace(/\s+/g, ' ').slice(0, 200), detail: { phases: planMsg.phases } });
+  } // endif 非重跑的规划分支
 
-  // results 按 agent 维度保存最新产出
-  const results = [];
-  const setResult = (agent, output, error, instruction, phase, outputPath) => {
-    const i = results.findIndex(r => r.agent.id === agent.id);
-    const entry = { agent, output, error, instruction, phase: phase || 'work', outputPath: outputPath || '' };
-    if (i >= 0) results[i] = entry; else results.push(entry);
-  };
-
-  // ---- 2. 执行各阶段（阶段内并行，分批限流） ----
-  for (let i = 0; i < phases.length; i++) {
+  // ---- 2. 执行各阶段（阶段内并行，分批限流；重跑从 startStage 起步） ----
+  for (let i = startStage - 1; i < phases.length; i++) {
     if (isStopped()) {
       emit({ type: 'notice', content: '已手动停止，跳过剩余阶段', taskId });
       break;
@@ -421,6 +545,17 @@ ${message}
       ? `\n【产出文件（各智能体的完整成果，如需核验细节可按路径读取）】\n${outFiles.map(r => `- ${r.agent.name}：${r.outputPath}`).join('\n')}\n`
       : '';
 
+    // 自动核查：验收前由系统本地执行的确定性检查（文件/语法/JSON/占位符/自定义命令）
+    let autoText = '';
+    try {
+      const auto = await runAutoChecks(results);
+      if (auto && auto.text) {
+        autoText = `\n【客观核查结果（系统自动执行的事实核查，非智能体自述，验收必须参考）】\n${auto.text}\n`;
+        emit({ type: 'notice', content: `🔬 自动核查：${auto.passCount} 项通过${auto.failCount ? `，${auto.failCount} 项未通过（详情已交给验收）` : ''}`, taskId });
+        logFlow({ run: runId, type: 'autocheck', from: butler.name, round, summary: `${auto.passCount} 项通过${auto.failCount ? `，${auto.failCount} 项未通过` : ''}`, detail: { items: auto.items.slice(0, 40) } });
+      }
+    } catch { /* 核查异常不影响验收 */ }
+
     const verifyPrompt = `你是「管家」。第 ${round} 轮验收：请核对各子智能体的工作成果是否满足用户需求。
 
 【用户原始需求】
@@ -428,12 +563,12 @@ ${message}
 
 【各智能体的任务与产出】
 ${workText.slice(0, 24000)}
-${filesSection}
-${reworks > 0 ? '\n（注：此前已反馈过问题，请重点核对是否已按建议完善）\n' : ''}
+${filesSection}${autoText}
+    ${reworks > 0 ? '\n（注：此前已反馈过问题，请重点核对是否已按建议完善）\n' : ''}
 输出格式（严格遵守）：
-1. 先用 1~2 句中文向用户说明验收结论
+1. 先用 1~2 句中文向用户说明验收结论（若客观核查有未通过项，必须在结论中点名说明）
 2. 再输出 JSON：全部合格输出 {"verdict":"ACCEPT"}；存在问题输出 {"verdict":"REJECT","issues":[{"agent":"智能体名称","requirement":"必须满足的要求","suggestion":"具体完善建议"}]}
-只有确有问题才 REJECT；issues 只列需要返工的智能体，不要把合格的也列进去。`;
+只有确有问题才 REJECT；issues 只列需要返工的智能体，不要把合格的也列进去。客观核查未通过的项，对应的智能体必须列入 issues（除非与用户需求确实无关）。`;
 
     const verifyRes = await runAgentOnce(butler, verifyPrompt, emit, 'review', 'butler', taskId, sessionDir, scope);
     onMessage({ role: 'assistant', agentId: butler.id, agentName: butler.name, actor: 'butler', phase: 'review', content: (verifyRes.output || `[验收出错] ${verifyRes.error}`).slice(0, 20000), outputPath: verifyRes.outputPath || '' });
@@ -609,4 +744,66 @@ async function runTasks(tasks, butler, subAgents, opts, emit, onMessage, onTaskS
   emit({ type: 'all_done' });
 }
 
-module.exports = { runButler, runMentioned, runTasks };
+// ---------- 断点重跑：从流转日志还原编排现场 ----------
+// 读取一次 run 的全部事件，构造 runButler 的 opts.resume：
+// - phases：取 plan 事件 detail.phases（v3.7.0 起存完整指令；旧记录截断过，无法安全重跑）
+// - priorResults：< fromStage 各步骤的产出，从 done 事件的成果文件读回全文（同智能体多阶段取最新）
+// - message/taskId：取 start 事件（detail.message 完整，兜底 summary）
+function prepareRerun(events, fromStage, subAgents) {
+  const start = events.find(e => e.type === 'start');
+  const plan = events.find(e => e.type === 'plan');
+  if (!start || !plan) throw new Error('该记录缺少完整的规划信息，无法重跑');
+  const rawPhases = plan.detail && Array.isArray(plan.detail.phases) ? plan.detail.phases : null;
+  if (!rawPhases || !rawPhases.length) throw new Error('该记录为旧版本格式（调度指令不完整），仅 v3.7.0 之后的编排支持重跑');
+  fromStage = Math.max(1, Math.min(Number(fromStage) || 1, rawPhases.length));
+
+  // 校验各步骤的智能体仍然存在（已被删除的剔除并收集提示）
+  const phases = [];
+  const dropped = [];
+  for (const group of rawPhases) {
+    const keep = [];
+    for (const s of (Array.isArray(group) ? group : [group])) {
+      if (!s || !s.agentId || !String(s.instruction || '').trim()) continue;
+      const agent = subAgents.find(a => a.id === s.agentId);
+      if (agent) keep.push({ agentId: agent.id, agentName: agent.name, instruction: String(s.instruction).slice(0, 3000) });
+      else dropped.push(String(s.agentName || s.agentId));
+    }
+    if (keep.length) phases.push(keep);
+  }
+  if (!phases.length) throw new Error('调度方案中引用的智能体已全部不存在，无法重跑');
+  fromStage = Math.min(fromStage, phases.length);
+
+  // 每个智能体最新一次落盘产出（含返工后的版本）
+  const lastFile = new Map(); // agentName -> outputPath
+  for (const e of events) {
+    if (e.type === 'done' && e.to && e.files && e.files[0]) lastFile.set(e.to, e.files[0]);
+  }
+
+  // < fromStage 的步骤 → priorResults（同智能体多阶段时后一阶段覆盖前一阶段）
+  const byAgent = new Map();
+  for (let i = 0; i < fromStage - 1 && i < phases.length; i++) {
+    for (const s of phases[i]) {
+      const agent = subAgents.find(a => a.id === s.agentId) || { id: s.agentId, name: s.agentName };
+      const f = lastFile.get(s.agentName);
+      let output = '';
+      let outputPath = '';
+      if (f) {
+        try { output = fs.readFileSync(f, 'utf8'); outputPath = f; } catch { /* 文件丢失 */ }
+      }
+      byAgent.set(agent.id, {
+        agent, output,
+        error: output ? undefined : (f ? `（产出文件已丢失：${f}）` : '（该智能体当时无落盘产出）'),
+        instruction: s.instruction, phase: 'work', outputPath
+      });
+    }
+  }
+
+  return {
+    message: (start.detail && start.detail.message) || start.summary || '',
+    taskId: (start.detail && start.detail.taskId) || '',
+    phases, fromStage, dropped,
+    priorResults: [...byAgent.values()]
+  };
+}
+
+module.exports = { runButler, runMentioned, runTasks, prepareRerun, runAutoChecks };

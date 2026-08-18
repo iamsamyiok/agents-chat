@@ -378,6 +378,7 @@
       <span><i style="background:#d9f2e3;border:1px solid #07c160"></i>执行块</span>
       <span><i style="background:#fdeceb;border:1px solid #fa5151"></i>失败</span>
       <span><i style="background:#8a6fe8"></i>规划/验收/交付</span>
+      <span><i style="background:#10aeff"></i>自动核查</span>
       <span style="color:#999">点击块/连线/圆点查看详情</span>
     </div>
     <div class="flow-canvas" id="flowCanvas"></div>
@@ -387,7 +388,7 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const PAGE_VERSION = '3.6.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.7.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -1251,7 +1252,7 @@ async function delSched(id) {
 let flowTimer = null;       // 自动刷新定时器
 let flowEvents = [];        // 当前 run 的事件
 let flowRunId = '';         // 当前查看的 run
-const FLOW_TYPE_LABEL = { start: '开始', plan: '调度规划', dispatch: '派发', done: '完成', handoff: '交接', rework: '返工', verify: '验收', finish: '汇总交付' };
+const FLOW_TYPE_LABEL = { start: '开始', plan: '调度规划', dispatch: '派发', done: '完成', handoff: '交接', rework: '返工', verify: '验收', autocheck: '自动核查', finish: '汇总交付' };
 
 async function openFlow() {
   document.getElementById('flowMask').classList.add('show');
@@ -1361,7 +1362,7 @@ function renderFlowSVG() {
       const y1 = yOf(e.from), y2 = yOf(e.to);
       if (y1 !== null && y2 !== null) edges.push({ x1: x, y1, x2: x, y2, kind: e.type, ev: e, i: seq++ });
     }
-    if (['start', 'plan', 'verify', 'finish'].includes(e.type)) {
+    if (['start', 'plan', 'verify', 'autocheck', 'finish'].includes(e.type)) {
       const y = yOf(e.from) !== null ? yOf(e.from) : PAD_T;
       dots.push({ x, y: yOf(e.from), kind: e.type, ev: e, i: seq++ });
     }
@@ -1413,6 +1414,7 @@ function renderFlowSVG() {
     start: { c: '#07c160', label: '▶' },
     plan: { c: '#8a6fe8', label: '📋' },
     verify: { c: '#e8a33d', label: '' },
+    autocheck: { c: '#10aeff', label: '🔬' },
     finish: { c: '#7d5ac8', label: '🏁' }
   };
   for (const d of dots) {
@@ -1435,6 +1437,9 @@ function renderFlowSVG() {
 
 // 点击元素显示事件详情
 let evIndex = [];
+function rerunBtnHTML(stage, extra) {
+  return `<button class="mini-btn" data-rerun-stage="${stage}" title="${escAttr(extra || '该阶段起重新执行，前序产出复用')}">↻ 从阶段 ${stage} 重跑</button>`;
+}
 function showFlowDetail(i) {
   const e = evIndex[i];
   if (!e) return;
@@ -1449,8 +1454,52 @@ function showFlowDetail(i) {
     const dj = JSON.stringify(e.detail, null, 2);
     if (dj !== '{}') html += `<div style="margin-top:6px;color:#888">detail：${esc(dj.slice(0, 1500))}</div>`;
   }
+  // 断点重跑入口：plan 事件（列各阶段）与带阶段号的执行事件
+  let rerunStages = [];
+  if (e.type === 'plan' && e.detail && Array.isArray(e.detail.phases) && e.detail.phases.length) {
+    rerunStages = e.detail.phases.map((g, idx) => ({ stage: idx + 1, label: Array.isArray(g) ? g.map(s => s.agentName).join('、') : '' }));
+  } else if ((e.type === 'dispatch' || e.type === 'done') && e.stage > 0) {
+    rerunStages = [{ stage: e.stage, label: e.to || '' }];
+  }
+  if (rerunStages.length) {
+    html += `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #ddd">` +
+      rerunStages.map(s => `<div style="margin:4px 0">${s.label ? `<span style="font-size:11px;color:#888;margin-right:6px">${esc('阶段' + s.stage + '：' + s.label)}</span>` : ''}${rerunBtnHTML(s.stage)}</div>`).join('') +
+      `</div>`;
+  } else if (e.type === 'plan') {
+    html += `<div style="margin-top:8px;color:#bbb;font-size:11px">该记录为旧版本格式（调度指令不完整），不支持断点重跑</div>`;
+  }
   el.innerHTML = html;
   el.style.display = 'block';
+  el.querySelectorAll('[data-rerun-stage]').forEach(btn => {
+    btn.onclick = () => rerunFrom(flowRunId, Number(btn.dataset.rerunStage));
+  });
+}
+
+// ---------- 断点重跑：从流转视图一键回到任意阶段重新执行 ----------
+async function rerunFrom(run, stage) {
+  if (chatBusy) { toast('当前有编排进行中，请先完成或停止'); return; }
+  if (!confirm(`从第 ${stage} 阶段重跑？\n\n该阶段及其后的执行与验收将重新进行，之前阶段的产出作为背景复用。`)) return;
+  const startEv = flowEvents.find(e => e.type === 'start');
+  const tid = (startEv && startEv.detail && startEv.detail.taskId) || '';
+  closeFlow();
+  if (tid) switchSession(tid); // 重定向到原会话（主会话或对应任务会话），过程实时展示
+  chatBusy = true;
+  stopAsked = false;
+  setSendBtn();
+  let typing = addSys(`↻ 断点重跑中：从第 ${stage} 阶段开始…`, tid);
+  try {
+    await streamSSE('/api/flow/rerun', { run, fromStage: stage }, (e) => {
+      if (typing) { removeMsg(typing); typing = null; }
+      handleStreamEvent(e);
+    });
+  } catch (err) {
+    addSys('重跑异常：' + (err && err.message || err), tid);
+  } finally {
+    if (typing) removeMsg(typing);
+    chatBusy = false;
+    stopAsked = false;
+    setSendBtn();
+  }
 }
 
 // ---------- 历史 ----------
@@ -1672,7 +1721,7 @@ function openHelp() {
     <ol>
       <li><b>规划</b>：管家输出调度方案卡片（哪些阶段、谁并行谁串行）</li>
       <li><b>执行</b>：子智能体分阶段干活（阶段内并行、阶段间串行）；过程内容默认折叠只显示三行，点「展开全文」可看全过程</li>
-      <li><b>验收</b>：管家核对成果，不合格的打回返工（带改进建议，默认最多 2 轮）</li>
+      <li><b>验收</b>：验收前系统先跑「自动核查」（产出文件存在性、JS 代码块语法、JSON 可解析、占位符残留、自定义验证命令），核查结果作为事实交给管家；管家核对成果，不合格的打回返工（带改进建议，默认最多 2 轮）</li>
       <li><b>汇总</b>：管家给出结果概要；有成果文件时会列出完整路径，可直接打开查看</li>
     </ol>
     <p>每个智能体执行时聊天流会显示「正在执行…」动画条；工具调用过程（读写文件、执行命令）也会实时展示。</p>
@@ -1698,6 +1747,7 @@ function openHelp() {
       <li>绿色块=执行完成，红色块=失败，虚线动画块=执行中；蓝色曲线=交接（产出交给下游），橙色曲线=返工</li>
       <li>点击执行块 / 连线 / 圆点查看详情：任务指令、交接说明、成果文件路径</li>
       <li>顶部下拉切换历史编排记录，勾选「自动刷新」可实时观察进行中的任务</li>
+      <li><b>断点重跑</b>：点击执行块或规划卡片详情中的「↻ 从阶段 N 重跑」，该阶段起重新执行与验收，之前阶段的产出自动作为背景复用（适合某环节翻车后不用整轮重来）</li>
     </ul>
   </div>
   <div class="help-sec"><h4>🤝 智能体之间的交接</h4>
@@ -1724,6 +1774,7 @@ function openHelp() {
   <div class="help-sec"><h4>❓ 常见问题</h4>
     <ul>
       <li>换端口：编辑启动脚本里的 PORT；单任务超时：.env 中调大 <code>AGENTS_CHAT_TIMEOUT_MS</code>（默认 10 分钟）</li>
+      <li>自动核查定制：.env 中 <code>AGENTS_CHAT_VERIFY_CMD="npm test"</code> 可让每轮验收前自动跑测试/构建（在工作目录执行）；<code>AGENTS_CHAT_AUTOVERIFY=0</code> 关闭全部自动核查</li>
       <li>加/改智能体：「⚙ 智能体配置」可设名称、图标、技能说明、提示词；管家内置不可改；换内核也在该页顶部下拉框</li>
       <li>指定内核完整路径：.env 中设 <code>AGENTS_CHAT_OPENCODE_CMD</code> / <code>AGENTS_CHAT_CLAUDE_CMD</code> / <code>AGENTS_CHAT_CODEX_CMD</code> / <code>AGENTS_CHAT_PI_CMD</code></li>
       <li>页面行为异常：Ctrl+F5 强制刷新（版本不一致时会有提示）</li>

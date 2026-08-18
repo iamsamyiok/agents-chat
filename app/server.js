@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.6.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.7.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -34,7 +34,7 @@ const PORT = Number(process.argv.includes('--port') ? process.argv[process.argv.
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const store = require('./lib/store');
 const { runAgent, stopScope, stopAllChildren } = require('./lib/agent');
-const { runButler, runMentioned, runTasks } = require('./lib/orchestrator');
+const { runButler, runMentioned, runTasks, prepareRerun } = require('./lib/orchestrator');
 
 // ---------- 执行互斥与停止控制 ----------
 // chat / tasks 两个作用域各自单飞（防止双击或 API 直调并发执行）；
@@ -188,6 +188,52 @@ const server = http.createServer(async (req, res) => {
     const runId = String(parsed.query.run || '').slice(0, 60);
     if (!runId) { json(res, 400, { success: false, error: '缺少 run 参数' }); return; }
     json(res, 200, { success: true, run: runId, events: store.getFlow(runId) });
+    return;
+  }
+
+  if (p === '/api/flow/rerun' && req.method === 'POST') {
+    // 断点重跑：从历史编排的某个阶段重新执行（前置阶段产出复用）
+    // 走 chat 作用域锁（与聊天互斥）；消息写回原会话；SSE 实时回传全过程
+    const body = await readBody(req);
+    const runId = String(body.run || '').slice(0, 60);
+    const fromStage = Number(body.fromStage) || 1;
+    const events = runId ? store.getFlow(runId) : [];
+    if (!events.length) { json(res, 404, { success: false, error: '编排记录不存在' }); return; }
+    let prepared;
+    try {
+      const agentsAll = store.getAgents();
+      prepared = prepareRerun(events, fromStage, agentsAll.filter(a => a.id !== 'butler'));
+    } catch (err) {
+      json(res, 400, { success: false, error: err && err.message || String(err) });
+      return;
+    }
+    if (runLocks.chat) {
+      json(res, 409, { success: false, error: '当前有编排进行中，请等待完成或先停止' });
+      return;
+    }
+    runLocks.chat = true;
+    const myToken = stopTokens.chat;
+    const agentsAll = store.getAgents();
+    const butler = agentsAll.find(a => a.id === 'butler');
+    const subAgents = agentsAll.filter(a => a.id !== 'butler');
+    const taskId = prepared.taskId || '';
+    const opts = {
+      taskId, history: buildHistoryText(taskId), scope: 'chat',
+      isStopped: () => stopTokens.chat !== myToken,
+      resume: { phases: prepared.phases, priorResults: prepared.priorResults, fromStage: prepared.fromStage, baseRun: runId }
+    };
+    const send = sse(req, res);
+    const persist = (m) => store.addMessage({ ...m, taskId, timestamp: new Date().toISOString() });
+    try {
+      send({ type: 'notice', content: `↻ 断点重跑：从第 ${prepared.fromStage} 阶段开始（前序 ${prepared.priorResults.length} 份产出复用）${prepared.dropped.length ? `；注意：智能体 ${prepared.dropped.join('、')} 已不存在，相关步骤被跳过` : ''}`, taskId });
+      await runButler(butler, subAgents, prepared.message, opts, send, persist);
+    } catch (err) {
+      console.error('[flow/rerun] 编排异常:', err && (err.stack || err));
+      send({ type: 'error', content: `重跑异常：${err && err.message || err}` });
+    } finally {
+      runLocks.chat = false;
+      try { res.end(); } catch { /* closed */ }
+    }
     return;
   }
 
