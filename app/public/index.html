@@ -168,8 +168,18 @@
   .at-tx i { font-style: normal; color: #999; font-size: 11px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
 
   /* ---------- 弹窗 ---------- */
-  #modalMask, #agentsMask, #historyMask, #schedMask, #helpMask, #flowMask, #cardMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 50; }
-  #modalMask.show, #agentsMask.show, #historyMask.show, #schedMask.show, #helpMask.show, #flowMask.show, #cardMask.show { display: flex; }
+  #modalMask, #agentsMask, #historyMask, #schedMask, #helpMask, #flowMask, #cardMask, #teamsMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
+  #modalMask.show, #agentsMask.show, #historyMask.show, #schedMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show { display: flex; }
+  /* 团队仓库卡片 */
+  .team-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+  .team-card .tc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .team-card .tc-head b { font-size: 15px; }
+  .team-card .tc-src { font-size: 11px; color: #10aeff; background: #eef7ff; border-radius: 4px; padding: 1px 6px; }
+  .team-card .tc-desc { font-size: 12px; color: #555; line-height: 1.6; margin-bottom: 8px; }
+  .team-card .tc-members { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .team-card .tc-member { font-size: 12px; background: #f2f3f5; border-radius: 6px; padding: 3px 8px; }
+  .team-card .tc-usage { font-size: 11px; color: #8a6fe8; margin-bottom: 10px; }
+  .team-card .tc-actions { display: flex; gap: 8px; }
   /* 流转视图 */
   #flowMask .modal.flow { width: min(1100px, 94vw); height: min(760px, 92vh); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
   .flow-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #eee; flex: none; }
@@ -314,6 +324,9 @@
     <h3>智能体配置</h3>
     <div class="tip">每个智能体都是一个独立的 AI Agent：执行内核由顶部下拉框统一选择（OpenCode / Claude Code / Codex / pi），<b>图标</b>用于辨认，<b>名称</b>用于 @ 点名，<b>技能说明</b>供管家调度参考，<b>自定义提示词</b>会在任务下发时附加在用户提示词前面。所有智能体使用所选内核的默认模型。「管家」为内置调度智能体，不可修改。</div>
     <div class="butler-ro" id="butlerRo"></div>
+    <div class="ag-row" style="margin:8px 0 2px">
+      <button class="add-agent" style="flex:1" onclick="openTeams()">📦 团队仓库 · 一键换经典团队</button>
+    </div>
     <div class="global-cwd-box">
       <div class="lbl">🧠 执行内核（所有智能体共用）</div>
       <div class="ag-row">
@@ -347,6 +360,17 @@
       <span style="flex:1"></span>
       <button onclick="closeCardImport()">取消</button>
       <button class="primary" onclick="applyCardImport()">导入</button>
+    </div>
+  </div>
+</div>
+<!-- 团队仓库弹窗（经典智能体团队预设） -->
+<div id="teamsMask">
+  <div class="modal wide">
+    <h3>📦 团队仓库</h3>
+    <div class="tip">取材自开源社区验证过的经典多智能体组合。选择一套应用：「替换」换掉当前全部子智能体，「追加」在现有名单后加入（重名自动加序号）。应用后仍可自由增删改，点配置页「保存」才生效。</div>
+    <div id="teamsList"></div>
+    <div class="modal-actions">
+      <button class="primary" onclick="closeTeams()">关闭</button>
     </div>
   </div>
 </div>
@@ -410,7 +434,7 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const PAGE_VERSION = '3.8.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.9.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -425,6 +449,7 @@ let roundtableOn = false;      // 圆桌讨论模式开关（输入栏 💬 按�
 let runnerState = { kind: '', label: '', cmd: '', kernels: [] }; // 内核状态（帮助弹窗/配置页展示）
 let globalCwd = '';            // 全局统一工作目录
 let configKernel = 'auto';     // 配置的执行内核
+let teamPresets = [];          // 团队仓库预设（配置页「📦 团队仓库」）
 const sessions = new Map();    // key: 'main' | taskId → 消息数组
 
 const input = document.getElementById('input');
@@ -1611,6 +1636,66 @@ function openAgents() {
 
 function closeAgents() { document.getElementById('agentsMask').classList.remove('show'); }
 
+// ---------- 团队仓库：经典团队预设，一键应用 ----------
+async function openTeams() {
+  if (!teamPresets.length) {
+    const data = await api('/api/teams');
+    if (!data.success) { toast(data.error || '团队仓库加载失败'); return; }
+    teamPresets = data.teams || [];
+  }
+  renderTeams();
+  document.getElementById('teamsMask').classList.add('show');
+}
+function closeTeams() { document.getElementById('teamsMask').classList.remove('show'); }
+
+function renderTeams() {
+  const el = document.getElementById('teamsList');
+  if (!teamPresets.length) {
+    el.innerHTML = '<div class="task-empty" style="padding:16px">团队仓库为空</div>';
+    return;
+  }
+  el.innerHTML = teamPresets.map((t, i) => `
+    <div class="team-card">
+      <div class="tc-head">${esc(t.icon || '')} <b>${esc(t.name)}</b> <span class="tc-src">源自 ${esc(t.source || '社区经典')}</span></div>
+      <div class="tc-desc">${esc(t.desc || '')}</div>
+      <div class="tc-members">${(t.agents || []).map(a => `<span class="tc-member">${esc(a.icon || '')} ${esc(a.name)}：<span style="color:#888">${esc(String(a.desc || '').split('：')[0])}</span></span>`).join('')}</div>
+      ${t.usage ? `<div class="tc-usage">试试：${esc(t.usage)}</div>` : ''}
+      <div class="tc-actions">
+        <button class="mini-btn" onclick="applyTeamPreset(${i}, 'append')">＋ 追加到现有名单</button>
+        <button class="mini-btn" style="background:#07c160;color:#fff" onclick="applyTeamPreset(${i}, 'replace')">替换当前名单</button>
+      </div>
+    </div>`).join('');
+}
+
+// 应用团队：mode=replace 换掉全部子智能体；append 追加（重名自动加序号，避免 @ 点名歧义）
+function applyTeamPreset(i, mode) {
+  const t = teamPresets[i];
+  if (!t || !Array.isArray(t.agents) || !t.agents.length) { toast('该团队定义无效'); return; }
+  const incoming = t.agents.map(a => ({
+    id: '', behavior: 'echo',
+    name: String(a.name || '').trim(),
+    icon: String(a.icon || ''),
+    desc: String(a.desc || ''),
+    systemPrompt: String(a.systemPrompt || '')
+  })).filter(a => a.name);
+  if (!incoming.length) { toast('该团队没有有效成员'); return; }
+  if (mode === 'replace') {
+    editing = incoming;
+  } else {
+    const names = new Set(['管家', 'butler', ...editing.map(a => String(a.name || '').trim())]);
+    for (const a of incoming) {
+      let final = a.name, n = 2;
+      while (names.has(final)) final = `${a.name}${n++}`;
+      a.name = final;
+      names.add(final);
+      editing.push(a);
+    }
+  }
+  renderAgentCards();
+  closeTeams();
+  toast(`已应用「${t.name}」（${mode === 'replace' ? '替换' : '追加'} ${incoming.length} 个智能体），点「保存」后生效`);
+}
+
 function iconPicker(i) {
   const cur = editing[i].icon || '';
   return '<div class="icon-row">' + ICON_PRESETS.map(ic =>
@@ -1870,6 +1955,16 @@ function openHelp() {
       <li>成员轮流发言，能看到彼此观点并反驳；每轮结束主持人判定是否收敛，未收敛会给出下一轮聚焦问题引导讨论</li>
       <li>默认最多 2 轮（.env 中 <code>AGENTS_CHAT_ROUNDTABLE_ROUNDS</code> 可调）、每次发言限 600 字，防止讨论失控</li>
       <li>结束后管家输出总结：<b>共识 / 分歧（注明持方）/ 建议行动</b>；发言与总结都存档，流转视图可回溯（紫色 ⚖ 圆点为主持人判定）</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>📦 团队仓库</h4>
+    <ul>
+      <li>「⚙ 智能体配置」→「📦 团队仓库」：内置多套开源社区验证过的经典团队，一键应用</li>
+      <li><b>软件开发团队</b>（源自 MetaGPT / ChatDev 虚拟软件公司）：产品经理 → 架构师 → 工程师 → 测试工程师，从一句话需求到可运行软件</li>
+      <li><b>内容创作团队</b>（源自 CrewAI 内容营销经典）：研究员 → 作家 → 编辑，专业内容生产流水线</li>
+      <li><b>深度调研团队</b>（源自 CrewAI Research Crew）：研究员 → 分析师，输出摘要/洞察/建议的分析报告</li>
+      <li><b>翻译校对团队</b>（源自 CrewAI 入门经典）：翻译员 → 审校员，对准确性要求高的双人精翻</li>
+      <li>应用方式：<b>替换</b>（换掉当前全部子智能体）或 <b>追加</b>（重名自动加序号）；应用后仍可自由增删改，保存后生效</li>
     </ul>
   </div>
   <div class="help-sec"><h4>📇 智能体名片</h4>

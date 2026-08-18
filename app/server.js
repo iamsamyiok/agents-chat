@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.8.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.9.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -239,6 +239,12 @@ const server = http.createServer(async (req, res) => {
 
   if (p === '/api/agents' && req.method === 'GET') {
     json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '', kernel: String(store.getConfig().kernel || 'auto') });
+    return;
+  }
+
+  if (p === '/api/teams' && req.method === 'GET') {
+    // 团队仓库：经典智能体团队预设（前端展示与应用）
+    json(res, 200, { success: true, teams: store.getTeamPresets() });
     return;
   }
 
