@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.7.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.8.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -34,7 +34,7 @@ const PORT = Number(process.argv.includes('--port') ? process.argv[process.argv.
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const store = require('./lib/store');
 const { runAgent, stopScope, stopAllChildren } = require('./lib/agent');
-const { runButler, runMentioned, runTasks, prepareRerun } = require('./lib/orchestrator');
+const { runButler, runMentioned, runRoundtable, runTasks, prepareRerun } = require('./lib/orchestrator');
 
 // ---------- 执行互斥与停止控制 ----------
 // chat / tasks 两个作用域各自单飞（防止双击或 API 直调并发执行）；
@@ -425,9 +425,17 @@ const server = http.createServer(async (req, res) => {
     const send = sse(req, res);
     const persist = (m) => store.addMessage({ ...m, taskId, timestamp: new Date().toISOString() });
     try {
-      const run = mentionAgents.length > 0
-        ? runMentioned(mentionAgents, clean, opts, send, persist)
-        : runButler(butler, subAgents, clean, opts, send, persist);
+      let run;
+      if (body.mode === 'roundtable') {
+        // 圆桌讨论：@点名者参与（管家作为主持人不算发言席），未点名则全体子智能体参与
+        const speakers = mentionAgents.filter(a => a.id !== butler.id);
+        const participants = speakers.length ? speakers : subAgents;
+        run = runRoundtable(butler, participants, clean, opts, send, persist);
+      } else {
+        run = mentionAgents.length > 0
+          ? runMentioned(mentionAgents, clean, opts, send, persist)
+          : runButler(butler, subAgents, clean, opts, send, persist);
+      }
       await run;
     } catch (err) {
       console.error('[chat] 编排异常:', err && (err.stack || err));

@@ -704,6 +704,140 @@ async function runMentioned(mentionAgents, message, opts, emit, onMessage) {
   return { ok: results.some(r => r.output), finalText, stopped: isStopped() };
 }
 
+// ---------- 圆桌讨论：多智能体自由发言 + 管家主持人（借鉴 AutoGen 群聊辩论 / ChatDev 双智能体对话对） ----------
+// 与管家调度的区别：没有派活与验收，成员围绕主题轮流发言（看得到彼此观点，可反驳），
+// 每轮结束由主持人判定「收敛 / 继续深入（带聚焦问题）」，最后输出结构化总结。
+// Token 护栏：发言限字数、记录截断、最多 N 轮（.env AGENTS_CHAT_ROUNDTABLE_ROUNDS，默认 2）、可提前收敛
+const ROUNDTABLE_MAX_ROUNDS = Number(process.env.AGENTS_CHAT_ROUNDTABLE_ROUNDS) > 0
+  ? Number(process.env.AGENTS_CHAT_ROUNDTABLE_ROUNDS) : 2;
+const ROUNDTABLE_TRANSCRIPT_LIMIT = 9000; // 发言记录传给每个发言者的截断长度
+
+function transcriptText(transcript) {
+  const s = transcript.filter(t => t.text).map(t => `【${t.name}】\n${t.text}`).join('\n\n');
+  return s.length > ROUNDTABLE_TRANSCRIPT_LIMIT ? s.slice(s.length - ROUNDTABLE_TRANSCRIPT_LIMIT) + '…（更早发言已截断）' : s;
+}
+
+// 主持人判定：CONVERGED / CONTINUE（带聚焦问题）；解析失败按已收敛处理，避免无谓续轮
+function parseModerate(text) {
+  const j = extractPlanJSON(text);
+  if (j && typeof j === 'object' && typeof j.verdict === 'string') {
+    const v = j.verdict.toUpperCase();
+    if (v === 'CONTINUE') {
+      return { converged: false, question: String(j.question || '').slice(0, 300) };
+    }
+    return { converged: true, question: '' };
+  }
+  return { converged: true, question: '' };
+}
+
+async function runRoundtable(butler, participants, message, opts, emit, onMessage) {
+  const taskId = opts.taskId || '';
+  const scope = opts.scope || 'chat';
+  const isStopped = opts.isStopped || (() => false);
+  const sessionDir = sessionOutDir(taskId);
+  const runId = newRunId();
+  const members = participants.map(a => a.name);
+
+  const topicBlock = `【讨论主题】\n${message}`
+    + (opts.history ? `\n\n【会话背景（本会话此前的对话）】\n${String(opts.history).slice(0, 3000)}` : '');
+
+  logFlow({
+    run: runId, type: 'start', from: butler.name, summary: String(message).replace(/\s+/g, ' ').slice(0, 200),
+    detail: { taskId, mode: 'roundtable', members, message: String(message).slice(0, 20000) }
+  });
+  emit({ type: 'notice', content: `💬 圆桌讨论开始：${members.join('、')}（最多 ${ROUNDTABLE_MAX_ROUNDS} 轮，主持人可在达成共识后提前结束）`, taskId });
+
+  const transcript = [];
+  let focusing = '';
+  let stopped = false;
+
+  for (let round = 1; round <= ROUNDTABLE_MAX_ROUNDS; round++) {
+    for (let i = 0; i < participants.length; i++) {
+      const agent = participants[i];
+      if (isStopped()) { stopped = true; break; }
+      emit({
+        type: 'phase', index: (round - 1) * participants.length + i + 1,
+        total: ROUNDTABLE_MAX_ROUNDS * participants.length,
+        parallel: false, names: `第${round}轮 · ${agent.name} 发言`, taskId
+      });
+      logFlow({ run: runId, type: 'dispatch', from: butler.name, to: agent.name, stage: round, summary: `第${round}轮发言` });
+      const p = `【圆桌讨论 · 第 ${round} 轮】\n你是「${agent.name}」，正与多位协作者围绕同一主题讨论。
+
+${topicBlock}
+
+【发言记录（按时间序）】
+${transcript.length ? transcriptText(transcript) : '（你第一个发言）'}
+${focusing ? `\n【主持人聚焦问题】\n${focusing}\n` : ''}
+请发表你的观点，600 字以内：明确表态（认同/不认同谁、为什么），补充新信息或提出反驳，不要重复已说过的内容。直接输出发言内容。`;
+      const res = await runAgentOnce(agent, p, emit, 'talk', 'worker', taskId, sessionDir, scope);
+      if (res.output || res.error) {
+        transcript.push({ name: agent.name, text: res.output || `（发言失败：${res.error}）` });
+        // 发言仅展示与存档（phase=talk 不进入后续会话上下文），结论由总结承载
+        onMessage({ role: 'assistant', agentId: agent.id, agentName: agent.name, actor: 'assistant', phase: 'talk', content: (res.output || `[发言出错] ${res.error}`).slice(0, 20000), outputPath: res.outputPath || '' });
+      }
+      logFlow({
+        run: runId, type: 'done', to: agent.name, stage: round,
+        summary: (res.output ? `第${round}轮发言完成` : `发言失败：${String(res.error || '').slice(0, 120)}`),
+        files: res.outputPath ? [res.outputPath] : [],
+        detail: { ok: !!res.output, talk: true }
+      });
+    }
+    if (stopped || isStopped()) { stopped = true; break; }
+
+    // 每轮结束后主持人判定（最后一轮无需判定，直接总结）
+    if (round < ROUNDTABLE_MAX_ROUNDS) {
+      const modPrompt = `你是「管家」，本次圆桌讨论的主持人。第 ${round} 轮发言结束，请判定讨论是否已经收敛。
+
+${topicBlock}
+
+【发言记录（按时间序）】
+${transcriptText(transcript)}
+
+输出格式（严格遵守）：
+1. 先用 1 句中文说明判定理由
+2. 再输出 JSON：观点已充分交锋、可以总结，输出 {"verdict":"CONVERGED"}；仍存在重要分歧或信息缺口需要深入，输出 {"verdict":"CONTINUE","question":"给下一轮讨论的聚焦问题（一句话）"}`;
+      const modRes = await runAgentOnce(butler, modPrompt, (e) => { if (e.type === 'text') return; emit(e); }, 'review', 'butler', taskId, sessionDir, scope);
+      const mv = parseModerate(modRes.output || '');
+      if (mv.converged) {
+        emit({ type: 'notice', content: `⚖ 主持人判定：讨论已收敛，进入总结`, taskId });
+        logFlow({ run: runId, type: 'moderate', from: butler.name, round, summary: '判定：已收敛，进入总结' });
+        break;
+      }
+      focusing = mv.question || '请围绕核心分歧继续深入';
+      emit({ type: 'notice', content: `⚖ 主持人判定：继续深入 → ${focusing}`, taskId });
+      logFlow({ run: runId, type: 'moderate', from: butler.name, round, summary: `判定：继续深入（第 ${round + 1} 轮聚焦：${focusing.replace(/\s+/g, ' ').slice(0, 120)}）` });
+    }
+  }
+
+  if (stopped) {
+    emit({ type: 'notice', content: '已手动停止，圆桌讨论中止（已发言内容保存在会话记录）', taskId });
+    return { ok: false, finalText: '圆桌讨论已手动停止', stopped: true };
+  }
+
+  // 总结：共识 / 分歧 / 建议行动（phase=report，进入后续会话上下文）
+  const sumPrompt = `你是「管家」。圆桌讨论已结束，请向用户输出圆桌讨论总结。
+
+${topicBlock}
+
+【发言记录（按时间序）】
+${transcriptText(transcript)}
+
+要求：
+- 开头 2~3 句概括讨论整体走向与最终共识
+- 分节列出：「共识」各方一致同意的结论；「分歧」仍无定论的争议点（注明持方）；「建议行动」接下来建议怎么做
+- 结论明确，不编造任何发言者未说过的内容`;
+  const sumRes = await runAgentOnce(butler, sumPrompt, emit, 'report', 'butler', taskId, sessionDir, scope);
+  const finalText = sumRes.output || transcriptText(transcript) || sumRes.error || '';
+  onMessage({ role: 'assistant', agentId: butler.id, agentName: butler.name, actor: 'butler', phase: 'report', content: (finalText || '（无输出）').slice(0, 20000), outputPath: sumRes.outputPath || '' });
+  logFlow({
+    run: runId, type: 'finish', from: butler.name,
+    summary: String(finalText).replace(/\s+/g, ' ').slice(0, 200),
+    files: sumRes.outputPath ? [sumRes.outputPath] : [],
+    detail: { mode: 'roundtable', members, rounds: Math.min(ROUNDTABLE_MAX_ROUNDS, transcript.length ? Math.ceil(transcript.length / participants.length) : 0) }
+  });
+  return { ok: !!sumRes.output, finalText };
+}
+
 // ---------- 任务队列：每个任务一次完整调度（独立会话） ----------
 // 末尾 @子智能体 的任务由该智能体独立完成；未指派/@管家 则由管家调度
 // 手动停止：当前任务复位为待执行，剩余任务不再启动
@@ -806,4 +940,4 @@ function prepareRerun(events, fromStage, subAgents) {
   };
 }
 
-module.exports = { runButler, runMentioned, runTasks, prepareRerun, runAutoChecks };
+module.exports = { runButler, runMentioned, runRoundtable, runTasks, prepareRerun, runAutoChecks };

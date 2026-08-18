@@ -97,6 +97,9 @@
   #input { flex: 1; border: 1px solid #e2e2e2; border-radius: 6px; padding: 10px 12px; font-size: 14px; outline: none; }
   #input:focus { border-color: #07c160; }
   #sendBtn { background: #07c160; color: #fff; border: none; border-radius: 6px; padding: 0 22px; font-size: 14px; cursor: pointer; }
+  #rtBtn { background: #f2f3f5; color: #555; border: none; border-radius: 6px; padding: 0 14px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  #rtBtn:hover { background: #e8eaee; }
+  #rtBtn.on { background: #8a6fe8; color: #fff; }
   #sendBtn:disabled { background: #9ff0c1; cursor: not-allowed; }
   #sendBtn.stop, .run-all.stop { background: #fa5151; color: #fff; }
   #sendBtn.stop:hover, .run-all.stop:hover { background: #e04840; }
@@ -165,8 +168,8 @@
   .at-tx i { font-style: normal; color: #999; font-size: 11px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
 
   /* ---------- 弹窗 ---------- */
-  #modalMask, #agentsMask, #historyMask, #schedMask, #helpMask, #flowMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 50; }
-  #modalMask.show, #agentsMask.show, #historyMask.show, #schedMask.show, #helpMask.show, #flowMask.show { display: flex; }
+  #modalMask, #agentsMask, #historyMask, #schedMask, #helpMask, #flowMask, #cardMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 50; }
+  #modalMask.show, #agentsMask.show, #historyMask.show, #schedMask.show, #helpMask.show, #flowMask.show, #cardMask.show { display: flex; }
   /* 流转视图 */
   #flowMask .modal.flow { width: min(1100px, 94vw); height: min(760px, 92vh); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
   .flow-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #eee; flex: none; }
@@ -276,6 +279,7 @@
     <div id="messages"></div>
     <footer id="composer">
       <div class="input-row">
+        <button id="rtBtn" onclick="toggleRoundtable()" title="圆桌讨论模式：所有被 @ 的智能体（未 @ 则全体）围绕主题轮流发言、互相反驳，管家当主持人控制轮数并总结共识与分歧">💬 圆桌</button>
         <input id="input" placeholder="输入消息，@ 可点名智能体…" autocomplete="off">
         <button id="sendBtn" onclick="onSendBtn()">发送</button>
       </div>
@@ -322,10 +326,27 @@
       </div>
     </div>
     <div id="agentCards"></div>
-    <button class="add-agent" onclick="addAgentRow()">＋ 添加子智能体</button>
+    <div class="ag-row" style="gap:8px">
+      <button class="add-agent" style="flex:1" onclick="addAgentRow()">＋ 添加子智能体</button>
+      <button class="add-agent" style="flex:1" onclick="openCardImport()">📥 导入名片</button>
+    </div>
     <div class="modal-actions">
       <button onclick="closeAgents()">取消</button>
       <button class="primary" onclick="saveAgentsCfg()">保存</button>
+    </div>
+  </div>
+</div>
+<!-- 导入智能体名片弹窗 -->
+<div id="cardMask">
+  <div class="modal">
+    <h3>导入智能体名片</h3>
+    <div class="tip">粘贴名片 JSON，或选择名片文件（其他 Agents Chat 导出的 .json）。导入后先加入下方列表，点「保存」才生效。</div>
+    <div class="ta-wrap"><textarea id="cardText" style="min-height:180px" placeholder='{"type":"agents-chat-card","name":"架构师","icon":"📐","desc":"…","systemPrompt":"…"}'></textarea></div>
+    <div class="modal-actions">
+      <button class="mini-btn" onclick="pickCardFile()">选择文件…</button>
+      <span style="flex:1"></span>
+      <button onclick="closeCardImport()">取消</button>
+      <button class="primary" onclick="applyCardImport()">导入</button>
     </div>
   </div>
 </div>
@@ -379,6 +400,7 @@
       <span><i style="background:#fdeceb;border:1px solid #fa5151"></i>失败</span>
       <span><i style="background:#8a6fe8"></i>规划/验收/交付</span>
       <span><i style="background:#10aeff"></i>自动核查</span>
+      <span><i style="background:#8a6fe8"></i>主持人判定</span>
       <span style="color:#999">点击块/连线/圆点查看详情</span>
     </div>
     <div class="flow-canvas" id="flowCanvas"></div>
@@ -388,7 +410,7 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const PAGE_VERSION = '3.7.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.8.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -399,6 +421,7 @@ let chatBusy = false;          // 聊天编排进行中（发送按钮变「停�
 let taskBusy = false;          // 任务批量执行进行中（执行按钮变「停止执行」）
 let stopAsked = false;         // 本次流中已请求过停止，避免重复点击
 let curTaskId = '';            // '' = 主会话；否则为任务会话
+let roundtableOn = false;      // 圆桌讨论模式开关（输入栏 💬 按钮）
 let runnerState = { kind: '', label: '', cmd: '', kernels: [] }; // 内核状态（帮助弹窗/配置页展示）
 let globalCwd = '';            // 全局统一工作目录
 let configKernel = 'auto';     // 配置的执行内核
@@ -841,6 +864,15 @@ async function onSendBtn() {
   send();
 }
 
+// 圆桌讨论模式：发言席上所有被 @ 智能体（未 @ 则全体）围绕主题轮流发言，管家主持
+function toggleRoundtable() {
+  roundtableOn = !roundtableOn;
+  const btn = document.getElementById('rtBtn');
+  btn.classList.toggle('on', roundtableOn);
+  btn.textContent = roundtableOn ? '💬 圆桌 · 开' : '💬 圆桌';
+  input.placeholder = roundtableOn ? '圆桌讨论：@ 参与者（不 @ 则全体子智能体），发送即开始…' : '输入消息，@ 可点名智能体…';
+}
+
 async function stopRun(scope) {
   stopAsked = true;
   setSendBtn();
@@ -864,7 +896,7 @@ async function send() {
     pushUser(text);
     typing = addSys('智能体处理中…');
 
-    await streamSSE('/api/chat', { message: text, taskId: curTaskId }, (e) => {
+    await streamSSE('/api/chat', { message: text, taskId: curTaskId, mode: roundtableOn ? 'roundtable' : '' }, (e) => {
       if (typing) { removeMsg(typing); typing = null; }
       handleStreamEvent(e);
     });
@@ -1252,7 +1284,7 @@ async function delSched(id) {
 let flowTimer = null;       // 自动刷新定时器
 let flowEvents = [];        // 当前 run 的事件
 let flowRunId = '';         // 当前查看的 run
-const FLOW_TYPE_LABEL = { start: '开始', plan: '调度规划', dispatch: '派发', done: '完成', handoff: '交接', rework: '返工', verify: '验收', autocheck: '自动核查', finish: '汇总交付' };
+const FLOW_TYPE_LABEL = { start: '开始', plan: '调度规划', dispatch: '派发', done: '完成', handoff: '交接', rework: '返工', verify: '验收', autocheck: '自动核查', moderate: '主持人判定', finish: '汇总交付' };
 
 async function openFlow() {
   document.getElementById('flowMask').classList.add('show');
@@ -1362,7 +1394,7 @@ function renderFlowSVG() {
       const y1 = yOf(e.from), y2 = yOf(e.to);
       if (y1 !== null && y2 !== null) edges.push({ x1: x, y1, x2: x, y2, kind: e.type, ev: e, i: seq++ });
     }
-    if (['start', 'plan', 'verify', 'autocheck', 'finish'].includes(e.type)) {
+    if (['start', 'plan', 'verify', 'autocheck', 'moderate', 'finish'].includes(e.type)) {
       const y = yOf(e.from) !== null ? yOf(e.from) : PAD_T;
       dots.push({ x, y: yOf(e.from), kind: e.type, ev: e, i: seq++ });
     }
@@ -1415,6 +1447,7 @@ function renderFlowSVG() {
     plan: { c: '#8a6fe8', label: '📋' },
     verify: { c: '#e8a33d', label: '' },
     autocheck: { c: '#10aeff', label: '🔬' },
+    moderate: { c: '#8a6fe8', label: '⚖' },
     finish: { c: '#7d5ac8', label: '🏁' }
   };
   for (const d of dots) {
@@ -1600,6 +1633,7 @@ function renderAgentCards() {
     <div class="ag-card">
       <div class="ag-row">
         <input value="${escAttr(a.name)}" placeholder="名称（用于 @ 点名）" oninput="editing[${i}].name=this.value">
+        <button class="mini-btn" title="导出名片 JSON 文件，可分享给其他 Agents Chat 用户" onclick="exportAgentCard(${i})">名片</button>
         <button class="mini-btn gray" onclick="editing.splice(${i},1);renderAgentCards()">删除</button>
       </div>
       ${iconPicker(i)}
@@ -1650,6 +1684,79 @@ function addAgentRow() {
   const cards = document.querySelectorAll('#agentCards .ag-card');
   const last = cards[cards.length - 1];
   if (last) last.querySelector('input').focus();
+}
+
+// ---------- 智能体名片：导出/导入（借鉴 A2A Agent Card 的能力名片思想，本机文件版） ----------
+function agentCardJSON(a) {
+  return JSON.stringify({
+    type: 'agents-chat-card', version: 1, exportedAt: new Date().toISOString(),
+    name: String(a.name || ''), icon: String(a.icon || ''),
+    desc: String(a.desc || ''), systemPrompt: String(a.systemPrompt || '')
+  }, null, 2);
+}
+
+function exportAgentCard(i) {
+  const a = editing[i];
+  if (!a) return;
+  if (!String(a.name || '').trim()) { toast('请先给这个智能体起个名字再导出'); return; }
+  const safe = String(a.name).replace(/[\\/:*?"<>|\s]/g, '_').slice(0, 30);
+  const blob = new Blob([agentCardJSON(a)], { type: 'application/json' });
+  const el = document.createElement('a');
+  el.href = URL.createObjectURL(blob);
+  el.download = `agent-card-${safe}.json`;
+  el.click();
+  setTimeout(() => URL.revokeObjectURL(el.href), 5000);
+  toast('名片已导出为 JSON 文件，可分享给其他用户导入');
+}
+
+// 名片内容归一化：必须有名称；其余字段缺省补空（提示词为空时导入后仍可补写）
+function normalizeCard(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  const name = String(obj.name || '').trim();
+  if (!name) return null;
+  return {
+    name: name.slice(0, 20),
+    icon: String(obj.icon || '').trim().slice(0, 8),
+    desc: String(obj.desc || '').slice(0, 100),
+    systemPrompt: String(obj.systemPrompt || '').slice(0, 8000)
+  };
+}
+
+function openCardImport() {
+  document.getElementById('cardText').value = '';
+  document.getElementById('cardMask').classList.add('show');
+}
+function closeCardImport() { document.getElementById('cardMask').classList.remove('show'); }
+
+let cardFileInput = null;
+function pickCardFile() {
+  if (!cardFileInput) {
+    cardFileInput = document.createElement('input');
+    cardFileInput.type = 'file';
+    cardFileInput.accept = '.json,.txt';
+    cardFileInput.style.display = 'none';
+    document.body.appendChild(cardFileInput);
+    cardFileInput.addEventListener('change', () => {
+      const f = cardFileInput.files && cardFileInput.files[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = () => { document.getElementById('cardText').value = String(r.result || ''); };
+      r.readAsText(f);
+    });
+  }
+  cardFileInput.value = '';
+  cardFileInput.click();
+}
+
+function applyCardImport() {
+  let obj;
+  try { obj = JSON.parse(document.getElementById('cardText').value); } catch { toast('JSON 解析失败，请检查名片内容'); return; }
+  const c = normalizeCard(obj);
+  if (!c) { toast('不是有效的智能体名片（至少需要 name 字段）'); return; }
+  editing.push({ id: '', behavior: 'echo', ...c });
+  renderAgentCards();
+  closeCardImport();
+  toast(`已导入名片「${c.name}」，点「保存」后生效`);
 }
 async function saveAgentsCfg() {
   const noName = editing.some(a => !String(a.name || '').trim());
@@ -1755,6 +1862,21 @@ function openHelp() {
       <li>多智能体协作时，上游智能体会留一份结构化交接文档：任务、进度、产出摘要、成果文件位置、给下游的建议</li>
       <li>下游智能体先读交接文档和成果文件全文再开工，避免仅凭摘要行事</li>
       <li>交接内容与全过程可在「🔭 流转」视图中追溯</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>💬 圆桌讨论</h4>
+    <ul>
+      <li>输入栏「💬 圆桌」按钮开启后发送 = 发起圆桌：被 <code>@</code> 的智能体上桌（不 <code>@</code> 则全体子智能体），管家当主持人</li>
+      <li>成员轮流发言，能看到彼此观点并反驳；每轮结束主持人判定是否收敛，未收敛会给出下一轮聚焦问题引导讨论</li>
+      <li>默认最多 2 轮（.env 中 <code>AGENTS_CHAT_ROUNDTABLE_ROUNDS</code> 可调）、每次发言限 600 字，防止讨论失控</li>
+      <li>结束后管家输出总结：<b>共识 / 分歧（注明持方）/ 建议行动</b>；发言与总结都存档，流转视图可回溯（紫色 ⚖ 圆点为主持人判定）</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>📇 智能体名片</h4>
+    <ul>
+      <li>「⚙ 智能体配置」里每个智能体可点「名片」导出为 JSON 文件（名称/图标/技能说明/提示词）</li>
+      <li>「📥 导入名片」粘贴 JSON 或选择名片文件，即可把别人分享的智能体加入名单，点「保存」后生效</li>
+      <li>名片只含角色定义，不含内核与密钥——接收方用自己的内核运行</li>
     </ul>
   </div>
   <div class="help-sec"><h4>🛑 停止与中断</h4>

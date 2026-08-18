@@ -42,7 +42,17 @@ if (behavior === 'echo') {
   }
 } else if (behavior === 'butler') {
   // 管家演示：规划时输出可解析的 JSON 调度方案；验收第1轮拒绝、第2轮通过；汇总时输出最终报告
-  if (prompt.includes('最终正式回答') || prompt.includes('【各智能体产出】')) {
+  if (prompt.includes('圆桌讨论总结')) {
+    output(`[圆桌总结] 共识：方案整体可行；分歧：实现优先级尚未定；建议行动：先做核心功能 ${DEMO_TAG}`);
+  } else if (prompt.includes('主持人') && prompt.includes('CONVERGED')) {
+    const rm = prompt.match(/第 (\d+) 轮发言结束/);
+    const round = rm ? Number(rm[1]) : 1;
+    if (round < 2) {
+      output(`判定：存在信息缺口，需要继续 ${DEMO_TAG}\n\`\`\`json\n${JSON.stringify({ verdict: 'CONTINUE', question: '请重点讨论实现成本与风险' }, null, 2)}\n\`\`\``);
+    } else {
+      output(`判定：观点已充分交锋 ${DEMO_TAG}\n\`\`\`json\n{"verdict":"CONVERGED"}\n\`\`\``);
+    }
+  } else if (prompt.includes('最终正式回答') || prompt.includes('【各智能体产出】')) {
     output(`[汇总] 已综合各子智能体的产出，任务完成，最终结果如下 ${DEMO_TAG}`);
   } else if (prompt.includes('轮验收')) {
     const names = [...prompt.matchAll(/^【([^\s】]+) 的任务】/gm)].map(m => m[1]).filter(Boolean);
