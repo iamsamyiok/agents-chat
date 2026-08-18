@@ -340,6 +340,11 @@ ${message}
     const workText = results.map(r =>
       `【${r.agent.name} 的任务】\n${r.instruction}\n【${r.agent.name} 的产出】\n${(r.output || `（执行失败：${r.error}）`).slice(0, CTX_PER_OUTPUT)}`
     ).join('\n\n');
+    // 产出文件清单：验收与汇总时管家可按路径读取完整成果核验/交付
+    const outFiles = results.filter(r => r.outputPath);
+    const filesSection = outFiles.length
+      ? `\n【产出文件（各智能体的完整成果，如需核验细节可按路径读取）】\n${outFiles.map(r => `- ${r.agent.name}：${r.outputPath}`).join('\n')}\n`
+      : '';
 
     const verifyPrompt = `你是「管家」。第 ${round} 轮验收：请核对各子智能体的工作成果是否满足用户需求。
 
@@ -348,6 +353,7 @@ ${message}
 
 【各智能体的任务与产出】
 ${workText.slice(0, 24000)}
+${filesSection}
 ${reworks > 0 ? '\n（注：此前已反馈过问题，请重点核对是否已按建议完善）\n' : ''}
 输出格式（严格遵守）：
 1. 先用 1~2 句中文向用户说明验收结论
@@ -405,13 +411,19 @@ ${reworks > 0 ? '\n（注：此前已反馈过问题，请重点核对是否已�
 
   // ---- 4. 汇总：面向用户的正式回答 ----
   const outs = results.map(r => `【${r.agent.name}】\n${r.output || `（执行失败：${r.error}）`}`).join('\n\n');
-  const sumPrompt = `你是「管家」。各子智能体已完成工作${accepted ? `（验收通过，共 ${reworks} 轮返工）` : `（经 ${reworks} 轮返工仍未完全达标，请如实向用户说明残留问题）`}。请向用户输出最终正式回答：综合以下产出直接回答用户需求，结构清晰、结论明确。不要输出 JSON，用中文。
+  const deliverFiles = results.filter(r => r.outputPath);
+  const sumPrompt = `你是「管家」。各子智能体已完成工作${accepted ? `（验收通过，共 ${reworks} 轮返工）` : `（经 ${reworks} 轮返工仍未完全达标，请如实向用户说明残留问题）`}。请向用户输出最终正式回答，用中文，要求：
+- 开头用简明准确的 3~5 句概括最终结果，直接回应用户需求，让用户一眼看懂做成了什么
+- 各智能体产出中有成果文件的，必须在回答末尾给出「成果文件」一节，逐条注明完整路径（原样照抄下方路径，不要改写、不要省略），并各用一句话说明文件内容
+- 没有任何成果文件时，不要编造「成果文件」一节
+- 结构清晰、结论明确，不要输出 JSON
 
 【用户原始需求】
 ${message}
 
 【各智能体产出】
-${outs.slice(0, 24000)}`;
+${outs.slice(0, 24000)}
+${deliverFiles.length ? `\n【成果文件完整路径（务必原样告知用户）】\n${deliverFiles.map(r => `- ${r.agent.name}：${r.outputPath}`).join('\n')}` : '\n（本次工作没有落盘的成果文件）'}`;
   const sumRes = await runAgentOnce(butler, sumPrompt, emit, 'report', 'butler', taskId, sessionDir, scope);
   const finalText = sumRes.output || outs || sumRes.error || '';
   onMessage({ role: 'assistant', agentId: butler.id, agentName: butler.name, actor: 'butler', phase: 'report', content: (finalText || '（无输出）').slice(0, 20000), outputPath: sumRes.outputPath || '' });

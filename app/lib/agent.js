@@ -147,15 +147,17 @@ function runAgent(agent, prompt, onChunk, scope) {
   return spawnOpenCode(runner, args, fullPrompt, agent, onChunk, scope);
 }
 
-// 智能体工作目录：
-// - 配置了有效 cwd → 用之（相关文件资料保存在该文件夹）
-// - 否则默认每个智能体独立工作区 <数据目录>/workspaces/<agentId>/，避免多智能体互踩文件
-function resolveCwd(agent) {
-  const custom = agent && agent.cwd;
-  if (custom && typeof custom === 'string') {
-    try { if (fs.existsSync(custom) && fs.statSync(custom).isDirectory()) return custom; } catch { /* ignore */ }
+// 智能体工作目录（全局统一）：
+// - 配置了有效 globalCwd → 所有智能体共用该目录（文件资料集中在一处）
+// - 否则默认 <数据目录>/workspace/ 共享目录
+const storeRef = require('./store');
+function resolveCwd() {
+  let g = '';
+  try { g = String(storeRef.getConfig().globalCwd || '').trim(); } catch { /* ignore */ }
+  if (g) {
+    try { if (fs.existsSync(g) && fs.statSync(g).isDirectory()) return g; } catch { /* ignore */ }
   }
-  const dir = path.join(DATA_DIR, 'workspaces', String((agent && agent.id) || 'default').replace(/[^\w-]/g, '_'));
+  const dir = path.join(DATA_DIR, 'workspace');
   try { fs.mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
   return dir;
 }
@@ -164,7 +166,7 @@ function spawnOpenCode(runner, args, prompt, agent, onChunk, scope) {
   let child;
   try {
     child = spawn(runner.cmd, args, {
-      cwd: resolveCwd(agent),
+      cwd: resolveCwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: runner.shell,
       windowsHide: true
@@ -278,7 +280,7 @@ function spawnMock(args, agent, env, onChunk, scope) {
   let child;
   try {
     child = spawn(process.execPath, args, {
-      cwd: resolveCwd(agent),
+      cwd: resolveCwd(),
       stdio: ['ignore', 'pipe', 'pipe'],
       env
     });

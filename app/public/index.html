@@ -92,8 +92,7 @@
   .typing i:nth-child(3) { animation-delay: .4s; }
   @keyframes blink { 0%,80%,100% { opacity: .25; } 40% { opacity: 1; } }
 
-  #composer { background: #fff; border-top: 1px solid #e7e7e7; padding: 10px 14px; position: relative; }
-  .hint-row { font-size: 12px; color: #b2b2b2; margin-bottom: 8px; }
+  #composer { background: #fff; border-top: 1px solid #e7e7e7; padding: 12px 14px; position: relative; }
   .input-row { display: flex; gap: 10px; }
   #input { flex: 1; border: 1px solid #e2e2e2; border-radius: 6px; padding: 10px 12px; font-size: 14px; outline: none; }
   #input:focus { border-color: #07c160; }
@@ -102,6 +101,60 @@
   #sendBtn.stop, .run-all.stop { background: #fa5151; color: #fff; }
   #sendBtn.stop:hover, .run-all.stop:hover { background: #e04840; }
   .msg-file { font-size: 11px; color: #8a6fe8; background: #f4f1fd; border-radius: 4px; padding: 3px 8px; margin-top: 4px; max-width: 100%; word-break: break-all; cursor: default; }
+
+  /* 过程内容折叠：默认约 3 行，点击展开 */
+  .fold-wrap { position: relative; max-height: 70px; overflow: hidden; }
+  .fold-wrap::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 26px; background: linear-gradient(rgba(255,255,255,0), #fff); pointer-events: none; }
+  .fold-wrap.expanded { max-height: none; }
+  .fold-wrap.expanded::after { display: none; }
+  .fold-toggle { font-size: 11.5px; color: #07c160; cursor: pointer; margin-top: 3px; user-select: none; }
+  .fold-toggle:hover { text-decoration: underline; }
+
+  /* 工作中动画指示条 */
+  .working-bar { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #4a6cf7; background: #f0f4ff; border-radius: 14px; padding: 4px 12px; margin: 6px 0; }
+  .working-bar .wb-ic { font-size: 15px; display: inline-block; animation: wb-bounce 1s ease-in-out infinite; }
+  .working-bar .wb-tx { animation: wb-fade 1.6s ease-in-out infinite; }
+  @keyframes wb-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+  @keyframes wb-fade { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+
+  /* 导入弹窗 tab */
+  .tab-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .tab-row .tab { flex: 1; border: 1px solid #ddd; background: #fff; border-radius: 6px; padding: 8px 0; font-size: 13px; cursor: pointer; }
+  .tab-row .tab.active { border-color: #07c160; color: #07c160; background: #f0faf4; font-weight: 600; }
+  .ta-wrap { position: relative; }
+  #importAtMenu { display: none; position: absolute; left: 0; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid #e2e2e2; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.14); max-height: 220px; overflow-y: auto; z-index: 30; }
+  #importAtMenu .at-item { padding: 7px 12px; display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  #importAtMenu .at-item:hover, #importAtMenu .at-item.active { background: #f0f7f0; }
+
+  /* 定时任务管理 */
+  .sched-row { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+  .sched-time { color: #4a6cf7; font-weight: 600; white-space: nowrap; font-size: 12.5px; }
+  .sched-main { flex: 1; min-width: 0; }
+  .sched-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sched-sub { font-size: 11px; color: #999; margin-top: 2px; }
+  .sched-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .sched-btn { width: 100%; border: 1px solid #ddd; color: #555; background: #fff; border-radius: 6px; padding: 8px 0; font-size: 13px; cursor: pointer; margin-bottom: 8px; }
+  .sched-btn:hover { border-color: #07c160; color: #07c160; }
+  .st-scheduled { background: #8a6fe8; }
+
+  /* 图标选择 */
+  .icon-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+  .icon-pick { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 16px; border: 1px solid #e5e5e5; border-radius: 6px; background: #fff; cursor: pointer; }
+  .icon-pick:hover { border-color: #07c160; }
+  .icon-pick.active { border-color: #07c160; background: #f0faf4; box-shadow: 0 0 0 1px #07c160 inset; }
+  .global-cwd-box { border: 1px solid #d9e2ff; background: #f7f9ff; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; }
+  .global-cwd-box .lbl { font-weight: 600; color: #4a6cf7; margin-bottom: 6px; }
+
+  /* 帮助弹窗 */
+  .help-sec { margin-bottom: 14px; }
+  .help-sec h4 { font-size: 13.5px; color: #07c160; margin-bottom: 4px; }
+  .help-sec p, .help-sec li { font-size: 12.5px; color: #444; line-height: 1.8; }
+  .help-sec ul, .help-sec ol { padding-left: 18px; }
+  .help-kernel { font-size: 12.5px; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; line-height: 1.6; }
+  .help-kernel.ok { background: #eef7f0; color: #0a7a43; }
+  .help-kernel.demo { background: #faf3e3; color: #8a6116; }
+  .help-kernel.missing { background: #fbeceb; color: #c0392b; }
+  .help-kernel code { background: rgba(0,0,0,.06); border-radius: 3px; padding: 0 5px; }
 
   /* @ 智能体补全菜单 */
   #atMenu { display: none; position: absolute; bottom: 100%; left: 14px; right: 14px; margin-bottom: 6px; background: #fff; border: 1px solid #e2e2e2; border-radius: 8px; box-shadow: 0 -4px 20px rgba(0,0,0,.12); max-height: 264px; overflow-y: auto; z-index: 20; }
@@ -112,8 +165,8 @@
   .at-tx i { font-style: normal; color: #999; font-size: 11px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
 
   /* ---------- 弹窗 ---------- */
-  #modalMask, #agentsMask, #historyMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 50; }
-  #modalMask.show, #agentsMask.show, #historyMask.show { display: flex; }
+  #modalMask, #agentsMask, #historyMask, #schedMask, #helpMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 50; }
+  #modalMask.show, #agentsMask.show, #historyMask.show, #schedMask.show, #helpMask.show { display: flex; }
   .modal { background: #fff; border-radius: 10px; width: 560px; max-width: 92vw; max-height: 88vh; overflow-y: auto; padding: 20px; }
   .modal h3 { font-size: 15px; margin-bottom: 6px; }
   .modal .tip { font-size: 12px; color: #999; line-height: 1.7; margin-bottom: 10px; }
@@ -166,7 +219,8 @@
     </div>
     <div id="sessionList"></div>
     <div class="side-footer">
-      <button class="run-all" id="runAllBtn" onclick="onRunAllBtn()">按时间顺序执行全部待办</button>
+      <button class="sched-btn" onclick="openSched()">⏰ 定时任务</button>
+      <button class="run-all" id="runAllBtn" onclick="onRunAllBtn()" style="margin-bottom:0">按顺序执行全部待办</button>
     </div>
   </aside>
 
@@ -183,12 +237,12 @@
         <button class="cfg-btn" id="newSessBtn" onclick="newSession()">✚ 新会话</button>
         <button class="cfg-btn" id="histBtn" onclick="openHistory()">🕘 历史</button>
         <button class="cfg-btn" onclick="openAgents()">⚙ 智能体配置</button>
-        <span class="runner-tag" id="runnerTag">检测中…</span>
+        <span class="runner-tag" id="runnerTag" style="display:none"></span>
+        <button class="cfg-btn" id="helpBtn" onclick="openHelp()" title="使用帮助">❓ 帮助</button>
       </div>
     </header>
     <div id="messages"></div>
     <footer id="composer">
-      <div class="hint-row">输入 <b>@</b> 点名智能体（可多个，按顺序串行）；不点名则由<b>管家</b>自动调度子智能体并行/串行完成</div>
       <div class="input-row">
         <input id="input" placeholder="输入消息，@ 可点名智能体…" autocomplete="off">
         <button id="sendBtn" onclick="onSendBtn()">发送</button>
@@ -201,9 +255,16 @@
 <!-- 导入任务弹窗 -->
 <div id="modalMask">
   <div class="modal">
-    <h3>导入任务列表</h3>
-    <div class="tip">每行一个任务，可拖拽调整执行顺序。行末可 <code>@智能体</code> 指派：<code>@管家</code> 或不写 → 管家调度多个子智能体并行/串行完成；<code>@子智能体</code> → 该智能体独立完成全部工作。支持行首时间与 <code>-</code> / <code>1.</code> / <code>[ ]</code> 列表格式。每个任务是独立会话，点击可查看对话。</div>
-    <textarea id="importText" placeholder="09:00 检查邮件并回复客户 @管家&#10;10:30 编写周报初稿 @文案&#10;- 联系供应商确认报价&#10;14:00 修复登录页 bug @工程师"></textarea>
+    <h3>导入任务</h3>
+    <div class="tab-row">
+      <button class="tab active" id="tabSeq" onclick="setImportMode('sequential')">顺序任务</button>
+      <button class="tab" id="tabSch" onclick="setImportMode('scheduled')">定时任务</button>
+    </div>
+    <div class="tip" id="importTip"></div>
+    <div class="ta-wrap">
+      <textarea id="importText" onkeydown="importKeydown(event)"></textarea>
+      <div id="importAtMenu"></div>
+    </div>
     <div class="modal-actions">
       <button onclick="closeImport()">取消</button>
       <button class="primary" onclick="doImport()">提取任务</button>
@@ -215,8 +276,15 @@
 <div id="agentsMask">
   <div class="modal">
     <h3>智能体配置</h3>
-    <div class="tip">每个智能体都是一个独立的 AI Agent（基于 OpenCode 内核，如 claude code / codex 一样能干活）：<b>名称</b>用于 @ 点名，<b>技能说明</b>供管家调度参考，<b>工作目录</b>是它读写文件的地方，<b>自定义提示词</b>会在任务下发时附加在用户提示词前面（不是系统提示词）。所有智能体使用 OpenCode 默认模型。「管家」为内置调度智能体，不可修改。</div>
+    <div class="tip">每个智能体都是一个独立的 AI Agent（基于 OpenCode 内核）：<b>图标</b>用于辨认，<b>名称</b>用于 @ 点名，<b>技能说明</b>供管家调度参考，<b>自定义提示词</b>会在任务下发时附加在用户提示词前面。所有智能体使用 OpenCode 默认模型。「管家」为内置调度智能体，不可修改。</div>
     <div class="butler-ro" id="butlerRo"></div>
+    <div class="global-cwd-box">
+      <div class="lbl">📁 统一工作目录（所有智能体共用）</div>
+      <div class="ag-row">
+        <input id="globalCwdInput" placeholder="本地目录完整路径，智能体产出的文件都保存在这里；留空用默认目录">
+        <button class="mini-btn" onclick="pickGlobalDir()">选择</button>
+      </div>
+    </div>
     <div id="agentCards"></div>
     <button class="add-agent" onclick="addAgentRow()">＋ 添加子智能体</button>
     <div class="modal-actions">
@@ -236,18 +304,43 @@
     </div>
   </div>
 </div>
+<!-- 定时任务管理弹窗 -->
+<div id="schedMask">
+  <div class="modal">
+    <h3>⏰ 定时任务</h3>
+    <div class="tip">到点自动执行（程序运行期间有效）。每个任务是独立会话，执行过程与结果可在会话中查看。</div>
+    <div id="schedList"></div>
+    <div class="modal-actions">
+      <button class="primary" onclick="closeSched()">关闭</button>
+    </div>
+  </div>
+</div>
+<!-- 使用帮助弹窗 -->
+<div id="helpMask">
+  <div class="modal wide">
+    <h3>❓ 使用帮助</h3>
+    <div id="helpBody"></div>
+    <div class="modal-actions">
+      <button class="primary" onclick="closeHelp()">关闭</button>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
-const PAGE_VERSION = '3.3.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.4.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', task: '任务执行' };
+// 职业图标库（智能体配置可选）
+const ICON_PRESETS = ['🧑‍💻','🔍','✍️','🏗️','🎨','📊','🧪','📐','🚀','🛡️','🧭','📈','🧑‍🏫','🩺','⚖️','🔧','📖','🎬','🧙','💼','🖥️','🤖','🦉','🐝','🎯','🗂️','💡','🛠️','📡','🧠'];
 
 let agents = [], butlerId = 'butler', tasks = [];
 let chatBusy = false;          // 聊天编排进行中（发送按钮变「停止」）
 let taskBusy = false;          // 任务批量执行进行中（执行按钮变「停止执行」）
 let stopAsked = false;         // 本次流中已请求过停止，避免重复点击
 let curTaskId = '';            // '' = 主会话；否则为任务会话
+let runnerState = { kind: '', cmd: '' }; // 内核状态（帮助弹窗展示）
+let globalCwd = '';            // 全局统一工作目录
 const sessions = new Map();    // key: 'main' | taskId → 消息数组
 
 const input = document.getElementById('input');
@@ -255,8 +348,17 @@ const input = document.getElementById('input');
 function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 function escAttr(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 function fmtTime(ts) { const d = new Date(ts); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
+function fmtSched(ts) { const d = new Date(ts); const p = (n) => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function fmtSchedNow() { const d = new Date(); const p = (n) => String(n).padStart(2,'0'); return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`; }
 function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2200); }
 function colorOf(id) { let h = 0; const s = String(id); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_COLORS[h % AV_COLORS.length]; }
+// 智能体显示图标：配置的职业图标 > 名称首字
+function agentIcon(agentId, name) {
+  const a = agents.find(x => x.id === agentId);
+  if (a && a.icon) return a.icon;
+  if (agentId === butlerId) return '🎩';
+  return String(name || 'AI').slice(0, 1);
+}
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -273,16 +375,23 @@ async function init() {
   const [health, ag] = await Promise.all([api('/api/health'), api('/api/agents')]);
   agents = ag.agents || [];
   butlerId = ag.butlerId || 'butler';
+  globalCwd = ag.globalCwd || '';
+  runnerState = { kind: health.runner || '', cmd: health.opencode || '' };
+  // 内核状态：正常（OpenCode）不显示标签；演示/未检测到 属于需要用户知情的状态，保留醒目标注
   const tag = document.getElementById('runnerTag');
-  const tagMap = {
-    opencode: ['OpenCode 内核', 'opencode'],
-    demo: ['演示模式', 'demo'],
-    missing: ['未检测到 OpenCode', 'missing']
-  };
-  const [tagText, tagCls] = tagMap[health.runner] || ['未知状态', 'missing'];
-  tag.textContent = tagText;
-  tag.title = health.opencode || '';
-  tag.className = 'runner-tag ' + tagCls;
+  if (health.runner === 'demo') {
+    tag.textContent = '演示模式';
+    tag.title = '当前为模拟输出（AGENTS_CHAT_MOCK=1），详见帮助';
+    tag.className = 'runner-tag demo';
+    tag.style.display = '';
+  } else if (health.runner === 'missing') {
+    tag.textContent = '未检测到 OpenCode';
+    tag.title = '请先安装：npm install -g opencode-ai，详见帮助';
+    tag.className = 'runner-tag missing';
+    tag.style.display = '';
+  } else {
+    tag.style.display = 'none';
+  }
 
   renderMembers();
   await Promise.all([loadTasks(), loadMessages()]);
@@ -303,28 +412,43 @@ async function init() {
     }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   });
+
+  // 轻量轮询：感知定时任务自动触发引起的任务状态变化（执行批次进行中或页面隐藏时跳过）
+  setInterval(() => {
+    if (taskBusy || document.hidden) return;
+    loadTasks(true);
+  }, 8000);
 }
 
 function renderMembers() {
   const el = document.getElementById('members');
   el.innerHTML = agents.map(a =>
-    `<span class="member-avatar" style="background:${a.id === butlerId ? '#8a6fe8' : colorOf(a.id)}" title="${escAttr(a.name)}${a.locked ? '（内置）' : ''}">${esc(a.name.slice(0,1))}</span>`
-  ).join('') + `<span style="font-size:11px;color:#b2b2b2;margin-left:4px">${agents.length} 位智能体 · 未点名时管家调度</span>`;
+    `<span class="member-avatar" style="background:${a.id === butlerId ? '#8a6fe8' : colorOf(a.id)};font-size:13px" title="${escAttr(a.name)}${a.locked ? '（内置）' : ''}">${esc(a.icon || agentIcon(a.id, a.name))}</span>`
+  ).join('');
 }
 
 // ---------- 侧栏（主会话 + 任务会话） ----------
-async function loadTasks() {
+async function loadTasks(silent) {
   const data = await api('/api/tasks');
   tasks = data.tasks || [];
   renderSidebar();
+  if (schedOpen) renderSchedList(); // 定时任务弹窗打开时同步刷新
 }
 
 function statusText(s) {
   return { pending: '待执行', running: '执行中', done: '已完成', failed: '失败' }[s] || s;
 }
 
+// 侧栏可见任务：顺序任务全部可见；定时任务仅在已触发（执行中/已完成/失败）后出现，
+// 未触发的定时任务统一收纳在「⏰ 定时任务」弹窗中管理
+function visibleTasks() {
+  return tasks.filter(t => !(t.kind === 'scheduled' && t.status === 'pending'));
+}
+
 function renderSidebar() {
-  const pending = tasks.filter(t => t.status === 'pending').length;
+  const vis = visibleTasks();
+  const pending = vis.filter(t => t.status === 'pending').length;
+  const schedPending = tasks.filter(t => t.kind === 'scheduled' && t.status === 'pending').length;
   const badge = document.getElementById('pendingBadge');
   badge.style.display = pending ? 'inline' : 'none';
   badge.textContent = pending;
@@ -334,25 +458,25 @@ function renderSidebar() {
     <div class="task-avatar main-av">🏠</div>
     <div class="task-main">
       <div class="task-title">群聊 · 主会话</div>
-      <div class="task-sub"><span>未点名时由管家调度</span><span>${agents.length} 位智能体</span></div>
+      <div class="task-sub"><span>${agents.map(a => esc(a.icon || agentIcon(a.id, a.name))).join(' ')}</span><span>${agents.length} 位智能体</span></div>
     </div>
   </div>`;
 
   let tasksHtml;
-  if (tasks.length === 0) {
-    tasksHtml = '<div class="task-empty">暂无任务会话<br>点右上角「导入任务」粘贴清单<br>行末可 @智能体 指派，可拖拽排序</div>';
+  if (vis.length === 0) {
+    tasksHtml = `<div class="task-empty">暂无任务会话<br>点右上角「导入任务」添加顺序任务${schedPending ? `<br>⏰ 另有 ${schedPending} 个定时任务待触发` : '<br>定时任务请在下方「定时任务」按钮中管理'}</div>`;
   } else {
-    tasksHtml = tasks.map((t, i) => {
-      const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : '•';
+    tasksHtml = vis.map((t) => {
+      const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : (t.kind === 'scheduled' ? '⏰' : '•');
       const assign = t.assign && t.assign !== butlerId ? ` · @${esc(assignName(t.assign))}` : '';
-      return `<div class="task-item ${curTaskId === t.id ? 'active' : ''}" draggable="${!taskBusy && t.status !== 'running'}" ondragstart="onDragStart(${i},event)" ondragover="onDragOver(${i},event)" ondragleave="this.classList.remove('drag-over')" ondrop="onDrop(${i},event)" onclick="switchSession('${t.id}')">
+      return `<div class="task-item ${curTaskId === t.id ? 'active' : ''}" draggable="${!taskBusy && t.status !== 'running'}" ondragstart="onDragStart('${escAttr(t.id)}',event)" ondragover="onDragOver(event)" ondragleave="this.classList.remove('drag-over')" ondrop="onDrop('${escAttr(t.id)}',event)" onclick="switchSession('${escAttr(t.id)}')">
         <div class="task-avatar st-${t.status}">${icon}</div>
         <div class="task-main">
           <div class="task-title">${esc(t.title)}</div>
-          <div class="task-sub"><span>${statusText(t.status)}${assign}</span><span>${fmtTime(t.createdAt)}</span></div>
+          <div class="task-sub"><span>${statusText(t.status)}${assign}${t.kind === 'scheduled' ? ' · 定时' : ''}</span><span>${fmtTime(t.createdAt)}</span></div>
         </div>
-        ${t.status === 'pending' || t.status === 'failed' ? `<button class="mini-btn" onclick="event.stopPropagation();runTask('${t.id}')">执行</button>` : ''}
-        <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${t.id}')">✕</button>
+        ${t.status === 'pending' || t.status === 'failed' ? `<button class="mini-btn" onclick="event.stopPropagation();runTask('${escAttr(t.id)}')">执行</button>` : ''}
+        <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
       </div>`;
     }).join('');
   }
@@ -365,18 +489,22 @@ function assignName(id) {
 }
 
 // ---------- 任务拖拽排序 ----------
-let dragIdx = -1;
-function onDragStart(i, e) { dragIdx = i; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', String(i)); } catch {} }
-function onDragOver(i, e) { e.preventDefault(); const el = e.currentTarget; el.classList.add('drag-over'); }
-function onDrop(i, e) {
+let dragId = null;
+function onDragStart(id, e) { dragId = id; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', id); } catch {} }
+function onDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+function onDrop(targetId, e) {
   e.preventDefault();
   document.querySelectorAll('.task-item').forEach(el => el.classList.remove('drag-over'));
-  if (dragIdx < 0 || dragIdx === i) { dragIdx = -1; return; }
-  const arr = tasks.slice();
-  const [it] = arr.splice(dragIdx, 1);
-  arr.splice(i, 0, it);
-  tasks = arr;
-  dragIdx = -1;
+  if (!dragId || dragId === targetId) { dragId = null; return; }
+  const vis = visibleTasks();
+  const arr = vis.slice();
+  const from = arr.findIndex(t => t.id === dragId);
+  const to = arr.findIndex(t => t.id === targetId);
+  if (from < 0 || to < 0) { dragId = null; return; }
+  const [it] = arr.splice(from, 1);
+  arr.splice(to, 0, it);
+  dragId = null;
+  tasks = arr; // 可见列表即时反映新顺序（未触发的定时任务仍收在定时弹窗）
   renderSidebar();
   saveOrder(arr.map(t => t.id));
 }
@@ -442,7 +570,7 @@ function planNode(m) {
     inner = esc(m.content);
   }
   row.innerHTML = `
-    <div class="avatar butler">管</div>
+    <div class="avatar butler">🎩</div>
     <div class="msg-body">
       <div class="msg-name">管家 · 调度规划</div>
       <div class="bubble left plan-card">${inner}</div>
@@ -450,11 +578,28 @@ function planNode(m) {
   return row;
 }
 
+// 折叠切换（历史拼接与实时渲染共用）
+function toggleFoldEl(el) {
+  const wrap = el.previousElementSibling;
+  const expanded = wrap.classList.toggle('expanded');
+  el.textContent = expanded ? '收起 ▴' : '展开全文 ▾';
+}
+
+// 过程类消息（执行/验收）默认折叠，仅显示约三行
+function isFoldPhase(phase) { return phase === 'work' || phase === 'review'; }
+
 function msgNode(m) {
   if (m.role === 'sys') {
     const d = document.createElement('div');
     d.className = 'sys-tip';
     d.innerHTML = `<span>${esc(m.content)}</span>`;
+    return d;
+  }
+  if (m.role === 'working') {
+    // 工作中动画指示条（不持久化，仅执行期间展示）
+    const d = document.createElement('div');
+    d.className = 'sys-tip';
+    d.innerHTML = `<span class="working-bar"><span class="wb-ic">${esc(m.icon || '⏳')}</span><span class="wb-tx">${esc(m.agentName || '智能体')} 正在${PHASE_LABEL[m.phase] || '工作'}…</span></span>`;
     return d;
   }
   if (m.role === 'user') {
@@ -469,11 +614,15 @@ function msgNode(m) {
   const row = document.createElement('div');
   row.className = 'msg-row';
   const tag = m.phase && PHASE_LABEL[m.phase] ? `<span class="ph">【${PHASE_LABEL[m.phase]}】</span>` : '';
+  const avIcon = esc(agentIcon(m.agentId, m.agentName));
+  const bodyHtml = isFoldPhase(m.phase)
+    ? `<div class="bubble left"><div class="fold-wrap">${tag}<span class="tx"></span></div><div class="fold-toggle" onclick="toggleFoldEl(this)">展开全文 ▾</div></div>`
+    : `<div class="bubble left">${tag}<span class="tx"></span></div>`;
   row.innerHTML = `
-    <div class="avatar ${m.agentId === butlerId ? 'butler' : ''}" style="${m.agentId === butlerId ? '' : `background:${colorOf(m.agentId || 'x')}`}">${esc((m.agentName || 'AI').slice(0, 2))}</div>
+    <div class="avatar ${m.agentId === butlerId ? 'butler' : ''}" style="${m.agentId === butlerId ? '' : `background:${colorOf(m.agentId || 'x')}`}">${avIcon}</div>
     <div class="msg-body">
       <div class="msg-name">${esc(m.agentName || m.agentId || 'AI')}${m.agentId === butlerId ? ' · 管家' : ''}</div>
-      <div class="bubble left">${tag}<span class="tx"></span></div>
+      ${bodyHtml}
       ${m.outputPath ? `<div class="msg-file" title="完整产出已保存到此文件，后续智能体会直接读取完整版">📄 ${esc(m.outputPath)}</div>` : ''}
     </div>`;
   row.querySelector('.tx').textContent = m.content;
@@ -664,20 +813,44 @@ async function send() {
   }
 }
 
+// ---------- 工作中动画指示条（stage 起、首条文本/saved 止） ----------
+const workingBars = new Map(); // agentId|phase|taskId -> 前端消息对象
+function workingKey(ev) { return `${ev.agentId}|${ev.phase || ''}|${ev.taskId || ''}`; }
+function addWorking(ev) {
+  const key = workingKey(ev);
+  removeWorkingByKey(key);
+  const m = pushMsg({
+    role: 'working', content: '', icon: agentIcon(ev.agentId, ev.agentName),
+    agentId: ev.agentId, agentName: ev.agentName, phase: ev.phase, taskId: ev.taskId || '', ts: Date.now()
+  });
+  workingBars.set(key, m);
+}
+function removeWorkingByKey(key) {
+  const m = workingBars.get(key);
+  if (m) { removeMsg(m); workingBars.delete(key); }
+}
+function removeWorkingForTask(taskId, phase) {
+  for (const [key, m] of workingBars) {
+    if (m.taskId === (taskId || '') && (!phase || m.phase === phase)) removeWorkingByKey(key);
+  }
+}
+
 // 聊天/任务共用的流事件处理（调度过程仅展示，不进上下文由后端保证）
 function handleStreamEvent(e) {
   if (e.type === 'stage') {
-    const who = e.agentName + (e.role === 'butler' && e.agentName !== '管家' ? '（管家）' : '');
-    addSys(`${PHASE_LABEL[e.phase] || e.phase} · ${who}`, e.taskId);
+    addWorking(e);
   } else if (e.type === 'phase') {
     addSys(`▶ 阶段 ${e.index}/${e.total}（${e.parallel ? '并行' : '串行'}）：${e.names}`, e.taskId);
   } else if (e.type === 'plan') {
     pushPlan(e, e.taskId);
   } else if (e.type === 'verify') {
+    removeWorkingForTask(e.taskId, 'review');
     addSys(e.accepted ? `✅ 验收通过（第 ${e.round} 轮）` : `⚠ ${e.note || '验收未通过'}`, e.taskId);
   } else if (e.type === 'text') {
+    removeWorkingByKey(workingKey(e));
     onStreamText(e);
   } else if (e.type === 'saved') {
+    removeWorkingByKey(workingKey(e));
     onSaved(e);
   } else if (e.type === 'notice') {
     addSys(e.content, e.taskId);
@@ -690,8 +863,9 @@ function handleStreamEvent(e) {
 async function runTask(taskId) { await execTasks([taskId]); }
 
 async function runAllTasks() {
-  const pending = tasks.filter(t => t.status === 'pending' || t.status === 'failed');
-  if (pending.length === 0) { toast('没有待执行任务'); return; }
+  // 顺序待办：未触发的定时任务不参与「执行全部」，由定时调度器负责
+  const pending = tasks.filter(t => (t.status === 'pending' || t.status === 'failed') && !(t.kind === 'scheduled' && t.status === 'pending'));
+  if (pending.length === 0) { toast('没有待执行的顺序任务'); return; }
   await execTasks(pending.map(t => t.id));
 }
 
@@ -728,8 +902,9 @@ async function execTasks(taskIds) {
     await streamSSE('/api/tasks/run', { taskIds }, (e) => {
       if (e.type === 'task_start') {
         switchSession(e.taskId);
-        addSys(`开始执行：${e.title}（管家调度，本会话独立）`, e.taskId);
+        addSys(`开始执行：${e.title}（${esc(e.agentName || '管家')} 负责，本会话独立）`, e.taskId);
       } else if (e.type === 'task_done') {
+        removeWorkingForTask(e.taskId);
         const t = tasks.find(x => x.id === e.taskId);
         if (t) t.status = e.status;
         renderSidebar();
@@ -784,11 +959,14 @@ async function openHistory() {
       } else if (m.role === 'user') {
         html += `<div class="msg-row self"><div class="avatar me">我</div><div class="msg-body"><div class="bubble right">${esc(m.content)}</div></div></div>`;
       } else if (m.phase === 'plan' && m.plan) {
-        html += `<div class="msg-row"><div class="avatar butler">管</div><div class="msg-body"><div class="msg-name">${esc(m.agentName || '管家')} · 调度规划</div><div class="bubble left plan-card"><div class="plan-thought">${esc(m.plan.thought || '')}</div>${(m.plan.phases || []).map((g, gi) => `<div class="plan-phase"><b>阶段 ${gi + 1}</b>（${g.length > 1 ? g.length + ' 项并行' : '单执行'}）${g.map(s => `<div class="plan-step">▸ <b>${esc(s.agentName)}</b>：${esc(s.instruction)}</div>`).join('')}</div>`).join('')}</div></div></div>`;
+        html += `<div class="msg-row"><div class="avatar butler">🎩</div><div class="msg-body"><div class="msg-name">${esc(m.agentName || '管家')} · 调度规划</div><div class="bubble left plan-card"><div class="plan-thought">${esc(m.plan.thought || '')}</div>${(m.plan.phases || []).map((g, gi) => `<div class="plan-phase"><b>阶段 ${gi + 1}</b>（${g.length > 1 ? g.length + ' 项并行' : '单执行'}）${g.map(s => `<div class="plan-step">▸ <b>${esc(s.agentName)}</b>：${esc(s.instruction)}</div>`).join('')}</div>`).join('')}</div></div></div>`;
       } else {
         const tag = m.phase && PHASE_LABEL[m.phase] ? `<span class="ph">【${PHASE_LABEL[m.phase]}】</span>` : '';
         const fileTag = m.outputPath ? `<div class="msg-file">📄 ${esc(m.outputPath)}</div>` : '';
-        html += `<div class="msg-row"><div class="avatar ${m.agentId === butlerId ? 'butler' : ''}" style="${m.agentId === butlerId ? '' : `background:${colorOf(m.agentId || 'x')}`}">${esc((m.agentName || 'AI').slice(0, 2))}</div><div class="msg-body"><div class="msg-name">${esc(m.agentName || m.agentId || 'AI')}</div><div class="bubble left">${tag}${esc(m.content)}</div>${fileTag}</div></div>`;
+        const contentHtml = isFoldPhase(m.phase)
+          ? `<div class="bubble left"><div class="fold-wrap">${tag}${esc(m.content)}</div><div class="fold-toggle" onclick="toggleFoldEl(this)">展开全文 ▾</div></div>`
+          : `<div class="bubble left">${tag}${esc(m.content)}</div>`;
+        html += `<div class="msg-row"><div class="avatar ${m.agentId === butlerId ? 'butler' : ''}" style="${m.agentId === butlerId ? '' : `background:${colorOf(m.agentId || 'x')}`}">${esc(agentIcon(m.agentId, m.agentName))}</div><div class="msg-body"><div class="msg-name">${esc(m.agentName || m.agentId || 'AI')}</div>${contentHtml}${fileTag}</div></div>`;
       }
     }
     el.innerHTML = html;
@@ -799,23 +977,125 @@ async function openHistory() {
 function closeHistory() { document.getElementById('historyMask').classList.remove('show'); }
 
 // ---------- 导入任务 ----------
-function openImport() { document.getElementById('modalMask').classList.add('show'); }
-function closeImport() { document.getElementById('modalMask').classList.remove('show'); }
+let importMode = 'sequential';
+let importAt = null; // { start, end, items, active }
+
+const IMPORT_TIP = {
+  sequential: '每行一个任务，使用 <code>1.</code> <code>2.</code> 编号；行末可 <code>@智能体</code> 指派（输入 @ 有补全）——不指派则由管家调度，指派子智能体则独立完成。任务按编号顺序执行。',
+  scheduled: '每行一个定时任务：行首写启动时间（格式 <code>20260818-1307</code>），行首输入 <code>[]</code> 自动填入当前日期时间（可修改）；行末可 <code>@智能体</code> 指派。到点自动执行。'
+};
+const IMPORT_PH = {
+  sequential: '1. 检查邮件并回复客户 @管家\n2. 编写周报初稿 @文案\n3. 修复登录页 bug @工程师',
+  scheduled: '20260818-1307 生成今日日报 @文案\n20260818-1800 检查部署日志 @工程师'
+};
+
+function openImport() {
+  setImportMode(importMode);
+  document.getElementById('modalMask').classList.add('show');
+}
+function closeImport() {
+  document.getElementById('modalMask').classList.remove('show');
+  hideImportAt();
+}
+
+function setImportMode(mode) {
+  importMode = mode === 'scheduled' ? 'scheduled' : 'sequential';
+  document.getElementById('tabSeq').className = 'tab' + (importMode === 'sequential' ? ' active' : '');
+  document.getElementById('tabSch').className = 'tab' + (importMode === 'scheduled' ? ' active' : '');
+  document.getElementById('importTip').innerHTML = IMPORT_TIP[importMode];
+  const ta = document.getElementById('importText');
+  ta.placeholder = IMPORT_PH[importMode];
+  hideImportAt();
+}
+
+// 导入框 @ 智能体补全（textarea 版）
+const importText = document.getElementById('importText');
+importText.addEventListener('input', onImportInput);
+importText.addEventListener('blur', () => setTimeout(hideImportAt, 150));
+
+function onImportInput() {
+  // 定时模式：行首/行中刚输入 [] → 自动替换为当前日期时间（20260818-1307），用户可修改
+  if (importMode === 'scheduled') {
+    const pos = importText.selectionStart;
+    const before = importText.value.slice(0, pos);
+    if (before.endsWith('[]')) {
+      const ts = fmtSchedNow();
+      importText.value = before.slice(0, -2) + ts + importText.value.slice(pos);
+      const np = pos - 2 + ts.length;
+      importText.setSelectionRange(np, np);
+      hideImportAt();
+      return;
+    }
+  }
+  // @ 补全：匹配光标前正在输入的 @词
+  const pos = importText.selectionStart;
+  const before = importText.value.slice(0, pos);
+  const m = before.match(/@([^\s@，。,；;]*)$/);
+  if (!m) { hideImportAt(); return; }
+  const q = m[1].toLowerCase();
+  const items = agents.filter(a =>
+    !q || a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q) || String(a.desc || '').toLowerCase().includes(q)
+  ).slice(0, 8);
+  if (!items.length) { hideImportAt(); return; }
+  importAt = { start: pos - m[0].length, end: pos, items, active: 0 };
+  renderImportAt();
+}
+
+function renderImportAt() {
+  const menu = document.getElementById('importAtMenu');
+  menu.innerHTML = importAt.items.map((a, i) => `
+    <div class="at-item ${i === importAt.active ? 'active' : ''}" data-i="${i}">
+      <span class="at-av" style="background:${a.id === butlerId ? '#8a6fe8' : colorOf(a.id)}">${esc(a.icon || agentIcon(a.id, a.name))}</span>
+      <span class="at-tx"><b>${esc(a.name)}</b>${a.locked ? ' 🔒' : ''}<i>${esc(String(a.desc || a.id || '').slice(0, 40))}</i></span>
+    </div>`).join('');
+  menu.style.display = 'block';
+  menu.querySelectorAll('.at-item').forEach(el => {
+    el.onclick = () => pickImportAt(Number(el.dataset.i));
+    el.onmousedown = (e) => e.preventDefault();
+  });
+}
+
+function pickImportAt(i) {
+  if (!importAt) return;
+  const a = importAt.items[i];
+  const v = importText.value;
+  importText.value = v.slice(0, importAt.start) + '@' + a.name + ' ' + v.slice(importAt.end);
+  const np = importAt.start + a.name.length + 2;
+  importText.focus();
+  importText.setSelectionRange(np, np);
+  hideImportAt();
+}
+
+function hideImportAt() {
+  importAt = null;
+  document.getElementById('importAtMenu').style.display = 'none';
+}
+
+function importKeydown(e) {
+  if (!importAt) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); importAt.active = (importAt.active + 1) % importAt.items.length; renderImportAt(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); importAt.active = (importAt.active - 1 + importAt.items.length) % importAt.items.length; renderImportAt(); }
+  else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickImportAt(importAt.active); }
+  else if (e.key === 'Escape') { hideImportAt(); }
+}
 
 async function doImport() {
-  const text = document.getElementById('importText').value;
+  const text = importText.value;
   if (!text.trim()) { toast('请先粘贴任务文本'); return; }
   const data = await api('/api/tasks/import', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text })
+    body: JSON.stringify({ text, mode: importMode })
   });
   if (data.success) {
     tasks = data.tasks || [];
     renderSidebar();
-    addSys(`已提取 ${data.added} 个任务`);
+    addSys(importMode === 'scheduled'
+      ? `已添加 ${data.added} 个定时任务（可在「⏰ 定时任务」中管理）`
+      : `已提取 ${data.added} 个顺序任务`);
     (data.warnings || []).forEach(w => addSys('⚠ ' + w));
     closeImport();
-    document.getElementById('importText').value = '';
+    importText.value = '';
+    if (importMode === 'scheduled' && schedOpen) renderSchedList();
   } else toast(data.error || '导入失败');
 }
 
@@ -824,6 +1104,83 @@ async function clearTasks() {
   await api('/api/tasks/clear', { method: 'POST' });
   if (curTaskId) switchSession('');
   await loadTasks();
+}
+
+// ---------- 定时任务管理 ----------
+let schedOpen = false;
+let schedTimer = null;
+
+function openSched() {
+  schedOpen = true;
+  renderSchedList();
+  document.getElementById('schedMask').classList.add('show');
+  schedTimer = setInterval(() => { if (!document.hidden) renderSchedList(); }, 5000);
+}
+function closeSched() {
+  schedOpen = false;
+  if (schedTimer) { clearInterval(schedTimer); schedTimer = null; }
+  document.getElementById('schedMask').classList.remove('show');
+}
+
+function schedCountdown(ts) {
+  const diff = ts - Date.now();
+  if (diff <= 0) return '已到点';
+  const min = Math.ceil(diff / 60000);
+  if (min < 60) return `${min} 分钟后`;
+  const h = Math.floor(min / 60), m = min % 60;
+  if (h < 24) return `${h} 小时 ${m} 分后`;
+  return `${Math.floor(h / 24)} 天 ${h % 24} 小时后`;
+}
+
+async function renderSchedList() {
+  // 弹窗内实时刷新，独立拉取最新列表
+  let list;
+  try { list = (await api('/api/tasks')).tasks || []; } catch { return; }
+  tasks = list;
+  const sched = list.filter(t => t.kind === 'scheduled').sort((a, b) => (a.scheduledAt || 0) - (b.scheduledAt || 0));
+  const el = document.getElementById('schedList');
+  if (!sched.length) {
+    el.innerHTML = '<div class="task-empty">暂无定时任务<br>点右上角「导入任务」→「定时任务」标签添加</div>';
+    return;
+  }
+  el.innerHTML = sched.map(t => {
+    const st = t.status === 'pending' ? '⏳ ' + schedCountdown(t.scheduledAt) : statusText(t.status);
+    const assign = t.assign && t.assign !== butlerId ? ` · @${esc(assignName(t.assign))}` : '';
+    return `<div class="sched-row">
+      <span class="sched-time">${fmtSched(t.scheduledAt || t.createdAt)}</span>
+      <div class="sched-main">
+        <div class="sched-title">${esc(t.title)}</div>
+        <div class="sched-sub">${st}${assign}</div>
+      </div>
+      <div class="sched-actions">
+        ${t.status === 'pending' ? `<button class="mini-btn" title="不再等到点，立即执行" onclick="runSchedNow('${escAttr(t.id)}')">立即执行</button>` : ''}
+        ${t.status === 'failed' ? `<button class="mini-btn" onclick="runSchedNow('${escAttr(t.id)}')">重跑</button>` : ''}
+        <button class="mini-btn danger" title="删除定时任务" onclick="delSched('${escAttr(t.id)}')">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function runSchedNow(id) {
+  if (taskBusy) { toast('正在执行中，请先停止当前批次'); return; }
+  closeSched();
+  await execTasks([id]);
+}
+
+async function delSched(id) {
+  const t = tasks.find(x => x.id === id);
+  if (!confirm(`删除定时任务「${t ? t.title : ''}」${t && t.status !== 'pending' ? '及其会话记录' : ''}？`)) return;
+  const data = await api('/api/tasks/delete', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id })
+  });
+  if (data.success) {
+    tasks = data.tasks || [];
+    renderSidebar();
+    renderSchedList();
+    await loadMessages();
+    renderMessages();
+    toast('定时任务已删除');
+  } else toast(data.error || '删除失败');
 }
 
 // ---------- 历史 ----------
@@ -860,7 +1217,7 @@ function renderAt() {
   const menu = document.getElementById('atMenu');
   menu.innerHTML = atState.items.map((a, i) => `
     <div class="at-item ${i === atState.active ? 'active' : ''}" data-i="${i}">
-      <span class="at-av" style="background:${a.id === butlerId ? '#8a6fe8' : colorOf(a.id)}">${esc(a.name.slice(0, 1))}</span>
+      <span class="at-av" style="background:${a.id === butlerId ? '#8a6fe8' : colorOf(a.id)}">${esc(a.icon || agentIcon(a.id, a.name))}</span>
       <span class="at-tx"><b>${esc(a.name)}</b>${a.locked ? ' 🔒' : ''}<i>${esc(String(a.desc || a.id || '').slice(0, 40))}</i></span>
     </div>`).join('');
   menu.style.display = 'block';
@@ -894,11 +1251,24 @@ function openAgents() {
   document.getElementById('butlerRo').innerHTML =
     `<b>${esc(butler.name || '管家')}</b><span class="lock">🔒 内置 · 不可修改</span><br>${esc(butler.desc || '')}`;
   editing = agents.filter(a => a.id !== butlerId).map(a => ({ ...a }));
+  document.getElementById('globalCwdInput').value = globalCwd || '';
   renderAgentCards();
   document.getElementById('agentsMask').classList.add('show');
 }
 
 function closeAgents() { document.getElementById('agentsMask').classList.remove('show'); }
+
+function iconPicker(i) {
+  const cur = editing[i].icon || '';
+  return '<div class="icon-row">' + ICON_PRESETS.map(ic =>
+    `<div class="icon-pick ${cur === ic ? 'active' : ''}" title="选择图标" onclick="pickIcon(${i}, '${ic}')">${ic}</div>`
+  ).join('') + '</div>';
+}
+
+function pickIcon(i, ic) {
+  editing[i].icon = editing[i].icon === ic ? '' : ic; // 再点一次取消选择
+  renderAgentCards();
+}
 
 function renderAgentCards() {
   const el = document.getElementById('agentCards');
@@ -912,17 +1282,14 @@ function renderAgentCards() {
         <input value="${escAttr(a.name)}" placeholder="名称（用于 @ 点名）" oninput="editing[${i}].name=this.value">
         <button class="mini-btn gray" onclick="editing.splice(${i},1);renderAgentCards()">删除</button>
       </div>
+      ${iconPicker(i)}
       <input value="${escAttr(a.desc || '')}" placeholder="技能说明（管家据此判断调度给谁）" oninput="editing[${i}].desc=this.value">
-      <div class="ag-row">
-        <input value="${escAttr(a.cwd || '')}" placeholder="本地工作目录（完整路径，文件资料保存在此）" oninput="editing[${i}].cwd=this.value">
-        <button class="mini-btn" onclick="pickDir(${i})">选择</button>
-      </div>
       <textarea placeholder="自定义提示词（任务下发时附加在用户提示词前面，例如：你是资深工程师，输出必须可直接运行）" oninput="editing[${i}].systemPrompt=this.value">${esc(a.systemPrompt || '')}</textarea>
     </div>`).join('');
 }
 
-// 工作目录选择：浏览器安全限制拿不到绝对路径，选完自动填入文件夹名并提示用户补全
-let dirPickIdx = -1;
+// 全局工作目录选择：浏览器安全限制拿不到绝对路径，选完自动填入文件夹名并提示用户补全
+let dirPickTarget = null;
 const dirInput = document.createElement('input');
 dirInput.type = 'file';
 dirInput.webkitdirectory = true;
@@ -930,19 +1297,18 @@ dirInput.style.display = 'none';
 document.body.appendChild(dirInput);
 dirInput.addEventListener('change', () => {
   const f = dirInput.files && dirInput.files[0];
-  if (f && editing[dirPickIdx]) {
+  if (f && dirPickTarget) {
     const top = String(f.webkitRelativePath || '').split('/')[0] || '';
     if (top) {
-      editing[dirPickIdx].cwd = top;
-      renderAgentCards();
+      dirPickTarget.value = top;
       toast('浏览器限制无法读取完整路径，已填入文件夹名「' + top + '」，请补全前面的完整地址');
     }
   }
 });
-function pickDir(i) { dirPickIdx = i; dirInput.value = ''; dirInput.click(); }
+function pickGlobalDir() { dirPickTarget = document.getElementById('globalCwdInput'); dirInput.value = ''; dirInput.click(); }
 
 function addAgentRow() {
-  editing.push({ id: '', name: '', desc: '', cwd: '', systemPrompt: '' });
+  editing.push({ id: '', name: '', icon: '', desc: '', systemPrompt: '' });
   renderAgentCards();
   const cards = document.querySelectorAll('#agentCards .ag-card');
   const last = cards[cards.length - 1];
@@ -953,10 +1319,11 @@ async function saveAgentsCfg() {
   if (noName) { toast('每个智能体都需要名称'); return; }
   const data = await api('/api/agents', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agents: editing })
+    body: JSON.stringify({ agents: editing, globalCwd: document.getElementById('globalCwdInput').value })
   });
   if (data.success) {
     agents = data.agents;
+    globalCwd = data.globalCwd || '';
     renderMembers();
     renderSidebar();
     closeAgents();
@@ -964,6 +1331,83 @@ async function saveAgentsCfg() {
     (data.warnings || []).forEach(w => toast(w));
   } else toast(data.error || '保存失败');
 }
+
+// ---------- 使用帮助 ----------
+function kernelBanner() {
+  const map = {
+    opencode: ['ok', `✅ 运行内核：OpenCode 真实执行${runnerState.cmd ? `（${esc(runnerState.cmd)}）` : ''}，智能体具备读写文件、执行命令、联网检索等真实能力`],
+    demo: ['demo', '⚠ 当前为<b>演示模式</b>（AGENTS_CHAT_MOCK=1）：所有输出均为模拟结果。删除 .env 中该配置并安装 OpenCode 后即为真实执行'],
+    missing: ['missing', '❌ <b>未检测到 OpenCode</b>，任务将无法真实执行。请安装：<code>npm install -g opencode-ai</code>，再运行 <code>opencode auth login</code> 配置模型，然后重启本程序']
+  };
+  const [cls, text] = map[runnerState.kind] || map.missing;
+  return `<div class="help-kernel ${cls}">${text}</div>`;
+}
+
+function openHelp() {
+  document.getElementById('helpBody').innerHTML = kernelBanner() + `
+  <div class="help-sec"><h4>🚀 快速开始</h4>
+    <ol>
+      <li>本机安装 OpenCode 并登录模型：<code>npm install -g opencode-ai</code> → <code>opencode auth login</code>（模型与密钥由 OpenCode 管理，本程序不做任何 API 配置）</li>
+      <li>启动本程序后浏览器打开 <code>http://localhost:3456</code></li>
+      <li>直接在输入框说话即可开始；粘贴任务清单可批量执行</li>
+    </ol>
+  </div>
+  <div class="help-sec"><h4>💬 聊天与 @ 点名</h4>
+    <ul>
+      <li>直接说话 → 由「管家」理解需求、拆解任务、调度子智能体完成</li>
+      <li><code>@工程师 你好</code> → 点名某个智能体；<code>@工程师 @研究员 做个调研</code> → 按顺序串行流水线（前者产出自动作为后者背景）</li>
+      <li>输入 <code>@</code> 会有智能体补全菜单（方向键选择、回车确认）</li>
+      <li>「✚ 新会话」开启全新上下文，旧记录可在「🕘 历史」查看</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>🎩 管家调度是怎么工作的</h4>
+    <ol>
+      <li><b>规划</b>：管家输出调度方案卡片（哪些阶段、谁并行谁串行）</li>
+      <li><b>执行</b>：子智能体分阶段干活（阶段内并行、阶段间串行）；过程内容默认折叠只显示三行，点「展开全文」可看全过程</li>
+      <li><b>验收</b>：管家核对成果，不合格的打回返工（带改进建议，默认最多 2 轮）</li>
+      <li><b>汇总</b>：管家给出结果概要；有成果文件时会列出完整路径，可直接打开查看</li>
+    </ol>
+    <p>每个智能体执行时聊天流会显示「正在执行…」动画条；工具调用过程（读写文件、执行命令）也会实时展示。</p>
+  </div>
+  <div class="help-sec"><h4>📋 任务队列（顺序任务）</h4>
+    <ul>
+      <li>「导入任务」→ 顺序任务标签：每行 <code>1.</code> <code>2.</code> 编号，行末可 <code>@智能体</code> 指派</li>
+      <li>指派管家（或不指派）→ 管家调度多个智能体完成；指派子智能体 → 它独立完成</li>
+      <li>任务按编号顺序执行；单个点「执行」，或底部按钮「按顺序执行全部待办」</li>
+      <li>每个任务 = 独立会话，互不干扰；列表可拖拽调序；执行中可点红色「停止执行」中止</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>⏰ 定时任务</h4>
+    <ul>
+      <li>「导入任务」→ 定时任务标签：行首写启动时间（<code>20260818-1307</code>），输入 <code>[]</code> 自动填入当前时间</li>
+      <li>到点自动执行（需程序保持运行）；所有定时任务统一在左侧「⏰ 定时任务」按钮中管理</li>
+      <li>弹窗内可查看倒计时与状态，支持「立即执行」「重跑」「删除」</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>🛑 停止与中断</h4>
+    <ul>
+      <li>聊天处理中「发送」按钮变红色「停止」；任务批次执行中底部按钮变「停止执行」</li>
+      <li>被停止的任务回到「待执行」可重跑；任务执行期间仍可正常聊天</li>
+      <li>程序异常退出后，「执行中」任务会在下次启动时自动复位，不会卡死</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>📄 产出文件与数据</h4>
+    <ul>
+      <li>每份正式产出完整保存在 <code>.data/outputs/&lt;会话&gt;/</code>，消息下方紫色的 📄 路径即指向它，后续智能体也会读取完整版</li>
+      <li>全部数据在 <code>.data/</code> 目录（聊天、任务、配置）；网页里可「清空」，删除 .data/ = 恢复出厂</li>
+      <li>智能体读写文件的默认位置：配置的「统一工作目录」，或 <code>.data/workspace/</code></li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>❓ 常见问题</h4>
+    <ul>
+      <li>换端口：编辑启动脚本里的 PORT；单任务超时：.env 中调大 <code>AGENTS_CHAT_TIMEOUT_MS</code>（默认 10 分钟）</li>
+      <li>加/改智能体：「⚙ 智能体配置」可设名称、图标、技能说明、提示词；管家内置不可改</li>
+      <li>页面行为异常：Ctrl+F5 强制刷新（版本不一致时会有提示）</li>
+    </ul>
+  </div>`;
+  document.getElementById('helpMask').classList.add('show');
+}
+function closeHelp() { document.getElementById('helpMask').classList.remove('show'); }
 
 init();
 </script>

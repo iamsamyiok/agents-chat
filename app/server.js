@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.3.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.4.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -175,7 +175,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/agents' && req.method === 'GET') {
-    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id });
+    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '' });
     return;
   }
 
@@ -194,7 +194,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/agents' && req.method === 'POST') {
-    // 保存用户自定义子智能体（管家内置，不接受修改）
+    // 保存用户自定义子智能体（管家内置，不接受修改）+ 全局统一工作目录
     const body = await readBody(req);
     if (!Array.isArray(body.agents)) {
       json(res, 400, { success: false, error: 'agents 必须是数组' });
@@ -212,23 +212,24 @@ const server = http.createServer(async (req, res) => {
       let i = 2;
       while (names.has(final)) final = `${name}${i++}`; // 名称唯一，保证 @ 点名无歧义
       names.add(final);
-      let cwd = String(a.cwd || '').trim().replace(/["']/g, '');
-      if (cwd && !isDir(cwd)) {
-        dirWarn.push(`「${final}」的工作目录不存在或不是文件夹：${cwd}，已忽略（将使用程序根目录）`);
-        cwd = '';
-      }
       clean.push({
         id: String(a.id || '').replace(/[^\w-]/g, '') || `ag-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
         name: final,
+        icon: String(a.icon || '').trim().slice(0, 8) || '',
         desc: String(a.desc || '').slice(0, 100),
-        cwd,
         model: '', // 统一使用 OpenCode 默认模型配置，不接受自定义
         systemPrompt: String(a.systemPrompt || '').slice(0, 8000), // 下发任务时附加在用户提示词前
         behavior: String(a.behavior || 'echo')
       });
     }
-    store.saveAgents(clean);
-    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, warnings: dirWarn });
+    // 全局统一工作目录：所有智能体共用一处读写文件
+    let globalCwd = String(body.globalCwd || '').trim().replace(/["']/g, '');
+    if (globalCwd && !isDir(globalCwd)) {
+      dirWarn.push(`统一工作目录不存在或不是文件夹：${globalCwd}，已忽略（将使用默认目录）`);
+      globalCwd = '';
+    }
+    store.saveAgents(clean, globalCwd);
+    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '', warnings: dirWarn });
     return;
   }
 
@@ -245,14 +246,15 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/tasks/import' && req.method === 'POST') {
-    // 从文本自动提取任务（每行一个，支持时间前缀；行末可 @智能体 指派，默认管家）
+    // 从文本自动提取任务；mode: sequential=顺序任务（1. 编号）| scheduled=定时任务（行首定时时间）
     const body = await readBody(req);
     if (!body.text || !String(body.text).trim()) {
       json(res, 400, { success: false, error: 'text 不能为空' });
       return;
     }
-    const { added, warnings } = store.importTasks(body.text);
-    json(res, 200, { success: true, added, warnings, tasks: store.getTasks() });
+    const mode = body.mode === 'scheduled' ? 'scheduled' : 'sequential';
+    const { added, warnings } = store.importTasks(body.text, mode);
+    json(res, 200, { success: true, added, warnings, mode, tasks: store.getTasks() });
     return;
   }
 
@@ -279,6 +281,7 @@ const server = http.createServer(async (req, res) => {
 
   if (p === '/api/tasks/run' && req.method === 'POST') {
     // 顺序执行任务：每个任务 = 独立会话 + 一次完整管家调度
+    // 未指定 ids 时仅执行顺序待办（未到点的定时任务不在此列，由定时调度器负责）
     if (runLocks.tasks) {
       json(res, 409, { success: false, error: '已有一批任务正在执行，请等待完成或先停止' });
       return;
@@ -289,45 +292,16 @@ const server = http.createServer(async (req, res) => {
     const all = store.getTasks().slice().sort((a, b) => a.createdAt - b.createdAt);
     const selected = Array.isArray(body.taskIds) && body.taskIds.length > 0
       ? all.filter(t => body.taskIds.includes(t.id))
-      : all.filter(t => t.status === 'pending' || t.status === 'failed');
+      : all.filter(t => (t.status === 'pending' || t.status === 'failed') && !(t.kind === 'scheduled' && t.status === 'pending'));
     if (selected.length === 0) {
       runLocks.tasks = false;
       json(res, 400, { success: false, error: '没有可执行的任务' });
       return;
     }
-    const agents = store.getAgents();
-    const butler = agents.find(a => a.id === 'butler');
-    if (!butler) {
-      runLocks.tasks = false;
-      json(res, 400, { success: false, error: '管家智能体缺失，配置异常' });
-      return;
-    }
-    const subAgents = agents.filter(a => a.id !== 'butler');
-    const resolveAssign = (task) => {
-      if (!task.assign) return null;
-      return agents.find(a => a.id === task.assign) || null;
-    };
 
     const send = sse(req, res);
-    const persist = (m) => store.addMessage({ ...m, timestamp: new Date().toISOString() });
     try {
-      await runTasks(
-        selected, butler, subAgents,
-        { getHistory: (tid) => buildHistoryText(tid), resolveAssign, scope: 'tasks', isStopped: () => stopTokens.tasks !== myToken },
-        send, persist,
-        // 任务会话首条消息：任务本身（用户视角）
-        (task) => {
-          if (store.getMessages(task.id).length === 0) {
-            store.addMessage({
-              role: 'user',
-              content: `任务：${task.title}${task.notes ? `\n补充说明：${task.notes}` : ''}`,
-              taskId: task.id,
-              timestamp: new Date().toISOString()
-            });
-          }
-        },
-        (taskId, patch) => store.updateTask(taskId, patch)
-      );
+      await executeTaskBatch(selected, send, myToken);
     } catch (err) {
       console.error('[tasks/run] 编排异常:', err && (err.stack || err));
       send({ type: 'error', content: `任务编排异常：${err && err.message || err}` });
@@ -426,6 +400,57 @@ function shutdown(code) {
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 
+// ---------- 任务批次执行（SSE 手动触发与定时调度共用） ----------
+// send: 事件推送（SSE 为真实推送，定时触发为 no-op，消息仍会持久化）
+async function executeTaskBatch(selected, send, myToken) {
+  const agents = store.getAgents();
+  const butler = agents.find(a => a.id === 'butler');
+  if (!butler) throw new Error('管家智能体缺失，配置异常');
+  const subAgents = agents.filter(a => a.id !== 'butler');
+  const resolveAssign = (task) => {
+    if (!task.assign) return null;
+    return agents.find(a => a.id === task.assign) || null;
+  };
+  const persist = (m) => store.addMessage({ ...m, timestamp: new Date().toISOString() });
+  await runTasks(
+    selected, butler, subAgents,
+    { getHistory: (tid) => buildHistoryText(tid), resolveAssign, scope: 'tasks', isStopped: () => stopTokens.tasks !== myToken },
+    send, persist,
+    // 任务会话首条消息：任务本身（用户视角）
+    (task) => {
+      if (store.getMessages(task.id).length === 0) {
+        store.addMessage({
+          role: 'user',
+          content: `任务：${task.title}${task.notes ? `\n补充说明：${task.notes}` : ''}`,
+          taskId: task.id,
+          timestamp: new Date().toISOString()
+        });
+      }
+    },
+    (taskId, patch) => store.updateTask(taskId, patch)
+  );
+}
+
+// ---------- 定时调度器：到点的定时任务自动执行（无人值守） ----------
+// 执行过程照常持久化到对应任务会话，用户打开会话即可查看全过程
+const SCHED_INTERVAL_MS = 15000;
+function startScheduler() {
+  const timer = setInterval(() => {
+    if (runLocks.tasks) return; // 手动批次执行中，下轮再查
+    const due = store.getTasks().filter(t =>
+      t.kind === 'scheduled' && t.status === 'pending' && t.scheduledAt && t.scheduledAt <= Date.now());
+    if (!due.length) return;
+    runLocks.tasks = true;
+    const myToken = stopTokens.tasks;
+    console.log(`[scheduler] 定时触发 ${due.length} 个任务：${due.map(t => t.title).join('、')}`);
+    executeTaskBatch(due, () => {}, myToken)
+      .catch(err => console.error('[scheduler] 定时执行异常:', err && (err.stack || err)))
+      .finally(() => { runLocks.tasks = false; });
+  }, SCHED_INTERVAL_MS);
+  timer.unref();
+  return timer;
+}
+
 server.on('error', (err) => {
   if (err && err.code === 'EADDRINUSE') {
     console.error(`\n❌ 端口 ${PORT} 已被占用：很可能有一个旧版 Agents Chat 进程还在运行！`);
@@ -450,6 +475,7 @@ server.listen(PORT, () => {
   // 启动即修复孤儿状态：上次异常退出时仍标记「执行中」的任务复位为待执行
   const orphan = store.resetRunningTasks();
   if (orphan > 0) console.log(`检测到 ${orphan} 个上次未正常结束的任务，已复位为待执行`);
+  startScheduler();
   console.log(`Agents Chat 已启动: http://localhost:${PORT}`);
   console.log(`运行内核: ${kindText}`);
   console.log(`数据目录: ${store.DATA_DIR}`);
