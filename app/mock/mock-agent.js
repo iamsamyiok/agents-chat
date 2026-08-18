@@ -25,7 +25,16 @@ function streamOutput(lines) {
 }
 
 if (behavior === 'echo') {
-  streamOutput([`[演示] 收到：${prompt.slice(0, 200)}`, '正在处理…', `完成 ${DEMO_TAG}`]);
+  if (prompt.includes('【文件产出要求】')) {
+    // 演示「成果文件」闭环：真实写入工作目录一个文件，输出末尾报告完整绝对路径
+    const fs = require('fs');
+    const path = require('path');
+    const file = path.join(process.cwd(), 'demo-deliverable.md');
+    fs.writeFileSync(file, '# 演示成果\n\n这是演示模式下智能体写入工作目录的成果文件。\n');
+    output(`完成：任务已解决，成果文件已写入工作目录 ${DEMO_TAG}\n\n【产出文件】\n- ${file}`);
+  } else {
+    streamOutput([`[演示] 收到：${prompt.slice(0, 200)}`, '正在处理…', `完成 ${DEMO_TAG}`]);
+  }
 } else if (behavior === 'worker-good') {
   output(`完成：任务已解决，产出可用结果 ${DEMO_TAG}`);
 } else if (behavior === 'worker-bad-then-good') {
@@ -53,7 +62,13 @@ if (behavior === 'echo') {
       output(`判定：观点已充分交锋 ${DEMO_TAG}\n\`\`\`json\n{"verdict":"CONVERGED"}\n\`\`\``);
     }
   } else if (prompt.includes('最终正式回答') || prompt.includes('【各智能体产出】')) {
-    output(`[汇总] 已综合各子智能体的产出，任务完成，最终结果如下 ${DEMO_TAG}`);
+    // 汇总演示：照抄上游注入的成果文件完整路径（模拟管家按清单交付）
+    const fm = prompt.match(/【成果文件完整路径[^\n]*】\n([\s\S]*?)(?=\n\s*\n|$)/);
+    if (fm) {
+      output(`[汇总] 已综合各子智能体的产出，任务完成。\n\n成果文件：\n${fm[1].trim()}\n\n以上为最终交付 ${DEMO_TAG}`);
+    } else {
+      output(`[汇总] 已综合各子智能体的产出，任务完成（本次无成果文件） ${DEMO_TAG}`);
+    }
   } else if (prompt.includes('轮验收')) {
     const names = [...prompt.matchAll(/^【([^\s】]+) 的任务】/gm)].map(m => m[1]).filter(Boolean);
     if (prompt.includes('第 1 轮验收') && names.length > 0) {

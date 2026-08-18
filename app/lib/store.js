@@ -98,14 +98,25 @@ function saveConfig(cfg) {
 }
 
 // 保存用户自定义的子智能体列表 + 全局统一工作目录 + 执行内核（管家由内置定义补充，不接受传入）
+// 基于现有配置增量合并，保留 schedEnabled 等其他字段不被覆盖丢失
 function saveAgents(userAgents, globalCwd, kernel) {
   const cfg = getConfig();
   saveConfig({
+    ...cfg,
     defaultAgent: '',
     globalCwd: globalCwd !== undefined ? globalCwd : (cfg.globalCwd || ''),
     kernel: kernel !== undefined ? kernel : (cfg.kernel || 'auto'),
     agents: [BUTLER, ...userAgents]
   });
+}
+
+// 定时任务调度总开关（配置页侧栏「启动/关闭定时任务」按钮）
+function getSchedEnabled() {
+  return getConfig().schedEnabled !== false;
+}
+function setSchedEnabled(enabled) {
+  const cfg = getConfig();
+  saveConfig({ ...cfg, schedEnabled: !!enabled });
 }
 
 function getAgents() {
@@ -482,6 +493,8 @@ module.exports = {
   getConfig,
   saveConfig,
   saveAgents,
+  getSchedEnabled,
+  setSchedEnabled,
   getAgents,
   getTeamPresets,
   getTasks,

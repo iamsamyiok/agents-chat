@@ -206,6 +206,41 @@ function extractHandoffNote(output) {
   return m ? m[1].trim() : '';
 }
 
+// ---------- 成果文件：智能体在工作目录里真实创建/修改的文件（最终交付物） ----------
+// 与「过程存档」（data/outputs 下系统自动保存的各阶段完整输出）区分：
+// 交给用户的必须是工作目录中成果文件的完整绝对路径
+function deliverAsk() {
+  return `\n\n【文件产出要求】\n你与所有智能体共用的工作目录（所有工作记录与产出文件都保存在这里）：${resolveCwd()}\n若你在工作目录中创建或修改了文件，必须在输出最末尾附「【产出文件】」一节，逐行列出每个成果文件的完整绝对路径（以工作目录为基准拼成从根目录开始的完整路径，不要只写文件名或相对路径）；没有创建文件则不要添加这一节。`;
+}
+
+// 解析输出末尾的【产出文件】节：提取路径行 → 相对路径补全为绝对 → 过滤不存在的 → 去重
+function extractDeliverFiles(output, cwd) {
+  const m = String(output || '').match(/【产出文件】([\s\S]{0,2000}?)(?=\n\s*\n【|$)/);
+  if (!m) return [];
+  const out = [];
+  for (const line of m[1].split(/\r?\n/)) {
+    const pm = line.match(/(?:^|[\s：:])((?:[A-Za-z]:)?[\\/][^\s"'''，。；,;）)】]+)/);
+    if (!pm) continue;
+    const abs = path.resolve(cwd, pm[1]);
+    try { if (fs.existsSync(abs) && fs.statSync(abs).isFile() && !out.includes(abs)) out.push(abs); } catch { /* ignore */ }
+  }
+  return out;
+}
+
+// 汇总全部产出中的真实成果文件（去重、按时间序）
+function collectRealFiles(results) {
+  const cwdNow = resolveCwd();
+  const files = [];
+  for (const r of results) {
+    for (const f of extractDeliverFiles(r.output, cwdNow)) {
+      if (!files.includes(f)) files.push(f);
+    }
+  }
+  return files;
+}
+
+const PHASE_LABEL_CN = (ph) => ({ plan: '规划', work: '执行', review: '验收', report: '汇总', talk: '发言', task: '任务' }[ph] || '');
+
 // 结构化交接文档：给下游智能体看的「上游留下了什么」
 function buildHandoffDoc(r) {
   const status = r.output ? '已完成' : `执行失败：${String(r.error || '').slice(0, 200)}`;
@@ -512,7 +547,7 @@ ${message}
         logFlow({ run: runId, type: 'dispatch', from: butler.name, to: agent.name, stage: i + 1, summary: String(step.instruction).replace(/\s+/g, ' ').slice(0, 200) });
         let p = `【来自管家的指派】\n${step.instruction}\n\n【用户原始需求】\n${message}`;
         p = appendWorkContext(p, results, opts.history);
-        p += '\n\n请输出你的正式结果。' + (handoffDoc ? HANDOFF_ASK : '');
+        p += '\n\n请输出你的正式结果。' + deliverAsk() + (handoffDoc ? HANDOFF_ASK : '');
         const res = await runAgentOnce(agent, p, emit, 'work', 'worker', taskId, sessionDir, scope);
         setResult(agent, res.output, res.error, step.instruction, 'work', res.outputPath);
         onMessage({ role: 'assistant', agentId: agent.id, agentName: agent.name, actor: 'assistant', phase: 'work', content: (res.output || `[执行出错] ${res.error}`).slice(0, 20000), outputPath: res.outputPath || '' });
@@ -539,10 +574,14 @@ ${message}
     const workText = results.map(r =>
       `【${r.agent.name} 的任务】\n${r.instruction}\n【${r.agent.name} 的产出】\n${(r.output || `（执行失败：${r.error}）`).slice(0, CTX_PER_OUTPUT)}`
     ).join('\n\n');
-    // 产出文件清单：验收与汇总时管家可按路径读取完整成果核验/交付
+    // 产出文件清单：真实成果文件（工作目录）优先，过程存档作为补充供核验
+    const realFilesNow = collectRealFiles(results);
     const outFiles = results.filter(r => r.outputPath);
-    const filesSection = outFiles.length
-      ? `\n【产出文件（各智能体的完整成果，如需核验细节可按路径读取）】\n${outFiles.map(r => `- ${r.agent.name}：${r.outputPath}`).join('\n')}\n`
+    const filesSection = (realFilesNow.length || outFiles.length)
+      ? `\n【产出文件（如需核验细节可按路径读取）】\n${[
+          ...realFilesNow.map(f => `- 成果文件（最终交付物）：${f}`),
+          ...outFiles.map(r => `- ${r.agent.name}的过程存档（系统保存的完整输出，非最终成果）：${r.outputPath}`)
+        ].join('\n')}\n`
       : '';
 
     // 自动核查：验收前由系统本地执行的确定性检查（文件/语法/JSON/占位符/自定义命令）
@@ -616,7 +655,7 @@ ${filesSection}${autoText}
       if (ctxOthers) p += `\n\n【工作背景：其他智能体的产出】\n${ctxOthers}`;
       const otherFiles = results.filter(x => x.agent.id !== it.agentId && x.outputPath).map(x => `- ${x.agent.name}：${x.outputPath}`);
       if (otherFiles.length) p += `\n\n【其他智能体的完整产出文件】\n${otherFiles.join('\n')}`;
-      p += '\n\n请在原有产出基础上完善，不要从零重复劳动。' + (handoffDoc ? HANDOFF_ASK : '');
+      p += '\n\n请在原有产出基础上完善，不要从零重复劳动。' + deliverAsk() + (handoffDoc ? HANDOFF_ASK : '');
       logFlow({ run: runId, type: 'rework', from: butler.name, to: r.agent.name, round: reworks, summary: `${it.requirement}｜建议：${String(it.suggestion || '').replace(/\s+/g, ' ').slice(0, 150)}` });
       const res = await runAgentOnce(r.agent, p, emit, 'work', 'worker', taskId, sessionDir, scope);
       setResult(r.agent, res.output || r.output, res.output ? undefined : (res.error || r.error), it.instruction, 'work', res.outputPath || r.outputPath);
@@ -633,9 +672,17 @@ ${filesSection}${autoText}
   // ---- 4. 汇总：面向用户的正式回答 ----
   const outs = results.map(r => `【${r.agent.name}】\n${r.output || `（执行失败：${r.error}）`}`).join('\n\n');
   const deliverFiles = results.filter(r => r.outputPath);
+  // 真实成果文件：智能体在工作目录中创建/修改的文件（用户最终要的东西，完整绝对路径）
+  const realFiles = collectRealFiles(results);
+  const realSection = realFiles.length
+    ? `\n【成果文件完整路径（智能体在工作目录中真实创建的文件，务必原样照抄给用户，一个都不能漏）】\n${realFiles.map(f => `- ${f}`).join('\n')}`
+    : (deliverFiles.length
+        ? `\n【本次没有在工作目录中创建文件；以下是系统自动保存的各智能体过程存档（完整输出记录，非最终成果文件，如需提及请注明是过程记录）】\n${deliverFiles.map(r => `- ${r.agent.name} 的${PHASE_LABEL_CN(r.phase) || '阶段'}存档：${r.outputPath}`).join('\n')}`
+        : '\n（本次工作没有落盘的文件）');
   const sumPrompt = `你是「管家」。各子智能体已完成工作${accepted ? `（验收通过，共 ${reworks} 轮返工）` : `（经 ${reworks} 轮返工仍未完全达标，请如实向用户说明残留问题）`}。请向用户输出最终正式回答，用中文，要求：
 - 开头用简明准确的 3~5 句概括最终结果，直接回应用户需求，让用户一眼看懂做成了什么
-- 各智能体产出中有成果文件的，必须在回答末尾给出「成果文件」一节，逐条注明完整路径（原样照抄下方路径，不要改写、不要省略），并各用一句话说明文件内容
+- 回答末尾给出「成果文件」一节：原样照抄上方成果文件的完整路径（从根目录开始，不要改写、不要省略、不要缩写），并各用一句话说明文件内容
+- 路径中禁止出现相对路径或单独文件名；如智能体产出中提到的文件不在上方清单里，不要列入
 - 没有任何成果文件时，不要编造「成果文件」一节
 - 结构清晰、结论明确，不要输出 JSON
 
@@ -644,15 +691,15 @@ ${message}
 
 【各智能体产出】
 ${outs.slice(0, 24000)}
-${deliverFiles.length ? `\n【成果文件完整路径（务必原样告知用户）】\n${deliverFiles.map(r => `- ${r.agent.name}：${r.outputPath}`).join('\n')}` : '\n（本次工作没有落盘的成果文件）'}`;
+${realSection}`;
   const sumRes = await runAgentOnce(butler, sumPrompt, emit, 'report', 'butler', taskId, sessionDir, scope);
   const finalText = sumRes.output || outs || sumRes.error || '';
   onMessage({ role: 'assistant', agentId: butler.id, agentName: butler.name, actor: 'butler', phase: 'report', content: (finalText || '（无输出）').slice(0, 20000), outputPath: sumRes.outputPath || '' });
   logFlow({
     run: runId, type: 'finish', from: butler.name,
     summary: String(finalText).replace(/\s+/g, ' ').slice(0, 200),
-    files: deliverFiles.map(r => r.outputPath),
-    detail: { accepted, reworks }
+    files: realFiles.length ? realFiles : deliverFiles.map(r => r.outputPath),
+    detail: { accepted, reworks, realFiles }
   });
   return { ok: !sumRes.error || results.some(r => r.output), finalText };
 }

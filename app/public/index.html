@@ -26,9 +26,16 @@
   #sessionList { flex: 1; overflow-y: auto; }
   .task-empty { color: #b0b0b0; font-size: 13px; text-align: center; padding: 30px 20px; line-height: 1.8; }
   .list-sep { font-size: 11px; color: #b2b2b2; padding: 10px 14px 4px; }
-  .task-item { display: flex; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #f5f5f5; cursor: pointer; align-items: center; }
+  .task-item { display: flex; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #f5f5f5; cursor: pointer; align-items: center; position: relative; }
   .task-item:hover { background: #f7f7f7; }
   .task-item.active { background: #eef7f0; }
+  /* 未读绿点：会话有未查看的完成消息 */
+  .unread-dot { position: absolute; left: 5px; top: 50%; transform: translateY(-50%); width: 8px; height: 8px; border-radius: 50%; background: #07c160; box-shadow: 0 0 0 2px #fff; }
+  /* 任务完成右下角提醒弹窗 */
+  .done-toast { position: fixed; right: 16px; bottom: 16px; z-index: 80; width: 300px; max-width: calc(100vw - 32px); background: #fff; border: 1px solid #d9f2e3; border-left: 3px solid #07c160; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.16); cursor: pointer; overflow: hidden; animation: dt-in .25s ease; }
+  @keyframes dt-in { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .done-toast .dt-head { display: flex; align-items: center; gap: 6px; padding: 10px 12px 4px; font-size: 13px; font-weight: 600; color: #07c160; }
+  .done-toast .dt-body { padding: 0 12px 10px; font-size: 12px; color: #555; line-height: 1.6; max-height: 72px; overflow: hidden; }
   .task-avatar { width: 40px; height: 40px; border-radius: 6px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 16px; }
   .st-pending { background: #c9cdd4; }
   .st-running { background: #10aeff; animation: pulse 1.2s infinite; }
@@ -129,16 +136,15 @@
   #importAtMenu .at-item { padding: 7px 12px; display: flex; gap: 8px; align-items: center; cursor: pointer; }
   #importAtMenu .at-item:hover, #importAtMenu .at-item.active { background: #f0f7f0; }
 
-  /* 定时任务管理 */
-  .sched-row { display: flex; align-items: center; gap: 10px; padding: 10px 4px; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
-  .sched-time { color: #4a6cf7; font-weight: 600; white-space: nowrap; font-size: 12.5px; }
-  .sched-main { flex: 1; min-width: 0; }
-  .sched-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sched-sub { font-size: 11px; color: #999; margin-top: 2px; }
-  .sched-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  /* 任务视图切换（顺序/定时同一位置）+ 定时条目 */
+  .task-tabs { display: flex; gap: 6px; padding: 10px 12px 0; border-bottom: 1px solid #f0f0f0; }
+  .ttab { flex: 1; border: 1px solid #ddd; background: #fff; border-radius: 6px; padding: 7px 0; font-size: 12.5px; cursor: pointer; color: #555; }
+  .ttab.active { border-color: #07c160; color: #07c160; background: #f0faf4; font-weight: 600; }
+  .sched-time { color: #4a6cf7; white-space: nowrap; font-size: 11px; }
   .sched-btn { width: 100%; border: 1px solid #ddd; color: #555; background: #fff; border-radius: 6px; padding: 8px 0; font-size: 13px; cursor: pointer; margin-bottom: 8px; }
   .sched-btn:hover { border-color: #07c160; color: #07c160; }
   .st-scheduled { background: #8a6fe8; }
+  .run-all.off { background: #fff; color: #d54941; border: 1px solid #ecc; }
 
   /* 图标选择 */
   .icon-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
@@ -168,8 +174,8 @@
   .at-tx i { font-style: normal; color: #999; font-size: 11px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
 
   /* ---------- 弹窗 ---------- */
-  #modalMask, #agentsMask, #historyMask, #schedMask, #helpMask, #flowMask, #cardMask, #teamsMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
-  #modalMask.show, #agentsMask.show, #historyMask.show, #schedMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show { display: flex; }
+  #modalMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
+  #modalMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show { display: flex; }
   /* 团队仓库卡片 */
   .team-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
   .team-card .tc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -259,13 +265,15 @@
         <button class="mini-btn gray" onclick="clearTasks()">清空</button>
       </div>
     </div>
+    <div class="task-tabs">
+      <button class="ttab active" id="ttabSeq" onclick="setTaskView('seq')">📋 顺序任务</button>
+      <button class="ttab" id="ttabSched" onclick="setTaskView('sched')">⏰ 定时任务</button>
+    </div>
     <div id="sessionList"></div>
     <div class="side-footer">
-      <div style="display:flex;gap:6px">
-        <button class="sched-btn" onclick="openSched()">⏰ 定时任务</button>
-        <button class="sched-btn" onclick="openFlow()" id="flowBtn" title="智能体之间的派发/交接/返工可视化">🔭 流转</button>
-      </div>
       <button class="run-all" id="runAllBtn" onclick="onRunAllBtn()" style="margin-bottom:0">按顺序执行全部待办</button>
+      <button class="run-all off" id="schedPowerBtn" onclick="toggleSchedPower()" style="display:none;margin-bottom:0">⏸ 关闭定时任务</button>
+      <button class="sched-btn" onclick="openFlow()" id="flowBtn" title="智能体之间的派发/交接/返工可视化" style="margin:8px 0 0">🔭 智能体流转</button>
     </div>
   </aside>
 
@@ -332,10 +340,11 @@
       <div class="ag-row">
         <select id="kernelSel"></select>
       </div>
-      <div class="lbl" style="margin-top:10px">📁 统一工作目录（所有智能体共用）</div>
+      <div class="lbl" style="margin-top:10px">📁 工作目录（可选）</div>
+      <div class="tip" style="margin:4px 0 6px">不是上传文件：这里指定一个本机文件夹，所有智能体的工作记录与产出文件都会保存在其中。可不设置（留空则用程序默认目录）。</div>
       <div class="ag-row">
-        <input id="globalCwdInput" placeholder="本地目录完整路径，智能体产出的文件都保存在这里；留空用默认目录">
-        <button class="mini-btn" onclick="pickGlobalDir()">选择</button>
+        <input id="globalCwdInput" placeholder="文件夹完整路径，如 /Users/me/agents-work 或 D:\agents-work（可不填）">
+        <button class="mini-btn" onclick="pickGlobalDir()">选文件夹</button>
       </div>
     </div>
     <div id="agentCards"></div>
@@ -385,17 +394,6 @@
     </div>
   </div>
 </div>
-<!-- 定时任务管理弹窗 -->
-<div id="schedMask">
-  <div class="modal">
-    <h3>⏰ 定时任务</h3>
-    <div class="tip">到点自动执行（程序运行期间有效）。每个任务是独立会话，执行过程与结果可在会话中查看。</div>
-    <div id="schedList"></div>
-    <div class="modal-actions">
-      <button class="primary" onclick="closeSched()">关闭</button>
-    </div>
-  </div>
-</div>
 <!-- 使用帮助弹窗 -->
 <div id="helpMask">
   <div class="modal wide">
@@ -434,9 +432,9 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const PAGE_VERSION = '3.9.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.9.2'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
-const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', task: '任务执行' };
+const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行' };
 // 职业图标库（智能体配置可选）
 const ICON_PRESETS = ['🧑‍💻','🔍','✍️','🏗️','🎨','📊','🧪','📐','🚀','🛡️','🧭','📈','🧑‍🏫','🩺','⚖️','🔧','📖','🎬','🧙','💼','🖥️','🤖','🦉','🐝','🎯','🗂️','💡','🛠️','📡','🧠'];
 
@@ -507,7 +505,8 @@ async function init() {
   }
 
   renderMembers();
-  await Promise.all([loadTasks(), loadMessages()]);
+  await Promise.all([loadTasks(), loadMessages(), loadSchedState()]);
+  updateFooterBtns();
 
   // 版本互检：页面与服务端不一致 → 页面是旧缓存，必须强刷
   if (health.version && health.version !== PAGE_VERSION) {
@@ -544,30 +543,82 @@ function renderMembers() {
 async function loadTasks(silent) {
   const data = await api('/api/tasks');
   tasks = data.tasks || [];
+  detectBackgroundDone();
   renderSidebar();
-  if (schedOpen) renderSchedList(); // 定时任务弹窗打开时同步刷新
+}
+
+// ---------- 后台完成检测：定时任务由服务端调度执行，前端轮询感知状态变化 ----------
+// running → done 且用户没在看该会话：弹提醒 + 绿点（busy 时不拉消息避免打断流式气泡，点开时再拉）
+const prevTaskStatus = new Map();
+function detectBackgroundDone() {
+  for (const t of tasks) {
+    const prev = prevTaskStatus.get(t.id);
+    if (prev === 'running' && t.status === 'done' && t.id !== curTaskId) {
+      const title = `任务完成：${t.title}`;
+      if (!chatBusy && !taskBusy) {
+        loadMessages().then(() => showDoneToast(t.id, title));
+      } else {
+        showDoneToast(t.id, title);
+      }
+    }
+    prevTaskStatus.set(t.id, t.status);
+  }
 }
 
 function statusText(s) {
   return { pending: '待执行', running: '执行中', done: '已完成', failed: '失败' }[s] || s;
 }
 
-// 侧栏可见任务：顺序任务全部可见；定时任务仅在已触发（执行中/已完成/失败）后出现，
-// 未触发的定时任务统一收纳在「⏰ 定时任务」弹窗中管理
+// 侧栏可见任务（顺序视图）：仅顺序任务；定时任务在「⏰ 定时任务」视图中管理
 function visibleTasks() {
-  return tasks.filter(t => !(t.kind === 'scheduled' && t.status === 'pending'));
+  return tasks.filter(t => t.kind !== 'scheduled');
 }
 
 function renderSidebar() {
+  const el = document.getElementById('sessionList');
+  const badge = document.getElementById('pendingBadge');
+
+  // ---- 定时视图：全部定时任务（含未触发），按启动时间排序 ----
+  if (taskView === 'sched') {
+    const sched = tasks.filter(t => t.kind === 'scheduled').sort((a, b) => (a.scheduledAt || 0) - (b.scheduledAt || 0));
+    const pend = sched.filter(t => t.status === 'pending').length;
+    badge.style.display = pend ? 'inline' : 'none';
+    badge.textContent = pend;
+    let html;
+    if (!sched.length) {
+      html = '<div class="task-empty">暂无定时任务<br>点右上角「导入任务」→「定时任务」标签添加</div>';
+    } else {
+      html = `<div class="list-sep">定时任务（${schedEnabled ? '到点自动执行' : '调度已关闭，到点不执行'}）</div>` + sched.map(t => {
+        const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : '⏰';
+        const assign = t.assign && t.assign !== butlerId ? ` · @${esc(assignName(t.assign))}` : '';
+        const st = t.status === 'pending'
+          ? `<span class="sched-time">${fmtSched(t.scheduledAt || t.createdAt)}</span> · ${schedCountdown(t.scheduledAt)}`
+          : statusText(t.status);
+        return `<div class="task-item ${curTaskId === t.id ? 'active' : ''}" ${t.status === 'pending' ? '' : `onclick="switchSession('${escAttr(t.id)}')"`}>
+          ${unreadSess.has(t.id) ? '<span class="unread-dot"></span>' : ''}
+          <div class="task-avatar st-${t.status === 'pending' ? 'scheduled' : t.status}">${icon}</div>
+          <div class="task-main">
+            <div class="task-title">${esc(t.title)}</div>
+            <div class="task-sub"><span>${st}${assign}</span></div>
+          </div>
+          ${t.status === 'pending' ? `<button class="mini-btn" title="不再等到点，立即执行" onclick="event.stopPropagation();runSchedNow('${escAttr(t.id)}')">立即执行</button>` : ''}
+          ${t.status === 'failed' ? `<button class="mini-btn" title="重新执行" onclick="event.stopPropagation();runSchedNow('${escAttr(t.id)}')">重跑</button>` : ''}
+          <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
+        </div>`;
+      }).join('');
+    }
+    el.innerHTML = html;
+    return;
+  }
+
+  // ---- 顺序视图：主会话 + 顺序任务 ----
   const vis = visibleTasks();
   const pending = vis.filter(t => t.status === 'pending').length;
-  const schedPending = tasks.filter(t => t.kind === 'scheduled' && t.status === 'pending').length;
-  const badge = document.getElementById('pendingBadge');
   badge.style.display = pending ? 'inline' : 'none';
   badge.textContent = pending;
 
-  const el = document.getElementById('sessionList');
   const mainItem = `<div class="task-item ${curTaskId === '' ? 'active' : ''}" onclick="switchSession('')">
+    ${unreadSess.has('main') ? '<span class="unread-dot"></span>' : ''}
     <div class="task-avatar main-av">🏠</div>
     <div class="task-main">
       <div class="task-title">群聊 · 主会话</div>
@@ -577,16 +628,17 @@ function renderSidebar() {
 
   let tasksHtml;
   if (vis.length === 0) {
-    tasksHtml = `<div class="task-empty">暂无任务会话<br>点右上角「导入任务」添加顺序任务${schedPending ? `<br>⏰ 另有 ${schedPending} 个定时任务待触发` : '<br>定时任务请在下方「定时任务」按钮中管理'}</div>`;
+    tasksHtml = '<div class="task-empty">暂无顺序任务<br>点右上角「导入任务」添加<br>定时任务请切到上方「⏰ 定时任务」</div>';
   } else {
     tasksHtml = vis.map((t) => {
-      const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : (t.kind === 'scheduled' ? '⏰' : '•');
+      const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : '•';
       const assign = t.assign && t.assign !== butlerId ? ` · @${esc(assignName(t.assign))}` : '';
       return `<div class="task-item ${curTaskId === t.id ? 'active' : ''}" draggable="${!taskBusy && t.status !== 'running'}" ondragstart="onDragStart('${escAttr(t.id)}',event)" ondragover="onDragOver(event)" ondragleave="this.classList.remove('drag-over')" ondrop="onDrop('${escAttr(t.id)}',event)" onclick="switchSession('${escAttr(t.id)}')">
+        ${unreadSess.has(t.id) ? '<span class="unread-dot"></span>' : ''}
         <div class="task-avatar st-${t.status}">${icon}</div>
         <div class="task-main">
           <div class="task-title">${esc(t.title)}</div>
-          <div class="task-sub"><span>${statusText(t.status)}${assign}${t.kind === 'scheduled' ? ' · 定时' : ''}</span><span>${fmtTime(t.createdAt)}</span></div>
+          <div class="task-sub"><span>${statusText(t.status)}${assign}</span><span>${fmtTime(t.createdAt)}</span></div>
         </div>
         ${t.status === 'pending' || t.status === 'failed' ? `<button class="mini-btn" onclick="event.stopPropagation();runTask('${escAttr(t.id)}')">执行</button>` : ''}
         <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
@@ -646,9 +698,59 @@ async function delTask(id) {
 
 function switchSession(taskId) {
   curTaskId = taskId || '';
+  const wasUnread = unreadSess.has(curKey());
+  unreadSess.delete(curKey()); // 切到该会话 = 已读，清除绿点
   renderSidebar();
   renderHeader();
-  renderMessages();
+  // 有未读（后台完成过）或本地空但任务已结束（定时调度后台跑完）：从服务端拉最新消息
+  const t = curTaskId ? tasks.find(x => x.id === curTaskId) : null;
+  if (wasUnread || (t && (t.status === 'done' || t.status === 'failed') && getSess(curKey()).length === 0)) {
+    loadMessages(); // async，内部会 renderMessages
+  } else {
+    renderMessages(); // 执行中会话保留本地流式状态，避免气泡分叉
+  }
+}
+
+// ---------- 完成提醒：右下角弹窗 + 侧栏未读绿点 ----------
+// 工作中的任务保持原有「执行中」运转标识；空闲且无未读的会话无任何标识
+const unreadSess = new Set(); // 会话 key 集合：有未查看的完成消息
+let doneToastTimer = null;
+
+function markUnread(key) {
+  if (key === curKey()) return;
+  unreadSess.add(key);
+  renderSidebar();
+}
+
+// 取某会话最后一条汇总（report）消息文本，作为弹窗预览内容
+function lastReportText(taskId) {
+  const arr = getSess(sessKey(taskId));
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i].phase === 'report' && arr[i].content) return String(arr[i].content).replace(/\s+/g, ' ').trim();
+  }
+  return '';
+}
+
+// 右下角弹窗：显示最终回答部分内容，点击跳回原会话；不处理 3 秒后自动消失（保留绿点）
+function showDoneToast(taskId, title) {
+  const key = sessKey(taskId || '');
+  if (key === curKey()) return; // 用户正在看该会话，无需提醒
+  markUnread(key);
+  const old = document.querySelector('.done-toast');
+  if (old) old.remove();
+  if (doneToastTimer) { clearTimeout(doneToastTimer); doneToastTimer = null; }
+  const text = lastReportText(taskId) || '任务已完成，点击查看结果';
+  const t = document.createElement('div');
+  t.className = 'done-toast';
+  t.title = '点击查看完整对话';
+  t.innerHTML = `<div class="dt-head">✅ ${esc(title || (taskId ? '任务完成' : '已回复'))}</div><div class="dt-body">${esc(text.slice(0, 120))}${text.length > 120 ? '…' : ''}</div>`;
+  t.onclick = () => {
+    switchSession(taskId || '');
+    t.remove();
+    if (doneToastTimer) { clearTimeout(doneToastTimer); doneToastTimer = null; }
+  };
+  document.body.appendChild(t);
+  doneToastTimer = setTimeout(() => { t.remove(); doneToastTimer = null; }, 3000);
 }
 
 function renderHeader() {
@@ -698,8 +800,8 @@ function toggleFoldEl(el) {
   el.textContent = expanded ? '收起 ▴' : '展开全文 ▾';
 }
 
-// 过程类消息（执行/验收）默认折叠，仅显示约三行
-function isFoldPhase(phase) { return phase === 'work' || phase === 'review'; }
+// 过程类消息（执行/验收/圆桌发言）默认折叠，仅显示约三行；最终交付（汇总）默认完整展示
+function isFoldPhase(phase) { return phase === 'work' || phase === 'review' || phase === 'talk'; }
 
 function msgNode(m) {
   if (m.role === 'sys') {
@@ -736,7 +838,7 @@ function msgNode(m) {
     <div class="msg-body">
       <div class="msg-name">${esc(m.agentName || m.agentId || 'AI')}${m.agentId === butlerId ? ' · 管家' : ''}</div>
       ${bodyHtml}
-      ${m.outputPath ? `<div class="msg-file" title="完整产出已保存到此文件，后续智能体会直接读取完整版">📄 ${esc(m.outputPath)}</div>` : ''}
+      ${m.outputPath ? `<div class="msg-file" title="系统过程存档：该智能体本阶段完整输出（内部交接用）。用户最终要的成果文件在工作目录中，以管家交付清单里的完整路径为准">📄 过程存档 ${esc(m.outputPath)}</div>` : ''}
     </div>`;
   row.querySelector('.tx').textContent = m.content;
   m._tx = row.querySelector('.tx');
@@ -790,6 +892,17 @@ function pushPlan(ev, taskId) {
   });
 }
 
+// 封口：某智能体同阶段再次开始（如圆桌第二轮发言）时，把上一条流式消息标记结束，
+// 后续文本会新建独立气泡（否则会被错误地追加进上一轮的气泡里）
+function sealLiveStreams(ev) {
+  const key = sessKey(ev.taskId || '');
+  const sk = ev.agentId + '|' + ev.phase + '|' + key;
+  const arr = getSess(key);
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i]._sk === sk && arr[i]._live) arr[i]._live = false;
+  }
+}
+
 function onStreamText(ev) {
   const key = sessKey(ev.taskId);
   const sk = ev.agentId + '|' + ev.phase + '|' + key;
@@ -817,8 +930,8 @@ function onSaved(ev) {
       if (m._dom && document.contains(m._dom) && !m._dom.querySelector('.msg-file')) {
         const file = document.createElement('div');
         file.className = 'msg-file';
-        file.title = '完整产出已保存到此文件，后续智能体会直接读取完整版';
-        file.textContent = '📄 ' + ev.path;
+        file.title = '系统过程存档：该智能体本阶段完整输出（内部交接用）。用户最终要的成果文件在工作目录中，以管家交付清单里的完整路径为准';
+        file.textContent = '📄 过程存档 ' + ev.path;
         m._dom.querySelector('.msg-body').appendChild(file);
         scrollBottom();
       }
@@ -960,6 +1073,7 @@ function removeWorkingForTask(taskId, phase) {
 // 聊天/任务共用的流事件处理（调度过程仅展示，不进上下文由后端保证）
 function handleStreamEvent(e) {
   if (e.type === 'stage') {
+    sealLiveStreams(e); // 同一智能体同阶段的新一轮开始：封口上一条流式消息（圆桌第 N 轮各自成条）
     addWorking(e);
   } else if (e.type === 'phase') {
     addSys(`▶ 阶段 ${e.index}/${e.total}（${e.parallel ? '并行' : '串行'}）：${e.names}`, e.taskId);
@@ -974,6 +1088,8 @@ function handleStreamEvent(e) {
   } else if (e.type === 'saved') {
     removeWorkingByKey(workingKey(e));
     onSaved(e);
+    sealLiveStreams(e); // 本轮产出已落盘归档，流式消息封口
+    if (e.phase === 'report') showDoneToast(e.taskId || '', ''); // 最终交付落盘：用户已切走时右下角提醒
   } else if (e.type === 'notice') {
     addSys(e.content, e.taskId);
   } else if (e.type === 'error') {
@@ -985,8 +1101,8 @@ function handleStreamEvent(e) {
 async function runTask(taskId) { await execTasks([taskId]); }
 
 async function runAllTasks() {
-  // 顺序待办：未触发的定时任务不参与「执行全部」，由定时调度器负责
-  const pending = tasks.filter(t => (t.status === 'pending' || t.status === 'failed') && !(t.kind === 'scheduled' && t.status === 'pending'));
+  // 仅顺序任务参与「执行全部」；定时任务由定时调度器/立即执行按钮负责
+  const pending = visibleTasks().filter(t => t.status === 'pending' || t.status === 'failed');
   if (pending.length === 0) { toast('没有待执行的顺序任务'); return; }
   await execTasks(pending.map(t => t.id));
 }
@@ -1031,6 +1147,7 @@ async function execTasks(taskIds) {
         if (t) t.status = e.status;
         renderSidebar();
         addSys(`任务${e.status === 'done' ? '完成' : e.status === 'pending' ? '已停止（可重新执行）' : '失败'}：${e.title}`, e.taskId);
+        if (e.status === 'done') showDoneToast(e.taskId, `任务完成：${e.title}`); // 不在该会话时右下角提醒
       } else if (e.type === 'all_done') {
         gotAllDone = true;
         addSys('全部任务执行完毕');
@@ -1084,7 +1201,7 @@ async function openHistory() {
         html += `<div class="msg-row"><div class="avatar butler">🎩</div><div class="msg-body"><div class="msg-name">${esc(m.agentName || '管家')} · 调度规划</div><div class="bubble left plan-card"><div class="plan-thought">${esc(m.plan.thought || '')}</div>${(m.plan.phases || []).map((g, gi) => `<div class="plan-phase"><b>阶段 ${gi + 1}</b>（${g.length > 1 ? g.length + ' 项并行' : '单执行'}）${g.map(s => `<div class="plan-step">▸ <b>${esc(s.agentName)}</b>：${esc(s.instruction)}</div>`).join('')}</div>`).join('')}</div></div></div>`;
       } else {
         const tag = m.phase && PHASE_LABEL[m.phase] ? `<span class="ph">【${PHASE_LABEL[m.phase]}】</span>` : '';
-        const fileTag = m.outputPath ? `<div class="msg-file">📄 ${esc(m.outputPath)}</div>` : '';
+        const fileTag = m.outputPath ? `<div class="msg-file">📄 过程存档 ${esc(m.outputPath)}</div>` : '';
         const contentHtml = isFoldPhase(m.phase)
           ? `<div class="bubble left"><div class="fold-wrap">${tag}${esc(m.content)}</div><div class="fold-toggle" onclick="toggleFoldEl(this)">展开全文 ▾</div></div>`
           : `<div class="bubble left">${tag}${esc(m.content)}</div>`;
@@ -1228,20 +1345,48 @@ async function clearTasks() {
   await loadTasks();
 }
 
-// ---------- 定时任务管理 ----------
-let schedOpen = false;
-let schedTimer = null;
+// ---------- 定时任务（侧栏「⏰ 定时任务」视图） ----------
+let taskView = 'seq';      // 'seq' 顺序任务 | 'sched' 定时任务（同一位置切换显示）
+let schedEnabled = true;   // 定时调度总开关（服务端持久化）
 
-function openSched() {
-  schedOpen = true;
-  renderSchedList();
-  document.getElementById('schedMask').classList.add('show');
-  schedTimer = setInterval(() => { if (!document.hidden) renderSchedList(); }, 5000);
+function setTaskView(v) {
+  taskView = v;
+  document.getElementById('ttabSeq').classList.toggle('active', v === 'seq');
+  document.getElementById('ttabSched').classList.toggle('active', v === 'sched');
+  renderSidebar();
+  updateFooterBtns();
 }
-function closeSched() {
-  schedOpen = false;
-  if (schedTimer) { clearInterval(schedTimer); schedTimer = null; }
-  document.getElementById('schedMask').classList.remove('show');
+
+// 底部主按钮：顺序视图=执行全部/停止；定时视图=启动/关闭定时调度
+function updateFooterBtns() {
+  const run = document.getElementById('runAllBtn');
+  const sp = document.getElementById('schedPowerBtn');
+  const isSeq = taskView === 'seq';
+  run.style.display = isSeq ? '' : 'none';
+  sp.style.display = isSeq ? 'none' : '';
+  if (!isSeq) {
+    sp.textContent = schedEnabled ? '⏸ 关闭定时任务' : '▶ 启动定时任务';
+    sp.classList.toggle('off', !schedEnabled);
+    sp.disabled = false;
+  }
+}
+
+async function toggleSchedPower() {
+  const data = await api('/api/sched/toggle', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !schedEnabled })
+  });
+  if (data.success) {
+    schedEnabled = !!data.enabled;
+    updateFooterBtns();
+    toast(schedEnabled ? '定时任务已启动：到点的任务将自动执行' : '定时任务已关闭：到点不再自动执行（已触发的照常运行）');
+  } else toast(data.error || '操作失败');
+}
+
+async function loadSchedState() {
+  try {
+    const data = await api('/api/sched');
+    if (data.success) { schedEnabled = !!data.enabled; updateFooterBtns(); }
+  } catch { /* ignore */ }
 }
 
 function schedCountdown(ts) {
@@ -1254,55 +1399,9 @@ function schedCountdown(ts) {
   return `${Math.floor(h / 24)} 天 ${h % 24} 小时后`;
 }
 
-async function renderSchedList() {
-  // 弹窗内实时刷新，独立拉取最新列表
-  let list;
-  try { list = (await api('/api/tasks')).tasks || []; } catch { return; }
-  tasks = list;
-  const sched = list.filter(t => t.kind === 'scheduled').sort((a, b) => (a.scheduledAt || 0) - (b.scheduledAt || 0));
-  const el = document.getElementById('schedList');
-  if (!sched.length) {
-    el.innerHTML = '<div class="task-empty">暂无定时任务<br>点右上角「导入任务」→「定时任务」标签添加</div>';
-    return;
-  }
-  el.innerHTML = sched.map(t => {
-    const st = t.status === 'pending' ? '⏳ ' + schedCountdown(t.scheduledAt) : statusText(t.status);
-    const assign = t.assign && t.assign !== butlerId ? ` · @${esc(assignName(t.assign))}` : '';
-    return `<div class="sched-row">
-      <span class="sched-time">${fmtSched(t.scheduledAt || t.createdAt)}</span>
-      <div class="sched-main">
-        <div class="sched-title">${esc(t.title)}</div>
-        <div class="sched-sub">${st}${assign}</div>
-      </div>
-      <div class="sched-actions">
-        ${t.status === 'pending' ? `<button class="mini-btn" title="不再等到点，立即执行" onclick="runSchedNow('${escAttr(t.id)}')">立即执行</button>` : ''}
-        ${t.status === 'failed' ? `<button class="mini-btn" onclick="runSchedNow('${escAttr(t.id)}')">重跑</button>` : ''}
-        <button class="mini-btn danger" title="删除定时任务" onclick="delSched('${escAttr(t.id)}')">✕</button>
-      </div>
-    </div>`;
-  }).join('');
-}
-
 async function runSchedNow(id) {
   if (taskBusy) { toast('正在执行中，请先停止当前批次'); return; }
-  closeSched();
   await execTasks([id]);
-}
-
-async function delSched(id) {
-  const t = tasks.find(x => x.id === id);
-  if (!confirm(`删除定时任务「${t ? t.title : ''}」${t && t.status !== 'pending' ? '及其会话记录' : ''}？`)) return;
-  const data = await api('/api/tasks/delete', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id })
-  });
-  if (data.success) {
-    tasks = data.tasks || [];
-    renderSidebar();
-    renderSchedList();
-    await loadMessages();
-    renderMessages();
-    toast('定时任务已删除');
-  } else toast(data.error || '删除失败');
 }
 
 // ---------- 流转视图（智能体工作状态与信息传递可视化） ----------
@@ -1898,7 +1997,7 @@ function openHelp() {
       <li>支持四种内核：<b>OpenCode</b>（多 Provider）、<b>Claude Code</b>（Anthropic）、<b>Codex</b>（OpenAI）、<b>pi</b>（多 Provider），安装即可被自动识别</li>
       <li>「⚙ 智能体配置」顶部的下拉框选择内核：「自动」按检测顺序取第一个已安装的，或指定某一内核</li>
       <li>切换内核后所有智能体（含管家）统一使用新内核执行；认证、模型、密钥都在各内核自己的 CLI 里配置</li>
-      <li>各内核能力一致：读写文件、执行命令、联网检索，产出统一保存在「统一工作目录」</li>
+      <li>各内核能力一致：读写文件、执行命令、联网检索，工作记录与产出统一保存在「工作目录」</li>
     </ul>
   </div>
   <div class="help-sec"><h4>💬 聊天与 @ 点名</h4>
@@ -1918,24 +2017,20 @@ function openHelp() {
     </ol>
     <p>每个智能体执行时聊天流会显示「正在执行…」动画条；工具调用过程（读写文件、执行命令）也会实时展示。</p>
   </div>
-  <div class="help-sec"><h4>📋 任务队列（顺序任务）</h4>
+  <div class="help-sec"><h4>📋 顺序任务 / ⏰ 定时任务（同一位置切换）</h4>
     <ul>
-      <li>「导入任务」→ 顺序任务标签：每行 <code>1.</code> <code>2.</code> 编号，行末可 <code>@智能体</code> 指派</li>
-      <li>指派管家（或不指派）→ 管家调度多个智能体完成；指派子智能体 → 它独立完成</li>
-      <li>任务按编号顺序执行；单个点「执行」，或底部按钮「按顺序执行全部待办」</li>
-      <li>每个任务 = 独立会话，互不干扰；列表可拖拽调序；执行中可点红色「停止执行」中止</li>
-    </ul>
-  </div>
-  <div class="help-sec"><h4>⏰ 定时任务</h4>
-    <ul>
-      <li>「导入任务」→ 定时任务标签：行首写启动时间（<code>20260818-1307</code>），输入 <code>[]</code> 自动填入当前时间</li>
-      <li>到点自动执行（需程序保持运行）；所有定时任务统一在左侧「⏰ 定时任务」按钮中管理</li>
-      <li>弹窗内可查看倒计时与状态，支持「立即执行」「重跑」「删除」</li>
+      <li>左侧任务栏顶部开关：「📋 顺序任务」与「⏰ 定时任务」两个标签页在同一位置切换显示</li>
+      <li>顺序任务视图下，底部按钮为「按顺序执行全部待办」（执行中变红色「停止执行」）</li>
+      <li>定时任务视图下，底部按钮变为「▶ 启动 / ⏸ 关闭定时任务」（总开关，关闭后到点不再自动执行）</li>
+      <li><b>顺序任务</b>：「导入任务」→ 顺序任务标签，每行 <code>1.</code> <code>2.</code> 编号，行末可 <code>@智能体</code> 指派；任务按编号顺序执行，列表可拖拽调序，每个任务 = 独立会话</li>
+      <li><b>定时任务</b>：「导入任务」→ 定时任务标签，行首写启动时间（<code>20260818-1307</code>），输入 <code>[]</code> 自动填入当前时间；到点自动执行（需程序保持运行）</li>
+      <li>定时任务视图显示启动时间与倒计时，支持「立即执行」「重跑」「删除」；点击已触发的任务可查看其会话</li>
+      <li><b>完成提醒</b>：任务完成时右下角弹窗显示最终回答部分内容，点击跳回该会话；不处理 3 秒后自动消失，会话左侧留绿色小圆点标记未读（执行中的任务显示「执行中」运转标识；空闲且无未读则无标识）</li>
     </ul>
   </div>
   <div class="help-sec"><h4>🔭 流转视图（智能体协作可视化）</h4>
     <ul>
-      <li>左侧「🔭 流转」打开泳道时间线：每个智能体一条泳道，展示派发、执行、交接、返工全过程</li>
+      <li>左侧底部「🔭 智能体流转」打开泳道时间线：每个智能体一条泳道，展示派发、执行、交接、返工全过程</li>
       <li>绿色块=执行完成，红色块=失败，虚线动画块=执行中；蓝色曲线=交接（产出交给下游），橙色曲线=返工</li>
       <li>点击执行块 / 连线 / 圆点查看详情：任务指令、交接说明、成果文件路径</li>
       <li>顶部下拉切换历史编排记录，勾选「自动刷新」可实时观察进行中的任务</li>
@@ -1953,6 +2048,7 @@ function openHelp() {
     <ul>
       <li>输入栏「💬 圆桌」按钮开启后发送 = 发起圆桌：被 <code>@</code> 的智能体上桌（不 <code>@</code> 则全体子智能体），管家当主持人</li>
       <li>成员轮流发言，能看到彼此观点并反驳；每轮结束主持人判定是否收敛，未收敛会给出下一轮聚焦问题引导讨论</li>
+      <li>每轮每位智能体的发言都以独立气泡显示，默认折叠为约三行（点「展开全文」查看），只有管家的最终总结完整展示</li>
       <li>默认最多 2 轮（.env 中 <code>AGENTS_CHAT_ROUNDTABLE_ROUNDS</code> 可调）、每次发言限 600 字，防止讨论失控</li>
       <li>结束后管家输出总结：<b>共识 / 分歧（注明持方）/ 建议行动</b>；发言与总结都存档，流转视图可回溯（紫色 ⚖ 圆点为主持人判定）</li>
     </ul>
@@ -1983,9 +2079,10 @@ function openHelp() {
   </div>
   <div class="help-sec"><h4>📄 产出文件与数据</h4>
     <ul>
-      <li>每份正式产出完整保存在 <code>.data/outputs/&lt;会话&gt;/</code>，消息下方紫色的 📄 路径即指向它，后续智能体也会读取完整版</li>
+      <li><b>成果文件</b>（用户最终要的东西）：智能体在「工作目录」中真实创建的文件；管家最终交付时会列出每个成果文件的完整绝对路径</li>
+      <li><b>过程存档</b>：每份正式输出完整保存在 <code>.data/outputs/&lt;会话&gt;/</code>，消息下方紫色的「📄 过程存档」路径指向它，供核验与内部交接，非最终成果</li>
       <li>全部数据在 <code>.data/</code> 目录（聊天、任务、配置）；网页里可「清空」，删除 .data/ = 恢复出厂</li>
-      <li>智能体读写文件的默认位置：配置的「统一工作目录」，或 <code>.data/workspace/</code></li>
+      <li>智能体读写文件的默认位置：配置页设置的「工作目录」（可选），或 <code>.data/workspace/</code></li>
     </ul>
   </div>
   <div class="help-sec"><h4>❓ 常见问题</h4>

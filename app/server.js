@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.9.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.9.2'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -245,6 +245,19 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/teams' && req.method === 'GET') {
     // 团队仓库：经典智能体团队预设（前端展示与应用）
     json(res, 200, { success: true, teams: store.getTeamPresets() });
+    return;
+  }
+
+  if (p === '/api/sched' && req.method === 'GET') {
+    // 定时任务调度总开关状态（侧栏「启动/关闭定时任务」按钮）
+    json(res, 200, { success: true, enabled: store.getSchedEnabled() });
+    return;
+  }
+  if (p === '/api/sched/toggle' && req.method === 'POST') {
+    const body = await readBody(req);
+    const enabled = !!body.enabled;
+    store.setSchedEnabled(enabled);
+    json(res, 200, { success: true, enabled });
     return;
   }
 
@@ -522,6 +535,7 @@ const SCHED_INTERVAL_MS = 15000;
 function startScheduler() {
   const timer = setInterval(() => {
     if (runLocks.tasks) return; // 手动批次执行中，下轮再查
+    if (store.getSchedEnabled() === false) return; // 用户关闭了定时调度总开关
     const due = store.getTasks().filter(t =>
       t.kind === 'scheduled' && t.status === 'pending' && t.scheduledAt && t.scheduledAt <= Date.now());
     if (!due.length) return;
