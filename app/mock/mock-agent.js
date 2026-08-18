@@ -25,7 +25,13 @@ function streamOutput(lines) {
 }
 
 if (behavior === 'echo') {
-  if (prompt.includes('【文件产出要求】')) {
+  if (prompt.includes('【委派背景】')) {
+    // 中途委派演示：接手方正常完成，并附一条看板更新（验证共享看板的主动写入通道）
+    output(`完成：已接手委派任务并解决，供后续协作者参考 ${DEMO_TAG}\n\n【看板更新】\n1. 已确认该任务由我接手，前一位智能体的参考内容已消化`);
+  } else if (prompt.includes('委派测试')) {
+    // 中途委派演示：自认职责错配，输出委派 JSON 转交研究员
+    output(`这个任务需要数据调研能力，我无法胜任，转交更合适的人 ${DEMO_TAG}\n\n\`\`\`json\n{"handoff":"研究员","reason":"该任务核心是数据调研，我缺少相应能力"}\n\`\`\``);
+  } else if (prompt.includes('【文件产出要求】')) {
     // 演示「成果文件」闭环：真实写入工作目录一个文件，输出末尾报告完整绝对路径
     const fs = require('fs');
     const path = require('path');

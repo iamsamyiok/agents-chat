@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.10.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.11.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -36,6 +36,32 @@ const store = require('./lib/store');
 const { runAgent, stopScope, stopAllChildren } = require('./lib/agent');
 const { runButler, runMentioned, runRoundtable, runTasks, prepareRerun } = require('./lib/orchestrator');
 const memoryMod = require('./lib/memory');
+
+// ---------- 人工审批关卡：orchestrator 暂停等待用户放行（方案/交付），SSE 断线后可经 /api/approvals 恢复 ----------
+const pendingApprovals = new Map(); // approvalId -> {kind,label,taskId,resolve,timer}
+const APPROVAL_TIMEOUT_MS = Number(process.env.AGENTS_CHAT_APPROVAL_TIMEOUT_MS) > 0
+  ? Number(process.env.AGENTS_CHAT_APPROVAL_TIMEOUT_MS) : 600000; // 默认 10 分钟未审批视为拒绝
+
+function makeRequestApproval() {
+  return (kind, label, taskId) => new Promise((resolve) => {
+    const id = 'apr-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+    const timer = setTimeout(() => finishApproval(id, false, true), APPROVAL_TIMEOUT_MS);
+    pendingApprovals.set(id, { kind, label, taskId: taskId || '', resolve, timer, createdAt: new Date().toISOString() });
+  });
+}
+function finishApproval(id, approved, timedOut) {
+  const a = pendingApprovals.get(id);
+  if (!a) return null;
+  clearTimeout(a.timer);
+  pendingApprovals.delete(id);
+  a.resolve(!!approved);
+  return { ...a, timedOut: !!timedOut };
+}
+// 审批模式：'off' | 'plan'（方案后）| 'verify'（交付前）| 'all'；config.approval 优先，其次 env 默认
+function approvalSetting() {
+  const v = String(store.getConfig().approval || process.env.AGENTS_CHAT_APPROVAL || 'off').toLowerCase();
+  return ['off', 'plan', 'verify', 'all'].includes(v) ? v : 'off';
+}
 
 // ---------- 执行互斥与停止控制 ----------
 // chat / tasks 两个作用域各自单飞（防止双击或 API 直调并发执行）；
@@ -179,6 +205,26 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (p === '/api/approvals' && req.method === 'GET') {
+    // 当前等待中的审批（前端刷新/断线重连后恢复审批卡片）
+    json(res, 200, {
+      success: true,
+      approvals: [...pendingApprovals.entries()].map(([id, a]) => ({ id, kind: a.kind, label: a.label, taskId: a.taskId, createdAt: a.createdAt }))
+    });
+    return;
+  }
+
+  if (p === '/api/approval' && req.method === 'POST') {
+    // 审批裁决：approved=true 放行继续编排；false 终止编排
+    const body = await readBody(req);
+    const id = String(body.id || '');
+    const a = pendingApprovals.get(id);
+    if (!a) { json(res, 404, { success: false, error: '审批不存在或已处理' }); return; }
+    finishApproval(id, !!body.approved, false);
+    json(res, 200, { success: true, id, approved: !!body.approved });
+    return;
+  }
+
   if (p === '/api/flow/runs' && req.method === 'GET') {
     // 最近编排列表（流转视图的 run 选择器）
     json(res, 200, { success: true, runs: store.listFlowRuns(40) });
@@ -221,6 +267,7 @@ const server = http.createServer(async (req, res) => {
     const opts = {
       taskId, history: buildHistoryText(taskId), scope: 'chat',
       isStopped: () => stopTokens.chat !== myToken,
+      approval: approvalSetting(), requestApproval: makeRequestApproval(),
       resume: { phases: prepared.phases, priorResults: prepared.priorResults, fromStage: prepared.fromStage, baseRun: runId }
     };
     const send = sse(req, res);
@@ -239,7 +286,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/agents' && req.method === 'GET') {
-    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '', kernel: String(store.getConfig().kernel || 'auto') });
+    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '', kernel: String(store.getConfig().kernel || 'auto'), approval: approvalSetting() });
     return;
   }
 
@@ -343,8 +390,11 @@ const server = http.createServer(async (req, res) => {
     if (kernel !== 'auto' && !detectKernels()[kernel].ok) {
       dirWarn.push(`已选择内核 ${kernelDef.label}，但本机未检测到（${kernelDef.install}），保存后任务将无法执行`);
     }
-    store.saveAgents(clean, globalCwd, kernel);
-    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '', kernel: String(store.getConfig().kernel || 'auto'), warnings: dirWarn });
+    // 审批模式（协作关卡）：off=关闭 / plan=方案后 / verify=交付前 / all=两者
+    const approvalIn = String(body.approval || '').toLowerCase();
+    const approval = ['off', 'plan', 'verify', 'all'].includes(approvalIn) ? approvalIn : undefined;
+    store.saveAgents(clean, globalCwd, kernel, approval);
+    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '', kernel: String(store.getConfig().kernel || 'auto'), approval: approvalSetting(), warnings: dirWarn });
     return;
   }
 
@@ -463,7 +513,7 @@ const server = http.createServer(async (req, res) => {
     const clean = stripMentions(message) || message;
 
     // 先构建历史背景（此时还不含当前消息），再落库当前用户消息
-    const opts = { taskId, history: buildHistoryText(taskId), scope: 'chat', isStopped: () => stopTokens.chat !== myToken };
+    const opts = { taskId, history: buildHistoryText(taskId), scope: 'chat', isStopped: () => stopTokens.chat !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval() };
     store.addMessage({ role: 'user', content: message, taskId, timestamp: new Date().toISOString() });
 
     const send = sse(req, res);
@@ -537,7 +587,7 @@ async function executeTaskBatch(selected, send, myToken) {
   const persist = (m) => store.addMessage({ ...m, timestamp: new Date().toISOString() });
   await runTasks(
     selected, butler, subAgents,
-    { getHistory: (tid) => buildHistoryText(tid), resolveAssign, scope: 'tasks', isStopped: () => stopTokens.tasks !== myToken },
+    { getHistory: (tid) => buildHistoryText(tid), resolveAssign, scope: 'tasks', isStopped: () => stopTokens.tasks !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval() },
     send, persist,
     // 任务会话首条消息：任务本身（用户视角）
     (task) => {

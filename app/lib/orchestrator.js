@@ -263,6 +263,118 @@ function buildHandoffDoc(r) {
 // 要求智能体输出末尾附交接说明（仅 doc 模式注入）
 const HANDOFF_ASK = '\n\n另外：你处于多智能体协作流程中，请在输出末尾附加一段「【交接说明】」，用 1~3 条要点告诉接手的协作者关键信息（重要决策、踩过的坑、注意事项或建议）；若确实无可奉告可省略。';
 
+// ---------- 共享黑板：任务级共享状态文件（借鉴黑板架构；同轮编排全体协作者可读可写） ----------
+// 与交接文档的分工：交接文档是「前序产出给直接下游」的全文通道；看板是「全体协作者共享」的轻量进展/决定/提醒流
+const BOARD_ASK = '\n另外：若本步工作做出了影响后续工作的关键决定、或发现需要注意的风险，请在输出末尾附加「【看板更新】」用 1~2 条要点写明（会同步到全体协作者共享的看板）；无则省略。';
+
+function boardPathOf(sessionDir) { return path.join(sessionDir, 'BOARD.md'); }
+
+function boardInit(sessionDir, message, roster) {
+  try {
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(boardPathOf(sessionDir),
+      `# 共享看板\n\n【任务】${String(message).replace(/\s+/g, ' ').slice(0, 200)}\n【团队】${roster}\n\n## 进展\n`, 'utf8');
+    return boardPathOf(sessionDir);
+  } catch { return ''; }
+}
+
+// 从产出中提取「看板更新」块（智能体主动写给全体协作者的提醒/决定）
+function extractBoardNote(output) {
+  if (!output) return '';
+  const m = String(output).match(/【看板更新】([\s\S]{1,600}?)(?=\n\s*\n【|$)/);
+  return m ? m[1].replace(/\s+/g, ' ').trim() : '';
+}
+
+function boardAppend(sessionDir, stageLabel, agentName, summary, note, files) {
+  try {
+    const p = boardPathOf(sessionDir);
+    if (!fs.existsSync(p)) return;
+    const lines = [`- [${stageLabel}] ${agentName}：${String(summary || '').replace(/\s+/g, ' ').slice(0, 120)}`];
+    if (files && files.length) lines.push(`  - 成果文件：${files.join('、')}`);
+    if (note) lines.push(`  - 看板更新：${note.slice(0, 300)}`);
+    fs.appendFileSync(p, lines.join('\n') + '\n', 'utf8');
+  } catch { /* 看板写失败不影响主流程 */ }
+}
+
+function boardRead(sessionDir, maxLen) {
+  const limit = maxLen || 1600;
+  try {
+    const t = fs.readFileSync(boardPathOf(sessionDir), 'utf8');
+    return t.length > limit ? t.slice(0, limit) + '\n…（更早已截断）' : t;
+  } catch { return ''; }
+}
+
+// ---------- 中途委派：子智能体自认职责错配时改派名单内他人（借鉴 OpenAI Swarm handoff） ----------
+// 约定输出 {"handoff":"智能体名称","reason":"原因"}；只认「产出主体就是委派 JSON」的情况，防止误判正常产出
+function parseHandoff(output) {
+  const text = String(output || '').trim();
+  if (!text || text.length > 800 || !text.includes('handoff')) return null;
+  const blocks = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].map(m => m[1]);
+  const s = text.indexOf('{');
+  const e = text.lastIndexOf('}');
+  if (s >= 0 && e > s) blocks.push(text.slice(s, e + 1));
+  for (const b of blocks) {
+    try {
+      const j = JSON.parse(b);
+      if (j && typeof j.handoff === 'string' && j.handoff.trim()) {
+        return { to: j.handoff.trim(), reason: String(j.reason || '').slice(0, 500) };
+      }
+    } catch { /* 尝试下一个块 */ }
+  }
+  return null;
+}
+
+const HANDOFF_DELEGATE_ASK = `\n\n【中途委派】若你判断这个任务更适合名单中的另一位智能体完成（职责错配、你缺乏相应能力或信息），且你尚未开展实质工作，可以只输出一行 JSON 放弃接手：{"handoff":"目标智能体名称","reason":"简要原因"}；管家会把任务连同你的说明转交给对方。能胜任时严禁使用。`;
+
+// 带防循环上限的委派执行：返回最终执行的 {agent, res, delegated}；链上限 2 次（A→B→C 封顶）
+async function runWithHandoff(agent, prompt, roster, opts, emit, phase, role, taskId, sessionDir, scope, isStopped) {
+  let current = agent;
+  let p = prompt + HANDOFF_DELEGATE_ASK;
+  let chain = 0;
+  let res;
+  const trail = [];
+  while (true) {
+    res = await runAgentOnce(current, p, emit, phase, role, taskId, sessionDir, scope);
+    const ho = chain < 2 && !isStopped() ? parseHandoff(res.output) : null;
+    if (!ho) break;
+    const target = roster.find(a => (a.name === ho.to || a.id === ho.to) && a.id !== current.id);
+    if (!target) {
+      emit({ type: 'notice', content: `↪ 委派目标「${ho.to}」不在名单内，忽略委派、沿用当前产出`, taskId });
+      break;
+    }
+    chain++;
+    trail.push({ from: current.name, to: target.name, reason: ho.reason });
+    emit({ type: 'notice', content: `↪ ${current.name} 请求委派：${ho.reason} → 改派 ${target.name}（第 ${chain} 次转交）`, taskId });
+    p = prompt + `\n\n【委派背景】${current.name} 已接手但判断此任务更适合你，原因：${ho.reason}\n其已产出的参考内容：\n${String(res.output || '').slice(0, 2000)}` + HANDOFF_DELEGATE_ASK;
+    current = target;
+  }
+  return { agent: current, res, trail };
+}
+
+// ---------- 人工审批关卡：规划后 / 交付前暂停等待用户放行（借鉴 LangGraph interrupt / OpenAI 审批模式） ----------
+// 审批等待期间用户点「停止」或审批超时都视为拒绝；全部走 opts.requestApproval（由 server 注入），orchestrator 不感知 HTTP
+async function approvalGate(kind, label, opts, emit, isStopped, taskId) {
+  const mode = String((opts && opts.approval) || 'off');
+  if (mode !== 'all' && mode !== kind) return true;
+  if (!opts || typeof opts.requestApproval !== 'function') return true;
+  emit({ type: 'notice', content: `⏸ ${label} — 已暂停，等待人工审批`, taskId });
+  let settled = false;
+  const stopWatcher = (async () => {
+    while (!settled && !isStopped()) await new Promise(r => setTimeout(r, 800));
+    return false;
+  })();
+  const approved = await Promise.race([
+    Promise.resolve(opts.requestApproval(kind, label, taskId)),
+    stopWatcher
+  ]).finally(() => { settled = true; });
+  if (approved) {
+    emit({ type: 'notice', content: `✔ 审批通过：${label}`, taskId });
+  } else {
+    emit({ type: 'notice', content: `✘ 审批未通过（拒绝或超时）：${label}，编排终止`, taskId });
+  }
+  return approved;
+}
+
 function appendWorkContext(prompt, results, history) {
   let p = prompt;
   if (HANDOFF_MODE() === 'full') {
@@ -547,6 +659,17 @@ ${message}
   logFlow({ run: runId, type: 'plan', from: butler.name, summary: (planMsg.thought || '').replace(/\s+/g, ' ').slice(0, 200), detail: { phases: planMsg.phases } });
   } // endif 非重跑的规划分支
 
+  // 方案审批关卡：规划确定后、动工前等待用户放行（approval=plan/all 时启用）
+  if (phases.length > 0 && !(await approvalGate('plan', `调度方案：${phases.length} 个阶段，涉及 ${[...new Set(phases.flat().map(s => s.agentName || s.agent))].filter(Boolean).join('、')}`, opts, emit, isStopped, taskId))) {
+    return { ok: false, finalText: '用户否决了调度方案，编排已终止（可修改需求后重新发起）', stopped: true };
+  }
+
+  // 共享看板：本轮编排全体协作者的进展/决定/提醒（每轮独立，重跑时前序产出概要一并写入）
+  boardInit(sessionDir, message, subAgents.map(a => a.name).join('、') || '（管家独自处理）');
+  if (resume && results.length) {
+    for (const r of results) boardAppend(sessionDir, `复用·${PHASE_LABEL_CN(r.phase) || r.phase}`, r.agent.name, String(r.output || '').replace(/\s+/g, ' ').slice(0, 100), extractBoardNote(r.output), r.outputPath ? [r.outputPath] : []);
+  }
+
   // ---- 2. 执行各阶段（阶段内并行，分批限流；重跑从 startStage 起步） ----
   for (let i = startStage - 1; i < phases.length; i++) {
     if (isStopped()) {
@@ -577,15 +700,24 @@ ${message}
         logFlow({ run: runId, type: 'dispatch', from: butler.name, to: agent.name, stage: i + 1, summary: String(step.instruction).replace(/\s+/g, ' ').slice(0, 200) });
         let p = `【来自管家的指派】\n${step.instruction}\n\n【用户原始需求】\n${message}`;
         p = appendWorkContext(p, results, opts.history);
-        p += '\n\n请输出你的正式结果。' + deliverAsk() + (handoffDoc ? HANDOFF_ASK : '');
-        const res = await runAgentOnce(agent, p, emit, 'work', 'worker', taskId, sessionDir, scope);
-        setResult(agent, res.output, res.error, step.instruction, 'work', res.outputPath);
-        onMessage({ role: 'assistant', agentId: agent.id, agentName: agent.name, actor: 'assistant', phase: 'work', content: (res.output || `[执行出错] ${res.error}`).slice(0, 20000), outputPath: res.outputPath || '' });
+        const boardText = boardRead(sessionDir);
+        if (boardText) p += `\n\n【共享看板（本轮任务全体协作者的进展与提醒，含并行同伴的已完成阶段）】\n${boardText}`;
+        p += '\n\n请输出你的正式结果。' + deliverAsk() + (handoffDoc ? HANDOFF_ASK : '') + BOARD_ASK;
+        const { agent: finalAgent, res, trail } = await runWithHandoff(agent, p, subAgents, opts, emit, 'work', 'worker', taskId, sessionDir, scope, isStopped);
+        for (const t of trail) {
+          logFlow({ run: runId, type: 'handoff', from: t.from, to: t.to, stage: i + 1, summary: `中途委派：${t.reason}`, detail: { delegate: true } });
+        }
+        setResult(finalAgent, res.output, res.error, step.instruction, 'work', res.outputPath);
+        onMessage({ role: 'assistant', agentId: finalAgent.id, agentName: finalAgent.name, actor: 'assistant', phase: 'work', content: (res.output || `[执行出错] ${res.error}`).slice(0, 20000), outputPath: res.outputPath || '' });
+        boardAppend(sessionDir, `阶段${i + 1}`, finalAgent.name,
+          res.output ? String(res.output).replace(/\s+/g, ' ').slice(0, 100) : `执行失败：${String(res.error || '').slice(0, 80)}`,
+          extractBoardNote(res.output),
+          extractDeliverFiles(res.output, resolveCwd()));
         logFlow({
-          run: runId, type: 'done', to: agent.name, stage: i + 1,
-          summary: (res.output ? '完成' : `失败：${String(res.error || '').slice(0, 120)}`),
+          run: runId, type: 'done', to: finalAgent.name, stage: i + 1,
+          summary: (res.output ? '完成' : `失败：${String(res.error || '').slice(0, 120)}`) + (trail.length ? `（经 ${trail.length} 次委派）` : ''),
           files: res.outputPath ? [res.outputPath] : [],
-          detail: { ok: !!res.output }
+          detail: { ok: !!res.output, delegatedFrom: trail.length ? trail[0].from : '' }
         });
       })()));
     }
@@ -630,6 +762,7 @@ ${message}
 【用户原始需求】
 ${message}
 ${memOn && memory.memoryBlock(['user']) ? `\n【用户偏好（验收标准参考，如语言、格式、风格偏好）】\n${memory.memoryBlock(['user'])}\n` : ''}
+${boardRead(sessionDir, 1200) ? `【共享看板（各智能体自报的进展与提醒，仅供交叉参照）】\n${boardRead(sessionDir, 1200)}\n` : ''}
 【各智能体的任务与产出】
 ${workText.slice(0, 24000)}
 ${filesSection}${autoText}
@@ -690,6 +823,7 @@ ${filesSection}${autoText}
       const res = await runAgentOnce(r.agent, p, emit, 'work', 'worker', taskId, sessionDir, scope);
       setResult(r.agent, res.output || r.output, res.output ? undefined : (res.error || r.error), it.instruction, 'work', res.outputPath || r.outputPath);
       onMessage({ role: 'assistant', agentId: r.agent.id, agentName: r.agent.name, actor: 'assistant', phase: 'work', content: (res.output || `[返工出错] ${res.error}`).slice(0, 20000), outputPath: res.outputPath || '' });
+      if (res.output) boardAppend(sessionDir, `返工${reworks}`, r.agent.name, String(res.output).replace(/\s+/g, ' ').slice(0, 100), extractBoardNote(res.output), extractDeliverFiles(res.output, resolveCwd()));
       logFlow({
         run: runId, type: 'done', to: r.agent.name, round: reworks,
         summary: (res.output ? `第 ${reworks} 轮返工完成` : `返工失败：${String(res.error || '').slice(0, 120)}`),
@@ -700,6 +834,10 @@ ${filesSection}${autoText}
   }
 
   // ---- 4. 汇总：面向用户的正式回答 ----
+  // 交付审批关卡：验收通过后、正式交付前等待用户放行（approval=verify/all 时启用）
+  if (!(await approvalGate('verify', `交付确认：${accepted ? '验收通过' : `经 ${reworks} 轮返工仍有残留问题`}`, opts, emit, isStopped, taskId))) {
+    return { ok: false, finalText: '用户否决了本次交付，编排已终止（各智能体产出已保存在会话产出目录，可在流转视图中断点重跑）', stopped: true };
+  }
   const outs = results.map(r => `【${r.agent.name}】\n${r.output || `（执行失败：${r.error}）`}`).join('\n\n');
   const deliverFiles = results.filter(r => r.outputPath);
   // 真实成果文件：智能体在工作目录中创建/修改的文件（用户最终要的东西，完整绝对路径）
@@ -773,14 +911,16 @@ async function runMentioned(mentionAgents, message, opts, emit, onMessage) {
     }
     logFlow({ run: runId, type: 'dispatch', from: i === 0 ? '用户' : mentionAgents[i - 1].name, to: agent.name, stage: i + 1, summary: String(message).replace(/\s+/g, ' ').slice(0, 200) });
     const p = appendWorkContext(message, results, opts.history) + (handoffDoc && role === 'worker' ? HANDOFF_ASK : '');
-    const res = await runAgentOnce(agent, p, emit, 'work', role, taskId, sessionDir, scope);
-    results.push({ agent, output: res.output, error: res.error, instruction: String(message).slice(0, 300), phase: 'work', outputPath: res.outputPath });
+    // 中途委派：@点名流水线同样允许转交给名单内其他智能体（含管家改派子智能体之外的对象）
+    const { agent: finalAgent, res, trail } = await runWithHandoff(agent, p, mentionAgents, opts, emit, 'work', role, taskId, sessionDir, scope, isStopped);
+    for (const t of trail) logFlow({ run: runId, type: 'handoff', from: t.from, to: t.to, stage: i + 1, summary: `中途委派：${t.reason}`, detail: { delegate: true } });
+    results.push({ agent: finalAgent, output: res.output, error: res.error, instruction: String(message).slice(0, 300), phase: 'work', outputPath: res.outputPath });
     if (res.output || res.error) {
-      onMessage({ role: 'assistant', agentId: agent.id, agentName: agent.name, actor: 'assistant', phase: 'work', content: (res.output || `[执行出错] ${res.error}`).slice(0, 20000), outputPath: res.outputPath || '' });
+      onMessage({ role: 'assistant', agentId: finalAgent.id, agentName: finalAgent.name, actor: 'assistant', phase: 'work', content: (res.output || `[执行出错] ${res.error}`).slice(0, 20000), outputPath: res.outputPath || '' });
     }
     logFlow({
-      run: runId, type: 'done', to: agent.name, stage: i + 1,
-      summary: (res.output ? '完成' : `失败：${String(res.error || '').slice(0, 120)}`),
+      run: runId, type: 'done', to: finalAgent.name, stage: i + 1,
+      summary: (res.output ? '完成' : `失败：${String(res.error || '').slice(0, 120)}`) + (trail.length ? `（经 ${trail.length} 次委派）` : ''),
       files: res.outputPath ? [res.outputPath] : [],
       detail: { ok: !!res.output }
     });
@@ -1028,4 +1168,10 @@ function prepareRerun(events, fromStage, subAgents) {
   };
 }
 
-module.exports = { runButler, runMentioned, runRoundtable, runTasks, prepareRerun, runAutoChecks };
+module.exports = {
+  runButler, runMentioned, runRoundtable, runTasks, prepareRerun, runAutoChecks,
+  // 测试导出（单测用，业务代码请勿依赖）
+  testBoardInit: boardInit, testBoardAppend: boardAppend, testBoardRead: boardRead,
+  testExtractBoardNote: extractBoardNote, testParseHandoff: parseHandoff,
+  testApprovalGate: approvalGate
+};

@@ -100,13 +100,14 @@ function saveConfig(cfg) {
 
 // 保存用户自定义的子智能体列表 + 全局统一工作目录 + 执行内核（管家由内置定义补充，不接受传入）
 // 基于现有配置增量合并，保留 schedEnabled 等其他字段不被覆盖丢失
-function saveAgents(userAgents, globalCwd, kernel) {
+function saveAgents(userAgents, globalCwd, kernel, approval) {
   const cfg = getConfig();
   saveConfig({
     ...cfg,
     defaultAgent: '',
     globalCwd: globalCwd !== undefined ? globalCwd : (cfg.globalCwd || ''),
     kernel: kernel !== undefined ? kernel : (cfg.kernel || 'auto'),
+    approval: approval !== undefined ? approval : (cfg.approval || ''),
     agents: [BUTLER, ...userAgents]
   });
 }
