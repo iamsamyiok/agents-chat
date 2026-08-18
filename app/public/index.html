@@ -174,8 +174,8 @@
   .at-tx i { font-style: normal; color: #999; font-size: 11px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
 
   /* ---------- 弹窗 ---------- */
-  #modalMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
-  #modalMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show { display: flex; }
+  #modalMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask, #memMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
+  #modalMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show, #memMask.show { display: flex; }
   /* 团队仓库卡片 */
   .team-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
   .team-card .tc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -346,6 +346,11 @@
         <input id="globalCwdInput" placeholder="文件夹完整路径，如 /Users/me/agents-work 或 D:\agents-work（可不填）">
         <button class="mini-btn" onclick="pickGlobalDir()">选文件夹</button>
       </div>
+      <div class="lbl" style="margin-top:10px">💾 管家记忆</div>
+      <div class="tip" style="margin:4px 0 6px">管家跨会话记住工作笔记与你的偏好，规划时自动参考、任务完成后自动沉淀。点此查看或手动编辑。</div>
+      <div class="ag-row">
+        <button class="mini-btn" style="flex:1" onclick="openMem()">查看 / 编辑管家记忆</button>
+      </div>
     </div>
     <div id="agentCards"></div>
     <div class="ag-row" style="gap:8px">
@@ -394,6 +399,23 @@
     </div>
   </div>
 </div>
+<!-- 管家记忆弹窗 -->
+<div id="memMask">
+  <div class="modal wide">
+    <h3>💾 管家记忆</h3>
+    <div class="tip">管家跨会话记住的工作笔记与用户偏好：规划时自动参考，任务完成后自动提炼沉淀。一行一条，可手动增删改；两仓各有字数上限（笔记 2000 字 / 画像 1200 字），写满后系统自动让辅助小模型合并压缩，失败则淘汰最旧条目，绝不丢失新增内容。</div>
+    <div style="margin:6px 0 2px;font-weight:600">工作笔记（项目事实 / 环境约定 / 教训）</div>
+    <textarea id="memMemoryText" rows="7" style="width:100%;box-sizing:border-box;font:12px/1.6 Consolas,monospace" placeholder="一行一条"></textarea>
+    <div id="memMemoryUsage" style="font-size:11px;color:#888;margin:2px 0 8px"></div>
+    <div style="margin:6px 0 2px;font-weight:600">用户画像（偏好 / 习惯 / 身份）</div>
+    <textarea id="memUserText" rows="5" style="width:100%;box-sizing:border-box;font:12px/1.6 Consolas,monospace" placeholder="一行一条"></textarea>
+    <div id="memUserUsage" style="font-size:11px;color:#888;margin:2px 0 8px"></div>
+    <div class="modal-actions">
+      <button class="primary" onclick="saveMem()">保存</button>
+      <button onclick="closeMem()">关闭</button>
+    </div>
+  </div>
+</div>
 <!-- 使用帮助弹窗 -->
 <div id="helpMask">
   <div class="modal wide">
@@ -432,7 +454,7 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const PAGE_VERSION = '3.9.2'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.10.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -1747,6 +1769,43 @@ async function openTeams() {
 }
 function closeTeams() { document.getElementById('teamsMask').classList.remove('show'); }
 
+// 管家记忆：查看 / 手动编辑（一行一条；两仓各有字数上限，保存时服务端负责容量策略）
+async function openMem() {
+  document.getElementById('memMask').classList.add('show');
+  try {
+    const r = await api('/api/memory');
+    if (!r.success) throw new Error(r.error || '加载失败');
+    document.getElementById('memMemoryText').value = (r.memory || []).join('\n');
+    document.getElementById('memUserText').value = (r.user || []).join('\n');
+    renderMemUsage(r.usage, r.memory || [], r.user || []);
+  } catch (e) {
+    document.getElementById('memMemoryText').value = '';
+    document.getElementById('memUserText').value = '';
+    renderMemUsage(null, [], []);
+    toast('记忆加载失败：' + e.message);
+  }
+}
+function renderMemUsage(usage, memArr, userArr) {
+  const line = (u, arr, name, limitDefault) => {
+    const used = u ? u.used : arr.join('').length;
+    const limit = u ? u.limit : limitDefault;
+    const pct = Math.min(100, Math.round(used / limit * 100));
+    return `${name}：${used} / ${limit} 字（${pct}%）`;
+  };
+  document.getElementById('memMemoryUsage').textContent = line(usage && usage.memory, memArr, '笔记', 2000);
+  document.getElementById('memUserUsage').textContent = line(usage && usage.user, userArr, '画像', 1200);
+}
+async function saveMem() {
+  const split = (id) => document.getElementById(id).value.split('\n').map(s => s.trim()).filter(Boolean);
+  try {
+    const r = await api('/api/memory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memory: split('memMemoryText'), user: split('memUserText') }) });
+    if (!r.success) throw new Error(r.error || '保存失败');
+    toast('管家记忆已保存');
+    renderMemUsage(r.usage, split('memMemoryText'), split('memUserText'));
+  } catch (e) { toast('保存失败：' + e.message); }
+}
+function closeMem() { document.getElementById('memMask').classList.remove('show'); }
+
 function renderTeams() {
   const el = document.getElementById('teamsList');
   if (!teamPresets.length) {
@@ -2051,6 +2110,15 @@ function openHelp() {
       <li>每轮每位智能体的发言都以独立气泡显示，默认折叠为约三行（点「展开全文」查看），只有管家的最终总结完整展示</li>
       <li>默认最多 2 轮（.env 中 <code>AGENTS_CHAT_ROUNDTABLE_ROUNDS</code> 可调）、每次发言限 600 字，防止讨论失控</li>
       <li>结束后管家输出总结：<b>共识 / 分歧（注明持方）/ 建议行动</b>；发言与总结都存档，流转视图可回溯（紫色 ⚖ 圆点为主持人判定）</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>💾 管家记忆（跨会话长期记忆）</h4>
+    <ul>
+      <li>管家跨会话记住两类信息：<b>工作笔记</b>（项目事实、环境约定、教训）与<b>用户画像</b>（偏好、习惯），规划与验收、圆桌讨论时自动参考</li>
+      <li>任务完成后由辅助小模型自动提炼沉淀（聊天区提示「💾 管家记忆已更新」）；配置页可随时查看 / 手动编辑</li>
+      <li>两仓各有字数上限（笔记 2000 字 / 画像 1200 字）：写满自动让辅助小模型合并压缩，失败则淘汰最旧条目，绝不报错卡流程</li>
+      <li>规划前还会按关键词检索历史消息，把「以前聊过的相关内容」作为背景注入（历史回忆）</li>
+      <li>在 .env 配置 <code>AGENTS_CHAT_AUX_BASE_URL / MODEL / API_KEY</code>（任意 OpenAI 兼容接口，免费小模型即可）启用整理与压缩；不配置时记忆照常工作，仅跳过模型整理。<code>AGENTS_CHAT_MEMORY=0</code> 可整体关闭</li>
     </ul>
   </div>
   <div class="help-sec"><h4>📦 团队仓库</h4>

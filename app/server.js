@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.9.2'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.10.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -35,6 +35,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const store = require('./lib/store');
 const { runAgent, stopScope, stopAllChildren } = require('./lib/agent');
 const { runButler, runMentioned, runRoundtable, runTasks, prepareRerun } = require('./lib/orchestrator');
+const memoryMod = require('./lib/memory');
 
 // ---------- 执行互斥与停止控制 ----------
 // chat / tasks 两个作用域各自单飞（防止双击或 API 直调并发执行）；
@@ -258,6 +259,30 @@ const server = http.createServer(async (req, res) => {
     const enabled = !!body.enabled;
     store.setSchedEnabled(enabled);
     json(res, 200, { success: true, enabled });
+    return;
+  }
+
+  if (p === '/api/memory' && req.method === 'GET') {
+    // 管家长期记忆查看（含各仓字符用量）
+    const data = store.getMemoryData();
+    json(res, 200, {
+      success: true,
+      enabled: memoryMod.memoryEnabled(),
+      memory: data.memory,
+      user: data.user,
+      usage: { memory: memoryMod.usage('memory'), user: memoryMod.usage('user') }
+    });
+    return;
+  }
+  if (p === '/api/memory' && req.method === 'POST') {
+    // 手动编辑管家记忆（配置页；整体覆盖，逐条字符串）
+    const body = await readBody(req);
+    const data = {
+      memory: (Array.isArray(body.memory) ? body.memory : []).map(s => String(s).trim()).filter(Boolean).slice(0, 50),
+      user: (Array.isArray(body.user) ? body.user : []).map(s => String(s).trim()).filter(Boolean).slice(0, 50)
+    };
+    store.saveMemoryData(data);
+    json(res, 200, { success: true, usage: { memory: memoryMod.usage('memory'), user: memoryMod.usage('user') } });
     return;
   }
 

@@ -8,6 +8,7 @@ const DATA_DIR = process.env.AGENTS_CHAT_DATA || path.join(ROOT, '.data');
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 const TASKS_PATH = path.join(DATA_DIR, 'tasks.json');
 const MESSAGES_PATH = path.join(DATA_DIR, 'messages.json');
+const MEMORY_PATH = path.join(DATA_DIR, 'memory.json');
 
 function ensureDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -487,6 +488,21 @@ function listFlowRuns(limit) {
     .map(r => ({ ...r, agents: [...r.agents] }));
 }
 
+// ---------- 管家长期记忆（跨会话偏好与教训，读写由 memory.js 负责） ----------
+function getMemoryData() {
+  const d = readJson(MEMORY_PATH, null);
+  return {
+    memory: Array.isArray(d && d.memory) ? d.memory.map(s => String(s)).filter(Boolean) : [],
+    user: Array.isArray(d && d.user) ? d.user.map(s => String(s)).filter(Boolean) : []
+  };
+}
+function saveMemoryData(data) {
+  writeJson(MEMORY_PATH, {
+    memory: Array.isArray(data.memory) ? data.memory.map(String) : [],
+    user: Array.isArray(data.user) ? data.user.map(String) : []
+  });
+}
+
 module.exports = {
   DATA_DIR,
   BUTLER,
@@ -495,6 +511,8 @@ module.exports = {
   saveAgents,
   getSchedEnabled,
   setSchedEnabled,
+  getMemoryData,
+  saveMemoryData,
   getAgents,
   getTeamPresets,
   getTasks,
