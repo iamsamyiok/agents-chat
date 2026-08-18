@@ -74,6 +74,10 @@ function runAgentOnce(agent, prompt, emit, phase, role, taskId, sessionDir, scop
 }
 
 // ---------- 上下文传递：前序智能体产出 → 工作背景 ----------
+// 两种模式（.env AGENTS_CHAT_HANDOFF，默认 doc）：
+// - doc：借鉴 handoff skill 的「文档型交接」——组结构化交接文档（任务/进度/产出摘要/文件指针/建议），
+//        下游用文件读取工具自取完整产出，省 token 且保留决策线索
+// - full：旧模式，前序产出全文（截断）拼接
 function buildContext(results) {
   const parts = [];
   let total = 0;
@@ -88,14 +92,59 @@ function buildContext(results) {
   return parts.join('\n\n');
 }
 
+const HANDOFF_MODE = () => (process.env.AGENTS_CHAT_HANDOFF || 'doc').toLowerCase();
+
+// 从智能体输出中提取「交接说明」段（要求其输出末尾附 1~3 条给下游的关键信息）
+function extractHandoffNote(output) {
+  if (!output) return '';
+  const m = output.match(/【交接说?\s*[明册]?】([\s\S]{1,1200}?)(?=\n\s*\n【|$)/);
+  return m ? m[1].trim() : '';
+}
+
+// 结构化交接文档：给下游智能体看的「上游留下了什么」
+function buildHandoffDoc(r) {
+  const status = r.output ? '已完成' : `执行失败：${String(r.error || '').slice(0, 200)}`;
+  const note = extractHandoffNote(r.output);
+  const lines = [
+    `━━━ 交接文档｜来自 ${r.agent.name} ━━━`,
+    `■ 任务：${String(r.instruction || '(见上游指派)').slice(0, 300)}`,
+    `■ 进度：${status}`
+  ];
+  if (r.output) {
+    const brief = (note || r.output).replace(/\s+/g, ' ').slice(0, 500);
+    lines.push(`■ 产出摘要：${brief}${r.output.length > 500 && !note ? '…（完整内容见下方文件）' : ''}`);
+  }
+  if (r.outputPath) lines.push(`■ 成果文件：${r.outputPath}（完整产出，建议先用文件读取工具查看全文）`);
+  if (note) lines.push(`■ 给下游的建议：\n${note}`);
+  return lines.join('\n');
+}
+
+// 要求智能体输出末尾附交接说明（仅 doc 模式注入）
+const HANDOFF_ASK = '\n\n另外：你处于多智能体协作流程中，请在输出末尾附加一段「【交接说明】」，用 1~3 条要点告诉接手的协作者关键信息（重要决策、踩过的坑、注意事项或建议）；若确实无可奉告可省略。';
+
 function appendWorkContext(prompt, results, history) {
   let p = prompt;
-  const ctx = buildContext(results);
-  if (ctx) p += `\n\n【工作背景：前序智能体的产出摘要（完整版见下方文件）】\n${ctx}`;
+  if (HANDOFF_MODE() === 'full') {
+    const ctx = buildContext(results);
+    if (ctx) p += `\n\n【工作背景：前序智能体的产出摘要（完整版见下方文件）】\n${ctx}`;
+  } else {
+    const docs = results.filter(r => r.output || r.error).map(r => buildHandoffDoc(r)).join('\n\n');
+    if (docs) p += `\n\n【交接文档（前序智能体留给你的，含任务进度与成果文件位置）】\n${docs}\n\n请先通过「成果文件」路径读取上游完整产出后再开工，避免仅凭摘要行事。`;
+  }
   const files = results.filter(r => r.outputPath).map(r => `- ${r.agent.name}（${r.phase || 'work'}）：${r.outputPath}`);
-  if (files.length) p += `\n\n【完整产出文件】上方摘要可能被截断，以下文件是前序智能体的完整产出，建议直接读取后再开工：\n${files.join('\n')}`;
+  if (files.length) p += `\n\n【完整产出文件】\n${files.join('\n')}`;
   if (history) p += `\n\n【会话背景（本会话此前的对话）】\n${history}`;
   return p;
+}
+
+// ---------- 流转事件记录（供流转视图绘制，失败静默不影响主流程） ----------
+let storeFlow = null;
+try { storeFlow = require('./store'); } catch { storeFlow = null; }
+function logFlow(ev) {
+  try { if (storeFlow) storeFlow.addFlowEvent(ev); } catch { /* 忽略 */ }
+}
+function newRunId() {
+  return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
 // ---------- JSON 提取/引用解析 ----------
@@ -218,6 +267,9 @@ async function runButler(butler, subAgents, message, opts, emit, onMessage) {
   const sessionDir = sessionOutDir(taskId);
   const warnings = [];
   const warn = (w) => { warnings.push(w); emit({ type: 'notice', content: `⚠ ${w}`, taskId }); };
+  const runId = newRunId();
+  const handoffDoc = HANDOFF_MODE() !== 'full';
+  logFlow({ run: runId, type: 'start', from: butler.name, summary: String(message).replace(/\s+/g, ' ').slice(0, 200), detail: { taskId, mode: 'butler' } });
 
   const roster = subAgents.length
     ? subAgents.map(a => `- ${a.name}（${a.id}）：${a.desc || String(a.systemPrompt || '').slice(0, 60) || '（无描述）'}`).join('\n')
@@ -296,6 +348,7 @@ ${message}
   const planMsg = { thought: planThought(planRes.output), phases };
   emit({ type: 'plan', agentId: butler.id, agentName: butler.name, taskId, thought: planMsg.thought, phases: planMsg.phases });
   onMessage({ role: 'assistant', agentId: butler.id, agentName: butler.name, actor: 'butler', phase: 'plan', content: planToText(planMsg), plan: planMsg });
+  logFlow({ run: runId, type: 'plan', from: butler.name, summary: (planMsg.thought || '').replace(/\s+/g, ' ').slice(0, 200), detail: { phases: planMsg.phases.map(g => g.map(s => `${s.agentName}: ${s.instruction.slice(0, 100)}`)) } });
 
   // results 按 agent 维度保存最新产出
   const results = [];
@@ -313,16 +366,38 @@ ${message}
     }
     const group = phases[i];
     emit({ type: 'phase', index: i + 1, total: phases.length, parallel: group.length > 1, names: group.map(s => s.agentName).join('、'), taskId });
+    // 阶段间交接事件：上阶段产出者 → 本阶段执行者（流转视图的 handoff 边）
+    if (i > 0) {
+      const upsters = results.filter(r => r.output || r.error);
+      for (const up of upsters) {
+        for (const step of group) {
+          if (step.agentId === up.agent.id) continue;
+          logFlow({
+            run: runId, type: 'handoff', from: up.agent.name, to: step.agentName, stage: i + 1,
+            summary: (extractHandoffNote(up.output) || String(up.instruction || '').replace(/\s+/g, ' ')).slice(0, 200),
+            files: up.outputPath ? [up.outputPath] : [],
+            detail: { handoffDoc: handoffDoc }
+          });
+        }
+      }
+    }
     for (let j = 0; j < group.length; j += PARALLEL_CAP) {
       const batch = group.slice(j, j + PARALLEL_CAP);
       await Promise.all(batch.map(step => (async () => {
         const agent = subAgents.find(a => a.id === step.agentId);
+        logFlow({ run: runId, type: 'dispatch', from: butler.name, to: agent.name, stage: i + 1, summary: String(step.instruction).replace(/\s+/g, ' ').slice(0, 200) });
         let p = `【来自管家的指派】\n${step.instruction}\n\n【用户原始需求】\n${message}`;
         p = appendWorkContext(p, results, opts.history);
-        p += '\n\n请输出你的正式结果。';
+        p += '\n\n请输出你的正式结果。' + (handoffDoc ? HANDOFF_ASK : '');
         const res = await runAgentOnce(agent, p, emit, 'work', 'worker', taskId, sessionDir, scope);
         setResult(agent, res.output, res.error, step.instruction, 'work', res.outputPath);
         onMessage({ role: 'assistant', agentId: agent.id, agentName: agent.name, actor: 'assistant', phase: 'work', content: (res.output || `[执行出错] ${res.error}`).slice(0, 20000), outputPath: res.outputPath || '' });
+        logFlow({
+          run: runId, type: 'done', to: agent.name, stage: i + 1,
+          summary: (res.output ? '完成' : `失败：${String(res.error || '').slice(0, 120)}`),
+          files: res.outputPath ? [res.outputPath] : [],
+          detail: { ok: !!res.output }
+        });
       })()));
     }
     if (isStopped()) break;
@@ -368,10 +443,12 @@ ${reworks > 0 ? '\n（注：此前已反馈过问题，请重点核对是否已�
     if (verdict.accepted) {
       accepted = true;
       emit({ type: 'verify', round, accepted: true, taskId });
+      logFlow({ run: runId, type: 'verify', from: butler.name, round, summary: '验收通过' });
       break;
     }
     if (reworks >= MAX_REWORK) {
       emit({ type: 'verify', round, accepted: false, taskId, note: `已达最大返工轮数（${MAX_REWORK}），交付当前版本` });
+      logFlow({ run: runId, type: 'verify', from: butler.name, round, summary: `验收未通过（已达最大返工轮数 ${MAX_REWORK}，交付当前版本）` });
       break;
     }
     reworks++;
@@ -395,17 +472,26 @@ ${reworks > 0 ? '\n（注：此前已反馈过问题，请重点核对是否已�
       type: 'verify', round, accepted: false, taskId,
       note: `验收未通过，第 ${reworks} 轮返工：${reworkList.map(x => x.agentName).join('、')}`
     });
+    logFlow({ run: runId, type: 'verify', from: butler.name, round, summary: `验收未通过 → 第 ${reworks} 轮返工：${reworkList.map(x => x.agentName).join('、')}` });
     for (const it of reworkList) {
       const r = results.find(x => x.agent.id === it.agentId);
       let p = `【来自管家的返工要求】${it.requirement}\n【完善建议】${it.suggestion}\n\n【你上次的产出】\n${(r.output || `（执行失败：${r.error}）`).slice(0, CTX_PER_OUTPUT)}\n\n【你上次的任务】\n${it.instruction}\n\n【用户原始需求】\n${message}`;
+      if (r.outputPath) p += `\n\n【你上次的完整产出文件】${r.outputPath}（建议先读取完整版再修改）`;
       const ctxOthers = buildContext(results.filter(x => x.agent.id !== it.agentId));
       if (ctxOthers) p += `\n\n【工作背景：其他智能体的产出】\n${ctxOthers}`;
       const otherFiles = results.filter(x => x.agent.id !== it.agentId && x.outputPath).map(x => `- ${x.agent.name}：${x.outputPath}`);
       if (otherFiles.length) p += `\n\n【其他智能体的完整产出文件】\n${otherFiles.join('\n')}`;
-      p += '\n\n请在原有产出基础上完善，不要从零重复劳动。';
+      p += '\n\n请在原有产出基础上完善，不要从零重复劳动。' + (handoffDoc ? HANDOFF_ASK : '');
+      logFlow({ run: runId, type: 'rework', from: butler.name, to: r.agent.name, round: reworks, summary: `${it.requirement}｜建议：${String(it.suggestion || '').replace(/\s+/g, ' ').slice(0, 150)}` });
       const res = await runAgentOnce(r.agent, p, emit, 'work', 'worker', taskId, sessionDir, scope);
       setResult(r.agent, res.output || r.output, res.output ? undefined : (res.error || r.error), it.instruction, 'work', res.outputPath || r.outputPath);
       onMessage({ role: 'assistant', agentId: r.agent.id, agentName: r.agent.name, actor: 'assistant', phase: 'work', content: (res.output || `[返工出错] ${res.error}`).slice(0, 20000), outputPath: res.outputPath || '' });
+      logFlow({
+        run: runId, type: 'done', to: r.agent.name, round: reworks,
+        summary: (res.output ? `第 ${reworks} 轮返工完成` : `返工失败：${String(res.error || '').slice(0, 120)}`),
+        files: res.outputPath ? [res.outputPath] : [],
+        detail: { ok: !!res.output, rework: true }
+      });
     }
   }
 
@@ -427,6 +513,12 @@ ${deliverFiles.length ? `\n【成果文件完整路径（务必原样告知用�
   const sumRes = await runAgentOnce(butler, sumPrompt, emit, 'report', 'butler', taskId, sessionDir, scope);
   const finalText = sumRes.output || outs || sumRes.error || '';
   onMessage({ role: 'assistant', agentId: butler.id, agentName: butler.name, actor: 'butler', phase: 'report', content: (finalText || '（无输出）').slice(0, 20000), outputPath: sumRes.outputPath || '' });
+  logFlow({
+    run: runId, type: 'finish', from: butler.name,
+    summary: String(finalText).replace(/\s+/g, ' ').slice(0, 200),
+    files: deliverFiles.map(r => r.outputPath),
+    detail: { accepted, reworks }
+  });
   return { ok: !sumRes.error || results.some(r => r.output), finalText };
 }
 
@@ -437,20 +529,44 @@ async function runMentioned(mentionAgents, message, opts, emit, onMessage) {
   const isStopped = opts.isStopped || (() => false);
   const sessionDir = sessionOutDir(taskId);
   const results = [];
-  for (const agent of mentionAgents) {
+  const runId = newRunId();
+  const handoffDoc = HANDOFF_MODE() !== 'full';
+  logFlow({ run: runId, type: 'start', from: mentionAgents[0] && mentionAgents[0].name, summary: String(message).replace(/\s+/g, ' ').slice(0, 200), detail: { taskId, mode: 'pipeline', members: mentionAgents.map(a => a.name) } });
+  for (let i = 0; i < mentionAgents.length; i++) {
+    const agent = mentionAgents[i];
     if (isStopped()) {
       emit({ type: 'notice', content: '已手动停止，跳过剩余智能体', taskId });
       break;
     }
     const role = agent.id === 'butler' ? 'butler' : 'worker';
-    const p = appendWorkContext(message, results, opts.history);
+    // 流水线交接事件：上一个智能体 → 当前智能体
+    if (i > 0) {
+      const up = results[results.length - 1];
+      if (up && (up.output || up.error)) {
+        logFlow({
+          run: runId, type: 'handoff', from: up.agent.name, to: agent.name, stage: i + 1,
+          summary: (extractHandoffNote(up.output) || String(message).replace(/\s+/g, ' ')).slice(0, 200),
+          files: up.outputPath ? [up.outputPath] : []
+        });
+      }
+    }
+    logFlow({ run: runId, type: 'dispatch', from: i === 0 ? '用户' : mentionAgents[i - 1].name, to: agent.name, stage: i + 1, summary: String(message).replace(/\s+/g, ' ').slice(0, 200) });
+    const p = appendWorkContext(message, results, opts.history) + (handoffDoc && role === 'worker' ? HANDOFF_ASK : '');
     const res = await runAgentOnce(agent, p, emit, 'work', role, taskId, sessionDir, scope);
-    results.push({ agent, output: res.output, error: res.error, phase: 'work', outputPath: res.outputPath });
+    results.push({ agent, output: res.output, error: res.error, instruction: String(message).slice(0, 300), phase: 'work', outputPath: res.outputPath });
     if (res.output || res.error) {
       onMessage({ role: 'assistant', agentId: agent.id, agentName: agent.name, actor: 'assistant', phase: 'work', content: (res.output || `[执行出错] ${res.error}`).slice(0, 20000), outputPath: res.outputPath || '' });
     }
+    logFlow({
+      run: runId, type: 'done', to: agent.name, stage: i + 1,
+      summary: (res.output ? '完成' : `失败：${String(res.error || '').slice(0, 120)}`),
+      files: res.outputPath ? [res.outputPath] : [],
+      detail: { ok: !!res.output }
+    });
   }
-  return { ok: results.some(r => r.output), finalText: results.map(r => r.output).filter(Boolean).join('\n\n'), stopped: isStopped() };
+  const finalText = results.map(r => r.output).filter(Boolean).join('\n\n');
+  logFlow({ run: runId, type: 'finish', from: mentionAgents[mentionAgents.length - 1] && mentionAgents[mentionAgents.length - 1].name, summary: String(finalText).replace(/\s+/g, ' ').slice(0, 200), files: results.filter(r => r.outputPath).map(r => r.outputPath), detail: { mode: 'pipeline' } });
+  return { ok: results.some(r => r.output), finalText, stopped: isStopped() };
 }
 
 // ---------- 任务队列：每个任务一次完整调度（独立会话） ----------

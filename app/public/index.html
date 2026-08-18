@@ -165,8 +165,35 @@
   .at-tx i { font-style: normal; color: #999; font-size: 11px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
 
   /* ---------- 弹窗 ---------- */
-  #modalMask, #agentsMask, #historyMask, #schedMask, #helpMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 50; }
-  #modalMask.show, #agentsMask.show, #historyMask.show, #schedMask.show, #helpMask.show { display: flex; }
+  #modalMask, #agentsMask, #historyMask, #schedMask, #helpMask, #flowMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 50; }
+  #modalMask.show, #agentsMask.show, #historyMask.show, #schedMask.show, #helpMask.show, #flowMask.show { display: flex; }
+  /* 流转视图 */
+  #flowMask .modal.flow { width: min(1100px, 94vw); height: min(760px, 92vh); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+  .flow-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #eee; flex: none; }
+  .flow-bar h3 { margin: 0; font-size: 15px; }
+  .flow-bar select { flex: 1; min-width: 0; border: 1px solid #ddd; border-radius: 6px; padding: 5px 8px; font-size: 12px; background: #fff; }
+  .flow-legend { display: flex; gap: 10px; padding: 4px 14px 8px; font-size: 11px; color: #666; flex-wrap: wrap; flex: none; }
+  .flow-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 3px; vertical-align: -1px; }
+  .flow-canvas { flex: 1; overflow: auto; background: #fbfcfe; }
+  .flow-svg .lane-line { stroke: #e3e8f2; stroke-width: 1; }
+  .flow-svg .lane-label { font-size: 12px; fill: #333; font-weight: 600; }
+  .flow-svg .lane-sub { font-size: 10px; fill: #999; }
+  .flow-svg .ev-block { fill: #d9f2e3; stroke: #07c160; stroke-width: 1.2; rx: 6; cursor: pointer; }
+  .flow-svg .ev-block.err { fill: #fdeceb; stroke: #fa5151; }
+  .flow-svg .ev-block.running { stroke-dasharray: 5 3; animation: flowdash 1.2s linear infinite; }
+  @keyframes flowdash { to { stroke-dashoffset: -16; } }
+  .flow-svg .ev-block:hover { stroke-width: 2.4; }
+  .flow-svg .edge { fill: none; stroke: #9aa8c7; stroke-width: 1.4; cursor: pointer; }
+  .flow-svg .edge:hover { stroke-width: 2.6; }
+  .flow-svg .edge.handoff { stroke: #4a6cf7; }
+  .flow-svg .edge.rework { stroke: #e8a33d; }
+  .flow-svg .edge-label { font-size: 10px; fill: #556; }
+  .flow-svg .ev-dot { cursor: pointer; }
+  .flow-svg .ev-dot:hover { stroke-width: 3; }
+  .flow-detail { flex: none; max-height: 190px; overflow: auto; border-top: 1px solid #eee; padding: 10px 14px; font-size: 12px; background: #fff; white-space: pre-wrap; word-break: break-all; }
+  .flow-detail b { color: #333; }
+  .flow-detail .fd-title { font-weight: 600; margin-bottom: 6px; }
+  .flow-detail .fd-files { color: #7d5ac8; }
   .modal { background: #fff; border-radius: 10px; width: 560px; max-width: 92vw; max-height: 88vh; overflow-y: auto; padding: 20px; }
   .modal h3 { font-size: 15px; margin-bottom: 6px; }
   .modal .tip { font-size: 12px; color: #999; line-height: 1.7; margin-bottom: 10px; }
@@ -221,7 +248,10 @@
     </div>
     <div id="sessionList"></div>
     <div class="side-footer">
-      <button class="sched-btn" onclick="openSched()">⏰ 定时任务</button>
+      <div style="display:flex;gap:6px">
+        <button class="sched-btn" onclick="openSched()">⏰ 定时任务</button>
+        <button class="sched-btn" onclick="openFlow()" id="flowBtn" title="智能体之间的派发/交接/返工可视化">🔭 流转</button>
+      </div>
       <button class="run-all" id="runAllBtn" onclick="onRunAllBtn()" style="margin-bottom:0">按顺序执行全部待办</button>
     </div>
   </aside>
@@ -331,10 +361,33 @@
     </div>
   </div>
 </div>
+<!-- 流转视图弹窗（智能体工作状态与信息传递） -->
+<div id="flowMask">
+  <div class="modal flow">
+    <div class="flow-bar">
+      <h3>🔭 智能体流转</h3>
+      <select id="flowRunSel" onchange="onFlowRunChange()"></select>
+      <label style="font-size:11px;color:#666;white-space:nowrap"><input type="checkbox" id="flowAutoChk" checked onchange="onFlowAutoChange()"> 自动刷新</label>
+      <button class="mini-btn" onclick="loadFlowEvents()">刷新</button>
+      <button class="mini-btn gray" onclick="closeFlow()">关闭</button>
+    </div>
+    <div class="flow-legend">
+      <span><i style="background:#4a6cf7"></i>交接（产出→下游）</span>
+      <span><i style="background:#e8a33d"></i>返工</span>
+      <span><i style="background:#9aa8c7"></i>派发</span>
+      <span><i style="background:#d9f2e3;border:1px solid #07c160"></i>执行块</span>
+      <span><i style="background:#fdeceb;border:1px solid #fa5151"></i>失败</span>
+      <span><i style="background:#8a6fe8"></i>规划/验收/交付</span>
+      <span style="color:#999">点击块/连线/圆点查看详情</span>
+    </div>
+    <div class="flow-canvas" id="flowCanvas"></div>
+    <div class="flow-detail" id="flowDetail" style="display:none"></div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
-const PAGE_VERSION = '3.5.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.6.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -1194,6 +1247,212 @@ async function delSched(id) {
   } else toast(data.error || '删除失败');
 }
 
+// ---------- 流转视图（智能体工作状态与信息传递可视化） ----------
+let flowTimer = null;       // 自动刷新定时器
+let flowEvents = [];        // 当前 run 的事件
+let flowRunId = '';         // 当前查看的 run
+const FLOW_TYPE_LABEL = { start: '开始', plan: '调度规划', dispatch: '派发', done: '完成', handoff: '交接', rework: '返工', verify: '验收', finish: '汇总交付' };
+
+async function openFlow() {
+  document.getElementById('flowMask').classList.add('show');
+  await loadFlowRuns();
+  startFlowTimer();
+}
+function closeFlow() {
+  document.getElementById('flowMask').classList.remove('show');
+  stopFlowTimer();
+}
+function stopFlowTimer() { if (flowTimer) { clearInterval(flowTimer); flowTimer = null; } }
+function startFlowTimer() {
+  stopFlowTimer();
+  if (!document.getElementById('flowAutoChk').checked) return;
+  flowTimer = setInterval(() => { loadFlowEvents(true); if (flowRunId) loadFlowRuns(true); }, 3000);
+}
+function onFlowAutoChange() { if (document.getElementById('flowAutoChk').checked) startFlowTimer(); else stopFlowTimer(); }
+
+async function loadFlowRuns(quiet) {
+  const data = await api('/api/flow/runs');
+  if (!data.success) { if (!quiet) toast(data.error || '加载编排列表失败'); return; }
+  const sel = document.getElementById('flowRunSel');
+  const cur = flowRunId || (data.runs[0] && data.runs[0].run) || '';
+  sel.innerHTML = data.runs.map(r => {
+    const t = r.start ? new Date(r.start) : new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    const label = `${p(t.getMonth()+1)}-${p(t.getDate())} ${p(t.getHours())}:${p(t.getMinutes())} · ${r.agents.slice(0,4).join('、')}${r.agents.length>4?'等':''} · ${r.finished?'已完成':'进行中'} · ${r.summary.slice(0,26)}`;
+    return `<option value="${r.run}" ${r.run === cur ? 'selected' : ''}>${esc(label)}</option>`;
+  }).join('') || '<option value="">（暂无编排记录，发起一次对话或任务后即可看到）</option>';
+  if (cur !== flowRunId) { flowRunId = cur; await loadFlowEvents(quiet); }
+}
+
+function onFlowRunChange() {
+  flowRunId = document.getElementById('flowRunSel').value;
+  loadFlowEvents();
+}
+
+async function loadFlowEvents(quiet) {
+  if (!flowRunId) { renderFlowEmpty(); return; }
+  const data = await api('/api/flow?run=' + encodeURIComponent(flowRunId));
+  if (!data.success) { if (!quiet) toast(data.error || '加载流转事件失败'); return; }
+  flowEvents = data.events || [];
+  renderFlowSVG();
+}
+
+function renderFlowEmpty() {
+  document.getElementById('flowCanvas').innerHTML = '<div style="padding:40px;text-align:center;color:#999;font-size:13px">暂无编排记录<br><br>发起一次对话或执行任务后，这里会展示智能体之间的派发、交接与返工全过程</div>';
+  document.getElementById('flowDetail').style.display = 'none';
+}
+
+// SVG 泳道时间线渲染
+function renderFlowSVG() {
+  const evs = flowEvents;
+  if (!evs.length) { renderFlowEmpty(); return; }
+  // 1) 泳道：按事件中 from/to 首次出现顺序（start.from 通常为管家，天然置顶）
+  const lanes = [];
+  const laneIdx = new Map();
+  for (const e of evs) {
+    for (const name of [e.from, e.to]) {
+      if (!name || laneIdx.has(name)) continue;
+      laneIdx.set(name, lanes.length);
+      lanes.push(name);
+    }
+  }
+  // 2) 时间轴
+  const ts = evs.map(e => new Date(e.t).getTime()).filter(t => !isNaN(t));
+  const now = Date.now();
+  const t0 = Math.min(...ts);
+  const t1 = Math.max(Math.max(...ts), lanes.length ? now : 0);
+  const span = Math.max(t1 - t0, 1000);
+  // 3) 尺寸
+  const LANE_H = 64, PAD_T = 26, PAD_L = 128, PAD_R = 60;
+  const H = PAD_T + lanes.length * LANE_H + 20;
+  const W = Math.max(920, PAD_L + evs.length * 85 + PAD_R);
+  const xOf = (t) => PAD_L + Math.min(1, Math.max(0, (new Date(t).getTime() - t0) / span)) * (W - PAD_L - PAD_R);
+  const yOf = (name) => { const i = laneIdx.get(name); return i === undefined ? null : PAD_T + i * LANE_H + LANE_H / 2; };
+
+  // 4) dispatch→done 配对（同泳道串行块不重叠：起x至少 = 上一块终x+8）
+  const laneLastEnd = new Array(lanes.length).fill(0);
+  const pairDone = new Set();
+  const blocks = [];
+  const dots = [];
+  const edges = [];
+  let seq = 0;
+  for (const e of evs) {
+    const x = xOf(e.t);
+    if (e.type === 'dispatch') {
+      let done = null;
+      for (const d of evs) {
+        if (d.type === 'done' && d.to === e.to && !pairDone.has(d) && new Date(d.t) >= new Date(e.t)) { done = d; break; }
+      }
+      if (done) pairDone.add(done);
+      const y = yOf(e.to);
+      if (y !== null) {
+        const li = laneIdx.get(e.to);
+        let x2 = done ? xOf(done.t) : xOf(now);
+        x2 = Math.max(x2, x + 26);
+        const x1 = Math.max(x, laneLastEnd[li] + 8);
+        if (x1 + 20 > x2) x2 = x1 + 20;
+        laneLastEnd[li] = x2;
+        blocks.push({ x: x1, y: y - 14, w: x2 - x1, h: 28, ev: e, doneEv: done, running: !done, err: done && done.detail && done.detail.ok === false, label: e.to, i: seq++ });
+      }
+    } else if (e.type === 'handoff' || e.type === 'rework' || e.type === 'dispatch') {
+      // dispatch 边在块生成处跳过（块已表达），handoff/rework 画曲线
+    }
+    if (e.type === 'handoff' || e.type === 'rework') {
+      const y1 = yOf(e.from), y2 = yOf(e.to);
+      if (y1 !== null && y2 !== null) edges.push({ x1: x, y1, x2: x, y2, kind: e.type, ev: e, i: seq++ });
+    }
+    if (['start', 'plan', 'verify', 'finish'].includes(e.type)) {
+      const y = yOf(e.from) !== null ? yOf(e.from) : PAD_T;
+      dots.push({ x, y: yOf(e.from), kind: e.type, ev: e, i: seq++ });
+    }
+  }
+  evIndex = evs; // 供详情查询
+
+  // 5) 拼 SVG
+  const p2 = (n) => String(n).padStart(2, '0');
+  const fmtT = (t) => { const d = new Date(t); return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`; };
+  let s = `<svg class="flow-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+  s += `<defs><marker id="fArrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#9aa8c7"/></marker>
+  <marker id="fArrowH" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#4a6cf7"/></marker>
+  <marker id="fArrowR" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#e8a33d"/></marker></defs>`;
+  // 泳道
+  lanes.forEach((name, i) => {
+    const y = PAD_T + i * LANE_H + LANE_H / 2;
+    const icon = name === '用户' ? '👤' : (agents.find(a => a.name === name) || {}).icon || '';
+    s += `<line class="lane-line" x1="${PAD_L - 100}" y1="${y}" x2="${W - 20}" y2="${y}"/>`;
+    s += `<text class="lane-label" x="${PAD_L - 104}" y="${y - 2}" text-anchor="end">${esc((icon ? icon + ' ' : '') + name)}</text>`;
+    s += `<text class="lane-sub" x="${PAD_L - 104}" y="${y + 12}" text-anchor="end">智能体 ${i + 1}</text>`;
+  });
+  // 时间刻度（起/中/终）
+  for (const frac of [0, 0.5, 1]) {
+    const x = PAD_L + frac * (W - PAD_L - PAD_R);
+    const t = new Date(t0 + frac * span);
+    s += `<text class="lane-sub" x="${x}" y="${PAD_T - 10}" text-anchor="middle">${fmtT(t)}</text>`;
+  }
+  // 边（先画，块叠上面）
+  for (const ed of edges) {
+    const color = ed.kind === 'handoff' ? '#4a6cf7' : '#e8a33d';
+    const marker = ed.kind === 'handoff' ? 'fArrowH' : 'fArrowR';
+    const dx = Math.max(30, Math.abs(ed.x2 - ed.x1) / 2);
+    const mx = ed.x1, my = (ed.y1 + ed.y2) / 2;
+    s += `<path class="edge ${ed.kind}" data-ev="${evs.indexOf(ed.ev)}" d="M ${ed.x1},${ed.y1} C ${ed.x1 + dx},${ed.y1} ${ed.x2 - dx},${ed.y2} ${ed.x2},${ed.y2}" ${ed.y1 === ed.y2 ? '' : `marker-end="url(#${marker})"`}/>`;
+    if (ed.ev.summary) {
+      const txt = String(ed.ev.summary).replace(/\s+/g, ' ').slice(0, 22);
+      s += `<text class="edge-label" x="${mx + 6}" y="${my - 4}" style="paint-order:stroke;stroke:#fbfcfe;stroke-width:3px" fill="${color}">${esc(txt)}</text>`;
+    }
+  }
+  // 执行块
+  for (const b of blocks) {
+    const cls = 'ev-block' + (b.err ? ' err' : '') + (b.running ? ' running' : '');
+    s += `<g data-ev="${evs.indexOf(b.ev)}"><rect class="${cls}" x="${b.x}" y="${b.y}" width="${Math.max(b.w, 18)}" height="${b.h}" rx="7"/>
+    <text x="${b.x + Math.max(b.w,18)/2}" y="${b.y + 18}" text-anchor="middle" font-size="11" fill="${b.err ? '#c0392b' : '#0a6b3d'}">${b.running ? '执行中…' : (b.err ? '✗ 失败' : '✓ 完成')}</text>
+    <title>${esc(fmtT(b.ev.t) + ' 派发给 ' + b.ev.to + '：' + String(b.ev.summary || ''))}</title></g>`;
+  }
+  // 节点圆点
+  const DOT_STYLE = {
+    start: { c: '#07c160', label: '▶' },
+    plan: { c: '#8a6fe8', label: '📋' },
+    verify: { c: '#e8a33d', label: '' },
+    finish: { c: '#7d5ac8', label: '🏁' }
+  };
+  for (const d of dots) {
+    const st = DOT_STYLE[d.kind] || { c: '#999' };
+    if (d.y === null) continue;
+    const ok = d.kind === 'verify' ? /通过/.test(d.ev.summary || '') : null;
+    const fill = d.kind === 'verify' ? (ok ? '#07c160' : '#e8a33d') : st.c;
+    const text = d.kind === 'verify' ? (ok ? '✓' : '✗') : (st.label || '•');
+    s += `<g class="ev-dot" data-ev="${evs.indexOf(d.ev)}"><circle cx="${d.x}" cy="${d.y - 26}" r="11" fill="${fill}" opacity="0.92"/><text x="${d.x}" y="${d.y - 22}" text-anchor="middle" font-size="11" fill="#fff">${text}</text><title>${esc((FLOW_TYPE_LABEL[d.kind] || d.kind) + ' ' + fmtT(d.ev.t) + '：' + String(d.ev.summary || ''))}</title></g>`;
+  }
+  s += '</svg>';
+  const canvas = document.getElementById('flowCanvas');
+  canvas.innerHTML = s;
+  canvas.onclick = (evClick) => {
+    const g = evClick.target.closest('[data-ev]');
+    if (!g) return;
+    showFlowDetail(Number(g.dataset.ev));
+  };
+}
+
+// 点击元素显示事件详情
+let evIndex = [];
+function showFlowDetail(i) {
+  const e = evIndex[i];
+  if (!e) return;
+  const el = document.getElementById('flowDetail');
+  const p2 = (n) => String(n).padStart(2, '0');
+  const d = new Date(e.t);
+  const tm = `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+  let html = `<div class="fd-title">${FLOW_TYPE_LABEL[e.type] || e.type} · ${tm}${e.from ? ` · ${esc(e.from)}` : ''}${e.to ? ` → ${esc(e.to)}` : ''}${e.stage ? ` · 阶段 ${e.stage}` : ''}${e.round ? ` · 第 ${e.round} 轮` : ''}</div>`;
+  if (e.summary) html += `<div>${esc(e.summary)}</div>`;
+  if (e.files && e.files.length) html += `<div class="fd-files" style="margin-top:6px">📄 成果文件：<br>${e.files.map(f => esc(f)).join('<br>')}</div>`;
+  if (e.detail && Object.keys(e.detail).length) {
+    const dj = JSON.stringify(e.detail, null, 2);
+    if (dj !== '{}') html += `<div style="margin-top:6px;color:#888">detail：${esc(dj.slice(0, 1500))}</div>`;
+  }
+  el.innerHTML = html;
+  el.style.display = 'block';
+}
+
 // ---------- 历史 ----------
 async function loadMessages() {
   const data = await api('/api/messages');
@@ -1431,6 +1690,21 @@ function openHelp() {
       <li>「导入任务」→ 定时任务标签：行首写启动时间（<code>20260818-1307</code>），输入 <code>[]</code> 自动填入当前时间</li>
       <li>到点自动执行（需程序保持运行）；所有定时任务统一在左侧「⏰ 定时任务」按钮中管理</li>
       <li>弹窗内可查看倒计时与状态，支持「立即执行」「重跑」「删除」</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>🔭 流转视图（智能体协作可视化）</h4>
+    <ul>
+      <li>左侧「🔭 流转」打开泳道时间线：每个智能体一条泳道，展示派发、执行、交接、返工全过程</li>
+      <li>绿色块=执行完成，红色块=失败，虚线动画块=执行中；蓝色曲线=交接（产出交给下游），橙色曲线=返工</li>
+      <li>点击执行块 / 连线 / 圆点查看详情：任务指令、交接说明、成果文件路径</li>
+      <li>顶部下拉切换历史编排记录，勾选「自动刷新」可实时观察进行中的任务</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>🤝 智能体之间的交接</h4>
+    <ul>
+      <li>多智能体协作时，上游智能体会留一份结构化交接文档：任务、进度、产出摘要、成果文件位置、给下游的建议</li>
+      <li>下游智能体先读交接文档和成果文件全文再开工，避免仅凭摘要行事</li>
+      <li>交接内容与全过程可在「🔭 流转」视图中追溯</li>
     </ul>
   </div>
   <div class="help-sec"><h4>🛑 停止与中断</h4>

@@ -310,6 +310,63 @@ function clearMessages() {
   writeJson(MESSAGES_PATH, []);
 }
 
+// ---------- 流转日志（智能体之间的派发/交接/返工/验收事件，append-only） ----------
+// 供「🔭 流转」页面绘制泳道时间线：谁在何时把什么信息交给了谁
+const FLOW_PATH = path.join(DATA_DIR, 'flow.jsonl');
+
+function addFlowEvent(ev) {
+  try {
+    ensureDir();
+    const rec = {
+      t: ev.t || new Date().toISOString(),
+      run: String(ev.run || '').slice(0, 60),
+      type: String(ev.type || ''),       // start|plan|dispatch|done|handoff|rework|verify|finish
+      from: String(ev.from || '').slice(0, 40),
+      to: String(ev.to || '').slice(0, 40),
+      stage: Number(ev.stage) || 0,
+      round: Number(ev.round) || 0,
+      summary: String(ev.summary || '').slice(0, 400),
+      files: Array.isArray(ev.files) ? ev.files.slice(0, 20).map(f => String(f).slice(0, 300)) : [],
+      detail: ev.detail && typeof ev.detail === 'object' ? ev.detail : {}
+    };
+    fs.appendFileSync(FLOW_PATH, JSON.stringify(rec) + '\n', 'utf8');
+    return rec;
+  } catch { return null; }
+}
+
+function readFlowAll() {
+  try {
+    return fs.readFileSync(FLOW_PATH, 'utf8').split('\n').filter(Boolean).map(l => {
+      try { return JSON.parse(l); } catch { return null; }
+    }).filter(Boolean);
+  } catch { return []; }
+}
+
+// 单次编排的全部事件（按时间序）
+function getFlow(runId) {
+  return readFlowAll().filter(e => e.run === runId);
+}
+
+// 最近编排列表：run id 去重 + 元信息（开始时间/事件数/参与者/是否结束）
+function listFlowRuns(limit) {
+  const all = readFlowAll();
+  const map = new Map(); // run -> 元信息
+  for (const e of all) {
+    let r = map.get(e.run);
+    if (!r) { r = { run: e.run, start: e.t, end: '', events: 0, agents: new Set(), finished: false, summary: '' }; map.set(e.run, r); }
+    r.events++;
+    r.end = e.t;
+    if (e.from) r.agents.add(e.from);
+    if (e.to) r.agents.add(e.to);
+    if (e.type === 'finish') { r.finished = true; r.summary = e.summary; }
+    if (e.type === 'start' && !r.summary) r.summary = e.summary;
+  }
+  return [...map.values()]
+    .sort((a, b) => (a.start < b.start ? 1 : -1))
+    .slice(0, limit || 30)
+    .map(r => ({ ...r, agents: [...r.agents] }));
+}
+
 module.exports = {
   DATA_DIR,
   BUTLER,
@@ -328,5 +385,8 @@ module.exports = {
   parseTasksFromText,
   getMessages,
   addMessage,
-  clearMessages
+  clearMessages,
+  addFlowEvent,
+  getFlow,
+  listFlowRuns
 };

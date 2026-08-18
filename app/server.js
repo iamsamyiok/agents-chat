@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.5.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.6.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -175,6 +175,19 @@ const server = http.createServer(async (req, res) => {
     stopTokens[scope]++;
     const n = stopScope(scope);
     json(res, 200, { success: true, scope, stopped: n });
+    return;
+  }
+
+  if (p === '/api/flow/runs' && req.method === 'GET') {
+    // 最近编排列表（流转视图的 run 选择器）
+    json(res, 200, { success: true, runs: store.listFlowRuns(40) });
+    return;
+  }
+
+  if (p === '/api/flow' && req.method === 'GET') {
+    const runId = String(parsed.query.run || '').slice(0, 60);
+    if (!runId) { json(res, 400, { success: false, error: '缺少 run 参数' }); return; }
+    json(res, 200, { success: true, run: runId, events: store.getFlow(runId) });
     return;
   }
 
