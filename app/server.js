@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.4.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.5.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -150,13 +150,17 @@ const server = http.createServer(async (req, res) => {
 
   // ---------- API ----------
   if (p === '/api/health' && req.method === 'GET') {
-    const { resolveRunner } = require('./lib/agent');
+    const { resolveRunner, detectKernels } = require('./lib/agent');
     const runner = resolveRunner();
+    const kernels = detectKernels();
     json(res, 200, {
       success: true,
       version: APP_VERSION,
       runner: runner.kind,
-      opencode: runner.kind === 'opencode' ? runner.cmd : '',
+      kernelLabel: runner.kernel ? runner.kernel.label : '',
+      kernelCmd: runner.cmd || '',
+      kernels: Object.values(kernels).map(k => ({ id: k.id, label: k.label, ok: k.ok, cmd: k.cmd })),
+      configKernel: String(store.getConfig().kernel || 'auto'),
       model: process.env.AGENTS_CHAT_MODEL || '',
       autoApprove: process.env.AGENTS_CHAT_AUTO_APPROVE !== '0',
       port: PORT
@@ -175,7 +179,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/agents' && req.method === 'GET') {
-    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '' });
+    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '', kernel: String(store.getConfig().kernel || 'auto') });
     return;
   }
 
@@ -228,8 +232,16 @@ const server = http.createServer(async (req, res) => {
       dirWarn.push(`统一工作目录不存在或不是文件夹：${globalCwd}，已忽略（将使用默认目录）`);
       globalCwd = '';
     }
-    store.saveAgents(clean, globalCwd);
-    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '', warnings: dirWarn });
+    // 执行内核：'auto' 或注册表内的内核 id；选中未安装的内核给出警告（仍保存，运行时报错兜底）
+    const { KERNEL_DEFS, detectKernels } = require('./lib/agent');
+    let kernel = String(body.kernel || 'auto').trim() || 'auto';
+    const kernelDef = KERNEL_DEFS.find(k => k.id === kernel);
+    if (kernel !== 'auto' && !kernelDef) kernel = 'auto';
+    if (kernel !== 'auto' && !detectKernels()[kernel].ok) {
+      dirWarn.push(`已选择内核 ${kernelDef.label}，但本机未检测到（${kernelDef.install}），保存后任务将无法执行`);
+    }
+    store.saveAgents(clean, globalCwd, kernel);
+    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '', kernel: String(store.getConfig().kernel || 'auto'), warnings: dirWarn });
     return;
   }
 
@@ -465,18 +477,23 @@ server.on('error', (err) => {
 });
 
 server.listen(PORT, () => {
-  const { resolveRunner } = require('./lib/agent');
+  const { resolveRunner, detectKernels, KERNEL_DEFS } = require('./lib/agent');
   const runner = resolveRunner();
-  const kindText = runner.kind === 'opencode'
-    ? `OpenCode 真实执行（${runner.cmd}）`
-    : runner.kind === 'demo'
-      ? '演示模式（AGENTS_CHAT_MOCK=1，输出为模拟结果）'
-      : '未检测到 OpenCode！任务将报错，请先安装 opencode 并重启';
+  const kindText = runner.kind === 'demo'
+    ? '演示模式（AGENTS_CHAT_MOCK=1，输出为模拟结果）'
+    : runner.kind === 'missing'
+      ? (runner.missingKernel
+        ? `已选择内核 ${runner.missingKernel.label} 但未检测到！任务将报错，请先安装并重启`
+        : `未检测到任何内核！任务将报错，可安装其一：${KERNEL_DEFS.map(k => k.install).join(' / ')}`)
+      : `${runner.kernel.label} 真实执行（${runner.cmd}）`;
+  const detected = detectKernels();
+  const avail = KERNEL_DEFS.filter(k => detected[k.id].ok).map(k => k.label).join('、') || '无';
   // 启动即修复孤儿状态：上次异常退出时仍标记「执行中」的任务复位为待执行
   const orphan = store.resetRunningTasks();
   if (orphan > 0) console.log(`检测到 ${orphan} 个上次未正常结束的任务，已复位为待执行`);
   startScheduler();
   console.log(`Agents Chat 已启动: http://localhost:${PORT}`);
   console.log(`运行内核: ${kindText}`);
+  console.log(`本机可用内核: ${avail}（配置页可切换）`);
   console.log(`数据目录: ${store.DATA_DIR}`);
 });

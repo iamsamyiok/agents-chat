@@ -184,6 +184,8 @@
   .ag-row { display: flex; gap: 8px; margin-bottom: 8px; }
   .ag-row input { flex: 1; min-width: 0; border: 1px solid #ddd; border-radius: 6px; padding: 6px 10px; font-size: 13px; outline: none; }
   .ag-row input:focus { border-color: #07c160; }
+  .ag-row select { flex: 1; min-width: 0; border: 1px solid #cdd8f8; border-radius: 6px; padding: 6px 10px; font-size: 13px; outline: none; background: #fff; color: #333; }
+  .ag-row select:focus { border-color: #4a6cf7; }
   .ag-card > input { width: 100%; border: 1px solid #ddd; border-radius: 6px; padding: 6px 10px; font-size: 13px; outline: none; margin-bottom: 8px; }
   .ag-card > input:focus { border-color: #07c160; }
   .ag-card textarea { width: 100%; height: 64px; border: 1px solid #ddd; border-radius: 6px; padding: 6px 10px; font-size: 13px; resize: vertical; outline: none; }
@@ -276,10 +278,14 @@
 <div id="agentsMask">
   <div class="modal">
     <h3>智能体配置</h3>
-    <div class="tip">每个智能体都是一个独立的 AI Agent（基于 OpenCode 内核）：<b>图标</b>用于辨认，<b>名称</b>用于 @ 点名，<b>技能说明</b>供管家调度参考，<b>自定义提示词</b>会在任务下发时附加在用户提示词前面。所有智能体使用 OpenCode 默认模型。「管家」为内置调度智能体，不可修改。</div>
+    <div class="tip">每个智能体都是一个独立的 AI Agent：执行内核由顶部下拉框统一选择（OpenCode / Claude Code / Codex / pi），<b>图标</b>用于辨认，<b>名称</b>用于 @ 点名，<b>技能说明</b>供管家调度参考，<b>自定义提示词</b>会在任务下发时附加在用户提示词前面。所有智能体使用所选内核的默认模型。「管家」为内置调度智能体，不可修改。</div>
     <div class="butler-ro" id="butlerRo"></div>
     <div class="global-cwd-box">
-      <div class="lbl">📁 统一工作目录（所有智能体共用）</div>
+      <div class="lbl">🧠 执行内核（所有智能体共用）</div>
+      <div class="ag-row">
+        <select id="kernelSel"></select>
+      </div>
+      <div class="lbl" style="margin-top:10px">📁 统一工作目录（所有智能体共用）</div>
       <div class="ag-row">
         <input id="globalCwdInput" placeholder="本地目录完整路径，智能体产出的文件都保存在这里；留空用默认目录">
         <button class="mini-btn" onclick="pickGlobalDir()">选择</button>
@@ -328,7 +334,7 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const PAGE_VERSION = '3.4.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.5.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -339,8 +345,9 @@ let chatBusy = false;          // 聊天编排进行中（发送按钮变「停�
 let taskBusy = false;          // 任务批量执行进行中（执行按钮变「停止执行」）
 let stopAsked = false;         // 本次流中已请求过停止，避免重复点击
 let curTaskId = '';            // '' = 主会话；否则为任务会话
-let runnerState = { kind: '', cmd: '' }; // 内核状态（帮助弹窗展示）
+let runnerState = { kind: '', label: '', cmd: '', kernels: [] }; // 内核状态（帮助弹窗/配置页展示）
 let globalCwd = '';            // 全局统一工作目录
+let configKernel = 'auto';     // 配置的执行内核
 const sessions = new Map();    // key: 'main' | taskId → 消息数组
 
 const input = document.getElementById('input');
@@ -376,8 +383,9 @@ async function init() {
   agents = ag.agents || [];
   butlerId = ag.butlerId || 'butler';
   globalCwd = ag.globalCwd || '';
-  runnerState = { kind: health.runner || '', cmd: health.opencode || '' };
-  // 内核状态：正常（OpenCode）不显示标签；演示/未检测到 属于需要用户知情的状态，保留醒目标注
+  configKernel = ag.kernel || 'auto';
+  runnerState = { kind: health.runner || '', label: health.kernelLabel || '', cmd: health.kernelCmd || '', kernels: health.kernels || [] };
+  // 内核状态：正常不显示标签；演示/未检测到 属于需要用户知情的状态，保留醒目标注
   const tag = document.getElementById('runnerTag');
   if (health.runner === 'demo') {
     tag.textContent = '演示模式';
@@ -385,12 +393,15 @@ async function init() {
     tag.className = 'runner-tag demo';
     tag.style.display = '';
   } else if (health.runner === 'missing') {
-    tag.textContent = '未检测到 OpenCode';
-    tag.title = '请先安装：npm install -g opencode-ai，详见帮助';
+    tag.textContent = '未检测到内核';
+    tag.title = '可安装 OpenCode / Claude Code / Codex / pi 任一内核，详见帮助';
     tag.className = 'runner-tag missing';
     tag.style.display = '';
   } else {
-    tag.style.display = 'none';
+    tag.style.display = '';
+    tag.textContent = runnerState.label || '内核';
+    tag.title = `运行内核：${runnerState.label}（${runnerState.cmd || '已安装'}），可在智能体配置中切换`;
+    tag.className = 'runner-tag opencode';
   }
 
   renderMembers();
@@ -1252,6 +1263,7 @@ function openAgents() {
     `<b>${esc(butler.name || '管家')}</b><span class="lock">🔒 内置 · 不可修改</span><br>${esc(butler.desc || '')}`;
   editing = agents.filter(a => a.id !== butlerId).map(a => ({ ...a }));
   document.getElementById('globalCwdInput').value = globalCwd || '';
+  renderKernelSel();
   renderAgentCards();
   document.getElementById('agentsMask').classList.add('show');
 }
@@ -1307,6 +1319,23 @@ dirInput.addEventListener('change', () => {
 });
 function pickGlobalDir() { dirPickTarget = document.getElementById('globalCwdInput'); dirInput.value = ''; dirInput.click(); }
 
+// 内核下拉框：列出全部支持内核，已安装可选（标 ✓），未安装禁选（标 未安装）
+function renderKernelSel() {
+  const sel = document.getElementById('kernelSel');
+  const kernels = runnerState.kernels || [];
+  if (!kernels.length) { sel.innerHTML = '<option value="auto">自动（未获取到检测状态）</option>'; return; }
+  sel.innerHTML = `<option value="auto">自动（按 OpenCode → Claude Code → Codex → pi 顺序选择已安装的）</option>` +
+    kernels.map(k =>
+      k.ok
+        ? `<option value="${k.id}" ${configKernel === k.id ? 'selected' : ''}>${esc(k.label)} ✓（已安装）</option>`
+        : `<option value="${k.id}" disabled>${esc(k.label)}（未安装：npm install -g …）</option>`
+    ).join('');
+  if (configKernel === 'auto') sel.value = 'auto';
+  sel.onchange = () => {
+    if (sel.value !== 'auto') toast('保存后生效：' + (kernels.find(k => k.id === sel.value) || {}).label);
+  };
+}
+
 function addAgentRow() {
   editing.push({ id: '', name: '', icon: '', desc: '', systemPrompt: '' });
   renderAgentCards();
@@ -1319,11 +1348,12 @@ async function saveAgentsCfg() {
   if (noName) { toast('每个智能体都需要名称'); return; }
   const data = await api('/api/agents', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agents: editing, globalCwd: document.getElementById('globalCwdInput').value })
+    body: JSON.stringify({ agents: editing, globalCwd: document.getElementById('globalCwdInput').value, kernel: document.getElementById('kernelSel').value || 'auto' })
   });
   if (data.success) {
     agents = data.agents;
     globalCwd = data.globalCwd || '';
+    configKernel = data.kernel || 'auto';
     renderMembers();
     renderSidebar();
     closeAgents();
@@ -1333,24 +1363,43 @@ async function saveAgentsCfg() {
 }
 
 // ---------- 使用帮助 ----------
+const KERNEL_INSTALL = {
+  opencode: 'npm install -g opencode-ai（登录：opencode auth login）',
+  claude: 'npm install -g @anthropic-ai/claude-code（Anthropic 订阅或 API Key）',
+  codex: 'npm install -g @openai/codex（ChatGPT 订阅或 OPENAI_API_KEY）',
+  pi: 'npm install -g @earendil-works/pi-coding-agent（pi 内 /login 配置密钥）'
+};
+
 function kernelBanner() {
-  const map = {
-    opencode: ['ok', `✅ 运行内核：OpenCode 真实执行${runnerState.cmd ? `（${esc(runnerState.cmd)}）` : ''}，智能体具备读写文件、执行命令、联网检索等真实能力`],
-    demo: ['demo', '⚠ 当前为<b>演示模式</b>（AGENTS_CHAT_MOCK=1）：所有输出均为模拟结果。删除 .env 中该配置并安装 OpenCode 后即为真实执行'],
-    missing: ['missing', '❌ <b>未检测到 OpenCode</b>，任务将无法真实执行。请安装：<code>npm install -g opencode-ai</code>，再运行 <code>opencode auth login</code> 配置模型，然后重启本程序']
-  };
-  const [cls, text] = map[runnerState.kind] || map.missing;
-  return `<div class="help-kernel ${cls}">${text}</div>`;
+  const kernels = runnerState.kernels || [];
+  const avail = kernels.filter(k => k.ok).map(k => k.label).join('、') || '无';
+  if (runnerState.kind === 'demo') {
+    return `<div class="help-kernel demo">⚠ 当前为<b>演示模式</b>（AGENTS_CHAT_MOCK=1）：所有输出均为模拟结果。删除 .env 中该配置并安装任一内核后即为真实执行</div>`;
+  }
+  if (runnerState.kind === 'missing') {
+    const lines = Object.entries(KERNEL_INSTALL).map(([id, hint]) => `  ${kernels.find(k => k.id === id) && kernels.find(k => k.id === id).ok ? '✓' : '·'} ${hint}`);
+    return `<div class="help-kernel missing">❌ <b>未检测到可用内核</b>，任务将无法真实执行。本机检测：${avail}。任选其一安装后重启本程序：<br><code>${lines.join('<br>')}</code></div>`;
+  }
+  return `<div class="help-kernel ok">✅ 运行内核：<b>${esc(runnerState.label)}</b> 真实执行${runnerState.cmd ? `（${esc(runnerState.cmd)}）` : ''}，智能体具备读写文件、执行命令、联网检索等真实能力。本机可用：${esc(avail || '仅当前内核')}，可在「⚙ 智能体配置」中切换</div>`;
 }
 
 function openHelp() {
   document.getElementById('helpBody').innerHTML = kernelBanner() + `
   <div class="help-sec"><h4>🚀 快速开始</h4>
     <ol>
-      <li>本机安装 OpenCode 并登录模型：<code>npm install -g opencode-ai</code> → <code>opencode auth login</code>（模型与密钥由 OpenCode 管理，本程序不做任何 API 配置）</li>
-      <li>启动本程序后浏览器打开 <code>http://localhost:3456</code></li>
+      <li>本机安装任一执行内核并登录模型（模型与密钥由内核自己管理，本程序不做任何 API 配置）：<br>
+        <code>${KERNEL_INSTALL.opencode}</code><br><code>${KERNEL_INSTALL.claude}</code><br><code>${KERNEL_INSTALL.codex}</code><br><code>${KERNEL_INSTALL.pi}</code></li>
+      <li>启动本程序后浏览器打开 <code>http://localhost:3456</code>，会自动识别已安装的内核</li>
       <li>直接在输入框说话即可开始；粘贴任务清单可批量执行</li>
     </ol>
+  </div>
+  <div class="help-sec"><h4>🧠 执行内核</h4>
+    <ul>
+      <li>支持四种内核：<b>OpenCode</b>（多 Provider）、<b>Claude Code</b>（Anthropic）、<b>Codex</b>（OpenAI）、<b>pi</b>（多 Provider），安装即可被自动识别</li>
+      <li>「⚙ 智能体配置」顶部的下拉框选择内核：「自动」按检测顺序取第一个已安装的，或指定某一内核</li>
+      <li>切换内核后所有智能体（含管家）统一使用新内核执行；认证、模型、密钥都在各内核自己的 CLI 里配置</li>
+      <li>各内核能力一致：读写文件、执行命令、联网检索，产出统一保存在「统一工作目录」</li>
+    </ul>
   </div>
   <div class="help-sec"><h4>💬 聊天与 @ 点名</h4>
     <ul>
@@ -1401,7 +1450,8 @@ function openHelp() {
   <div class="help-sec"><h4>❓ 常见问题</h4>
     <ul>
       <li>换端口：编辑启动脚本里的 PORT；单任务超时：.env 中调大 <code>AGENTS_CHAT_TIMEOUT_MS</code>（默认 10 分钟）</li>
-      <li>加/改智能体：「⚙ 智能体配置」可设名称、图标、技能说明、提示词；管家内置不可改</li>
+      <li>加/改智能体：「⚙ 智能体配置」可设名称、图标、技能说明、提示词；管家内置不可改；换内核也在该页顶部下拉框</li>
+      <li>指定内核完整路径：.env 中设 <code>AGENTS_CHAT_OPENCODE_CMD</code> / <code>AGENTS_CHAT_CLAUDE_CMD</code> / <code>AGENTS_CHAT_CODEX_CMD</code> / <code>AGENTS_CHAT_PI_CMD</code></li>
       <li>页面行为异常：Ctrl+F5 强制刷新（版本不一致时会有提示）</li>
     </ul>
   </div>`;

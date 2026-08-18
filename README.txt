@@ -4,32 +4,38 @@ Agents Chat Portable（Agents 群聊）Windows 版
 一、这是什么
 -----------
 一个免安装的多智能体群聊工具：
-- 复用你电脑上已安装的 OpenCode（opencode 命令）作为统一内核，
-  具备读写文件、执行命令、联网检索等真实能力
-- 内置 3 个智能体（可多开可自定义）：规划师 / 工程师 / 研究员，
+- 自动识别你电脑上已安装的执行内核（四选一，装任意一个即可）：
+    OpenCode     npm install -g opencode-ai（多 Provider，默认首选）
+    Claude Code  npm install -g @anthropic-ai/claude-code（Anthropic）
+    Codex CLI    npm install -g @openai/codex（OpenAI，自带沙箱）
+    pi           npm install -g @earendil-works/pi-coding-agent（多 Provider）
+  内核具备读写文件、执行命令、联网检索等真实能力；
+  「⚙ 智能体配置」顶部下拉框可切换内核（默认「自动」按上面顺序选择）
+- 内置 3 个智能体（可多开可自定义）：工程师 / 研究员 / 文案，
   每个实例可以有不同的角色人设
-- 微信风格群聊界面，@智能体ID 点名对话
-- 任务队列：粘贴任务清单自动提取，按时间先后排序，逐个执行，
+- 微信风格群聊界面，@智能体 点名对话
+- 任务队列：顺序任务 + 定时任务，逐个执行，
   各任务之间上下文完全独立（每次执行都是全新会话）
 - 真实反馈：执行过程中的每一次工具调用（读文件、跑命令等）都会
   实时显示在聊天流里；失败会明确标红报错，绝不假装完成
 
 二、前置要求（必读）
 --------------------
-1. 本机已安装 OpenCode，cmd 里能跑通：
-       opencode --version
-   未安装的话先安装：
-       npm install -g opencode-ai
-2. OpenCode 里已配置好模型（终端运行 opencode auth login，
-   按提示选择服务商并登录）。模型与密钥由 OpenCode 自己管理，
-   本程序不做任何 API 配置。
+1. 本机已安装任一执行内核（四选一），cmd 里能跑通对应命令：
+        opencode --version
+        claude --version
+        codex --version
+        pi --version
+2. 该内核里已配置好模型与登录（各内核自己的登录命令，如
+   opencode auth login / claude 按提示登录 / codex login / pi 内 /login）。
+   模型与密钥由内核自己管理，本程序不做任何 API 配置。
 
 三、快速开始
 -----------
 1. 解压 zip 到任意目录（路径不要含特殊字符）
 2. 双击 start.bat，浏览器自动打开 http://localhost:3456
-3. 右上角显示绿色「OpenCode 内核」= 一切正常；
-   红色「未检测到 OpenCode」= 先完成上面第二节
+3. 右上角显示绿色内核名称（如「OpenCode」）= 一切正常；
+   红色「未检测到内核」= 先完成上面第二节
 4. 左上角「导入」粘贴任务清单，或直接在聊天框对话
 
 四、可选配置（.env 文件）
@@ -37,10 +43,14 @@ Agents Chat Portable（Agents 群聊）Windows 版
 一般不需要改，全部有默认值：
 
   AGENTS_CHAT_MODEL=              指定模型（provider/model 格式），
-                                  留空用 OpenCode 默认模型
-  AGENTS_CHAT_AUTO_APPROVE=1      自动批准权限请求（无人值守执行需要）
+                                  留空用所选内核的默认模型
+  AGENTS_CHAT_AUTO_APPROVE=1      自动批准权限请求（无人值守执行需要，
+                                  仅 OpenCode 内核）
   AGENTS_CHAT_TIMEOUT_MS=600000   单任务超时（毫秒）
   AGENTS_CHAT_OPENCODE_CMD=       手动指定 opencode 完整路径
+  AGENTS_CHAT_CLAUDE_CMD=         手动指定 claude 完整路径
+  AGENTS_CHAT_CODEX_CMD=          手动指定 codex 完整路径
+  AGENTS_CHAT_PI_CMD=             手动指定 pi 完整路径
   AGENTS_CHAT_MOCK=0              1=演示模式（模拟输出，界面体验用）
 
 五、界面使用
@@ -78,6 +88,8 @@ Agents Chat Portable（Agents 群聊）Windows 版
   - 未触发的定时任务不出现在任务会话列表，触发后自动出现
 
 【智能体配置（⚙）】
+  - 执行内核：配置页顶部下拉框，自动识别 OpenCode / Claude Code /
+    Codex / pi，已安装的标 ✓ 可选，未安装的灰显
   - 每个智能体可选职业图标，聊天头像/成员栏/补全菜单统一显示
   - 统一工作目录：所有智能体共用一处读写文件（配置页顶部设置）
 

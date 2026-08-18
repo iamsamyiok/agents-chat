@@ -47,6 +47,7 @@ function defaultConfig() {
   return {
     defaultAgent: '',
     globalCwd: '',
+    kernel: 'auto', // 执行内核：'auto' 按检测顺序自动，或 opencode/claude/codex/pi
     agents: [
       BUTLER,
       {
@@ -96,10 +97,15 @@ function saveConfig(cfg) {
   writeJson(CONFIG_PATH, cfg);
 }
 
-// 保存用户自定义的子智能体列表 + 全局统一工作目录（管家由内置定义补充，不接受传入）
-function saveAgents(userAgents, globalCwd) {
+// 保存用户自定义的子智能体列表 + 全局统一工作目录 + 执行内核（管家由内置定义补充，不接受传入）
+function saveAgents(userAgents, globalCwd, kernel) {
   const cfg = getConfig();
-  saveConfig({ defaultAgent: '', globalCwd: globalCwd !== undefined ? globalCwd : (cfg.globalCwd || ''), agents: [BUTLER, ...userAgents] });
+  saveConfig({
+    defaultAgent: '',
+    globalCwd: globalCwd !== undefined ? globalCwd : (cfg.globalCwd || ''),
+    kernel: kernel !== undefined ? kernel : (cfg.kernel || 'auto'),
+    agents: [BUTLER, ...userAgents]
+  });
 }
 
 function getAgents() {
