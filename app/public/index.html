@@ -273,7 +273,8 @@
   .ttab .badge { margin-left: 4px; vertical-align: 1px; }
 
   /* ---------- 单聊模式：Web 终端（OpenCode 交互） ---------- */
-  #soloView { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #0d1117; }
+  #soloView { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #f7f7f7; }
+  #soloTermPane { background: #0d1117; display: flex; flex-direction: column; flex: 1; min-height: 0; }
   .term-bar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #161b22; border-bottom: 1px solid #21262d; font-size: 12px; color: #8b949e; flex: none; }
   .term-bar .tb-title { color: #c9d1d9; font-weight: 600; font-size: 13px; }
   .term-bar .tb-cwd { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; font-family: Consolas, Menlo, monospace; }
@@ -292,6 +293,30 @@
   .term-quick .tq-btn { display: block; width: 100%; text-align: left; background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 7px 10px; font: 12px Consolas, Menlo, monospace; cursor: pointer; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .term-quick .tq-btn:hover { background: #21262d; border-color: #238636; }
   .term-quick .tq-note { font-size: 11px; color: #6e7681; line-height: 1.7; margin-top: 8px; }
+
+  /* ---------- 单聊工作台（OpenCode）：顶栏 / 模型下拉 / 过程块 ---------- */
+  .solo-topbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #fff; border-bottom: 1px solid #e7e7e7; flex: none; }
+  .solo-tabs { display: inline-flex; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
+  .solo-tabs .stab { border: none; background: #fff; font-size: 13px; padding: 5px 14px; cursor: pointer; color: #666; }
+  .solo-tabs .stab + .stab { border-left: 1px solid #ddd; }
+  .solo-tabs .stab.active { background: #07c160; color: #fff; font-weight: 600; }
+  .solo-model { border: 1px solid #ddd; border-radius: 8px; font-size: 12px; padding: 5px 8px; color: #333; max-width: 300px; background: #fff; }
+  .solo-model-hint { font-size: 11px; color: #b2b2b2; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #soloMessages { flex: 1; overflow-y: auto; padding: 16px 18px; }
+  .solo-empty { text-align: center; color: #b2b2b2; font-size: 13px; padding: 60px 20px; line-height: 2; }
+  .avatar.solo-av { background: #10aeff; }
+  .bubble .solo-tools { font: 12px/1.7 Consolas, Menlo, monospace; color: #0a742e; }
+  .bubble .solo-reasoning { border-left: 3px solid #d8d8d8; padding: 2px 10px; margin: 4px 0; color: #8a8a8a; font-size: 12.5px; font-style: italic; white-space: normal; max-height: 7.5em; overflow-y: auto; cursor: pointer; }
+  .bubble .solo-reasoning .sr-tag { font-style: normal; font-size: 11px; color: #b2b2b2; display: block; margin-bottom: 2px; }
+  .bubble .solo-part-md { white-space: normal; }
+  .bubble .solo-part-md p { margin: 0.35em 0; }
+  .bubble .solo-part-md pre { background: #f6f6f6; border-radius: 6px; padding: 8px 10px; overflow-x: auto; font-size: 12.5px; }
+  .bubble .solo-part-md code { background: #f0f0f0; border-radius: 3px; padding: 1px 4px; font-size: 12.5px; }
+  .bubble .solo-part-md pre code { background: none; padding: 0; }
+  .bubble .solo-part-md table { border-collapse: collapse; margin: 0.4em 0; }
+  .bubble .solo-part-md th, .bubble .solo-part-md td { border: 1px solid #ddd; padding: 4px 8px; font-size: 12.5px; }
+  .bubble .solo-part-md blockquote { border-left: 3px solid #ccc; margin: 0.4em 0; padding: 2px 10px; color: #777; }
+  .bubble .solo-part-md h1, .bubble .solo-part-md h2, .bubble .solo-part-md h3, .bubble .solo-part-md h4 { margin: 0.5em 0 0.3em; font-size: 1.05em; }
 
   /* ---------- Markdown 预览弹窗 ---------- */
   #previewMask { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 95; }
@@ -389,18 +414,38 @@
       </footer>
     </div>
     <div id="soloView" style="display:none">
-      <div class="term-bar">
-        <span class="tb-title">⌨ 终端</span>
-        <span class="tb-cwd" id="termCwd" title="工作目录"></span>
-        <button class="term-btn" onclick="termRun('opencode --version 2>&1 || echo 未安装 opencode')">检查 opencode</button>
-        <button class="term-btn" onclick="termClear()">清屏</button>
-        <button class="term-btn warn" onclick="termSignal('int')" title="中断当前命令（Ctrl+C）">Ctrl+C</button>
+      <div class="solo-topbar">
+        <div class="solo-tabs">
+          <button id="soloTabChat" class="stab active" onclick="setSoloTab('chat')">💬 AI 对话</button>
+          <button id="soloTabTerm" class="stab" onclick="setSoloTab('term')">⌨ 终端</button>
+        </div>
+        <select id="ocModelSel" class="solo-model" onchange="onSoloModelPick()" title="模型选择（来自 opencode models）"></select>
+        <button class="term-btn" style="background:#fff;color:#666;border-color:#ddd" onclick="refreshOcModels()" title="重新拉取模型列表（opencode models）">⟳ 模型</button>
+        <span class="solo-model-hint" id="soloModelHint"></span>
       </div>
-      <div class="term-body" id="termBody"></div>
-      <div class="term-input-row">
-        <span class="t-prompt" id="termPrompt">$</span>
-        <input id="termInput" placeholder="输入命令回车执行，↑↓ 切换历史命令…" autocomplete="off" spellcheck="false">
-        <button class="term-btn" style="background:#238636;border-color:#238636;color:#fff" onclick="sendTerm()">运行</button>
+      <div id="soloChatPane" style="flex:1;min-height:0;display:flex;flex-direction:column">
+        <div id="soloMessages"></div>
+        <footer id="composer">
+          <div class="input-row">
+            <input id="soloInput" placeholder="输入消息，与 OpenCode 单聊（会话内多轮续聊）…" autocomplete="off">
+            <button id="soloSendBtn" onclick="onSoloSendBtn()">发送</button>
+          </div>
+        </footer>
+      </div>
+      <div id="soloTermPane" style="display:none">
+        <div class="term-bar">
+          <span class="tb-title">⌨ 终端</span>
+          <span class="tb-cwd" id="termCwd" title="工作目录"></span>
+          <button class="term-btn" onclick="termRun('opencode --version 2>&1 || echo 未安装 opencode')">检查 opencode</button>
+          <button class="term-btn" onclick="termClear()">清屏</button>
+          <button class="term-btn warn" onclick="termSignal('int')" title="中断当前命令（Ctrl+C）">Ctrl+C</button>
+        </div>
+        <div class="term-body" id="termBody"></div>
+        <div class="term-input-row">
+          <span class="t-prompt" id="termPrompt">$</span>
+          <input id="termInput" placeholder="输入命令回车执行，↑↓ 切换历史命令…" autocomplete="off" spellcheck="false">
+          <button class="term-btn" style="background:#238636;border-color:#238636;color:#fff" onclick="sendTerm()">运行</button>
+        </div>
       </div>
     </div>
   </main>
@@ -581,7 +626,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.12.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.13.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -598,8 +643,19 @@ let globalCwd = '';            // 全局统一工作目录
 let configKernel = 'auto';     // 配置的执行内核
 let configApproval = 'off';    // 人工审批关卡：off/plan/verify/all
 let teamPresets = [];          // 团队仓库预设（配置页「📦 团队仓库」）
-let chatMode = 'group';        // 当前模式：group=群聊（多智能体）| solo=单聊（本机终端）
-const sessions = new Map();    // key: 'main' | taskId → 消息数组
+let chatMode = 'group';        // 当前模式：group=群聊（多智能体）| solo=单聊（OpenCode 工作台）
+const sessions = new Map();    // key: 'main' | taskId | oc会话id → 消息数组
+
+// ---------- 单聊工作台状态 ----------
+let soloTab = 'chat';          // solo 视图子标签：chat=AI 对话 | term=终端
+let ocSessions = [];           // 单聊会话列表（服务端 oc-sessions.json）
+let curOcId = '';              // 当前单聊会话 id（'' = 未选，显示空态引导）
+let soloBusy = false;          // 单聊进行中（发送按钮变「停止」）
+let soloStopAsked = false;
+let ocModels = [];             // 可选模型（opencode models）
+let ocModelDemo = false;       // 演示模式（模型列表为假数据）
+let ocModelNoResume = false;   // 当前内核不支持 -s 续聊（每轮独立对话）
+let curOcModel = '';           // 当前选中模型（localStorage 记忆）
 
 const input = document.getElementById('input');
 
@@ -657,7 +713,7 @@ async function init() {
   }
 
   renderMembers();
-  await Promise.all([loadTasks(), loadMessages(), loadSchedState()]);
+  await Promise.all([loadTasks(), loadMessages(), loadSchedState(), loadOcSessions(), loadOcModels()]);
   restoreApprovals(); // 恢复仍在等待的人工审批卡片（刷新/断线场景）
   updateFooterBtns();
 
@@ -684,6 +740,12 @@ async function init() {
     if (e.key === 'Enter') { e.preventDefault(); sendTerm(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); if (termCmdIdx > 0) { termCmdIdx--; ti.value = termCmdHist[termCmdIdx] || ''; } }
     else if (e.key === 'ArrowDown') { e.preventDefault(); if (termCmdIdx < termCmdHist.length - 1) { termCmdIdx++; ti.value = termCmdHist[termCmdIdx] || ''; } else { termCmdIdx = termCmdHist.length; ti.value = ''; } }
+  });
+
+  // 单聊对话输入：回车发送
+  const si = document.getElementById('soloInput');
+  si.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); soloSend(); }
   });
 
   // Markdown 预览：消息中的 .md 路径 / 过程存档行 → 点击打开预览弹窗
@@ -713,12 +775,16 @@ function setChatMode(mode) {
   document.getElementById('modeGroupBtn').classList.toggle('active', chatMode === 'group');
   document.getElementById('groupView').style.display = chatMode === 'group' ? 'flex' : 'none';
   document.getElementById('soloView').style.display = chatMode === 'solo' ? 'flex' : 'none';
-  // 单聊模式：任务管理标签让位（顺序/定时任务在群聊侧栏），侧栏改为终端快捷命令
-  document.getElementById('taskTabs').style.display = chatMode === 'group' ? '' : 'none';
+  // 顺序/定时任务标签两种模式共用（内容按 runner 过滤：单聊任务只在单聊侧栏显示）
   document.getElementById('flowEntryBtn').style.display = chatMode === 'group' ? '' : 'none';
   renderSidebar();
   renderHeader();
-  if (chatMode === 'solo') connectTerm();
+  if (chatMode === 'solo') {
+    connectTerm();
+    loadOcSessions();
+    loadOcModels();
+    setTimeout(() => { try { document.getElementById('soloInput').focus(); } catch {} }, 100);
+  }
 }
 
 // ---------- 单聊模式：Web 终端 ----------
@@ -805,6 +871,380 @@ async function termClear() {
   document.getElementById('termBody').innerHTML = '';
 }
 
+// 顶栏快捷命令：填入输入框直接执行
+function termRun(cmd) {
+  document.getElementById('termInput').value = cmd;
+  sendTerm();
+}
+
+// ==================== 单聊工作台（OpenCode） ====================
+
+// ---------- 子标签：AI 对话 / 终端 ----------
+function setSoloTab(tab) {
+  soloTab = tab === 'term' ? 'term' : 'chat';
+  document.getElementById('soloTabChat').classList.toggle('active', soloTab === 'chat');
+  document.getElementById('soloTabTerm').classList.toggle('active', soloTab === 'term');
+  document.getElementById('soloChatPane').style.display = soloTab === 'chat' ? 'flex' : 'none';
+  document.getElementById('soloTermPane').style.display = soloTab === 'term' ? 'flex' : 'none';
+  if (soloTab === 'chat') setTimeout(() => { try { document.getElementById('soloInput').focus(); } catch {} }, 100);
+  else connectTerm();
+}
+
+// ---------- 模型列表 ----------
+async function loadOcModels(refresh) {
+  try {
+    const r = await api('/api/oc/models' + (refresh ? '?refresh=1' : ''));
+    if (!r.success) return;
+    ocModelDemo = !!r.demo;
+    ocModelNoResume = !!r.noResume;
+    ocModels = r.models || [];
+    renderOcModelSel();
+  } catch { /* 模型列表加载失败不影响聊天（用默认模型） */ }
+}
+function refreshOcModels() { loadOcModels(true).then(() => toast(ocModels.length ? `已刷新模型列表（${ocModels.length} 个）` : '模型列表为空：可先在终端运行 opencode auth login 配置')); }
+function renderOcModelSel() {
+  const sel = document.getElementById('ocModelSel');
+  const saved = localStorage.getItem('ocModel') || '';
+  curOcModel = ocModels.some(m => m.id === saved) ? saved : '';
+  sel.innerHTML = '<option value="">默认模型</option>' + ocModels.map(m =>
+    `<option value="${escAttr(m.id)}" ${m.id === curOcModel ? 'selected' : ''}>${esc(m.label || m.id)}</option>`).join('');
+  const hint = document.getElementById('soloModelHint');
+  if (ocModelDemo) hint.textContent = '演示模式：模型列表为模拟数据';
+  else if (ocModelNoResume) hint.textContent = '当前内核不支持会话续聊与模型列表，每轮为独立对话';
+  else if (!ocModels.length) hint.textContent = '未获取到模型列表（默认模型可用；可在终端运行 opencode models 检查）';
+  else hint.textContent = `共 ${ocModels.length} 个模型可选`;
+}
+function onSoloModelPick() {
+  curOcModel = document.getElementById('ocModelSel').value;
+  localStorage.setItem('ocModel', curOcModel);
+}
+
+// ---------- 会话管理 ----------
+async function loadOcSessions() {
+  try {
+    const r = await api('/api/oc/sessions');
+    if (r.success) {
+      ocSessions = r.sessions || [];
+      if (chatMode === 'solo') renderSidebar();
+    }
+  } catch { /* ignore */ }
+}
+async function newOcSession() {
+  if (soloBusy) { toast('当前消息处理中，请等待或停止后再新建'); return; }
+  const r = await api('/api/oc/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+  if (r.success) {
+    ocSessions.unshift(r.session);
+    switchSoloSession(r.session.id);
+    toast('已新建单聊会话');
+  } else toast(r.error || '新建失败');
+}
+async function delOcSession(id) {
+  const s = ocSessions.find(x => x.id === id);
+  if (!confirm(`删除单聊会话「${s ? (s.title || '新会话') : ''}」及其消息？`)) return;
+  const r = await api('/api/oc/sessions/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+  if (r.success) {
+    ocSessions = r.sessions || [];
+    sessions.delete(id);
+    if (curOcId === id) { curOcId = ''; renderHeader(); }
+    renderSidebar();
+    soloRenderMessages();
+    toast('会话已删除');
+  } else toast(r.error || '删除失败');
+}
+function switchSoloSession(id) {
+  if (chatMode !== 'solo') setChatMode('solo');
+  curOcId = id || '';
+  unreadSess.delete(id);
+  renderSidebar();
+  renderHeader();
+  soloRenderMessages();
+}
+
+// ---------- 消息渲染 ----------
+function soloScroll() { const b = document.getElementById('soloMessages'); if (b) b.scrollTop = b.scrollHeight; }
+function soloAtBottom() { const b = document.getElementById('soloMessages'); return !b || (b.scrollHeight - b.scrollTop - b.clientHeight < 80); }
+
+function soloMsgNode(m) {
+  if (m.role === 'sys') {
+    const d = document.createElement('div');
+    d.className = 'sys-tip';
+    d.innerHTML = `<span>${esc(m.content)}</span>`;
+    return d;
+  }
+  if (m.role === 'user') {
+    const row = document.createElement('div');
+    row.className = 'msg-row self';
+    row.innerHTML = `
+      <div class="avatar me">我</div>
+      <div class="msg-body"><div class="bubble right">${esc(m.content)}</div></div>`;
+    return row;
+  }
+  // assistant：Markdown 渲染（opencode 输出天然是 Markdown）
+  const row = document.createElement('div');
+  row.className = 'msg-row';
+  row.innerHTML = `
+    <div class="avatar solo-av">🤖</div>
+    <div class="msg-body">
+      <div class="msg-name">${esc(m.agentName || 'OpenCode')}</div>
+      <div class="bubble left solo-bubble"><div class="solo-part-md">${renderMd(m.content || '')}</div></div>
+    </div>`;
+  return row;
+}
+
+function soloRenderMessages() {
+  const box = document.getElementById('soloMessages');
+  if (!curOcId) {
+    box.innerHTML = `<div class="solo-empty">👋 欢迎使用单聊工作台<br>
+      点左上角「✚ 新会话」开始与 OpenCode 一对一对话（多轮续聊）<br>
+      顶部可切换模型；「⌨ 终端」标签可直接执行本机命令<br>
+      「导入任务」创建的任务在单聊模式下由 OpenCode 单体逐个执行</div>`;
+    return;
+  }
+  box.innerHTML = '';
+  for (const m of getSess(curOcId)) box.appendChild(soloMsgNode(m));
+  soloScroll();
+}
+
+function pushSoloMsg(key, m) {
+  getSess(key).push(m);
+  if (chatMode === 'solo' && key === curOcId) {
+    document.getElementById('soloMessages').appendChild(soloMsgNode(m));
+    soloScroll();
+  }
+  return m;
+}
+function addSoloSys(text, key) {
+  return pushSoloMsg(key || curOcId, { role: 'sys', content: text, ts: Date.now() });
+}
+
+// ---------- 流式渲染（快照覆盖式） ----------
+// soloLive: key -> { parts:Map(partId->{text,el}), order:[], tools:[], reasoning, row, domReady }
+const soloLive = new Map();
+
+function soloEnsureLive(key) {
+  let live = soloLive.get(key);
+  if (live) return live;
+  live = { parts: new Map(), order: [], tools: [], reasoning: '', row: null };
+  soloLive.set(key, live);
+  if (chatMode === 'solo' && key === curOcId && soloTab === 'chat') {
+    const row = document.createElement('div');
+    row.className = 'msg-row';
+    row.innerHTML = `
+      <div class="avatar solo-av">🤖</div>
+      <div class="msg-body">
+        <div class="msg-name">OpenCode</div>
+        <div class="bubble left solo-bubble">
+          <div class="solo-tools"></div>
+          <div class="solo-reasoning" style="display:none"><span class="sr-tag">💭 思考过程（点击展开/收起）</span><div class="sr-body" style="display:none"></div></div>
+          <div class="solo-stream-holder"></div>
+        </div>
+      </div>`;
+    document.getElementById('soloMessages').appendChild(row);
+    live.row = row;
+    live.holder = row.querySelector('.solo-stream-holder');
+    live.toolsEl = row.querySelector('.solo-tools');
+    live.reasoningEl = row.querySelector('.solo-reasoning');
+    soloScroll();
+  }
+  return live;
+}
+
+// 正文快照：同 partId 覆盖，新 partId 追加块
+function soloStreamText(ev) {
+  const live = soloEnsureLive(ev.taskId || ev.sessionId || curOcId);
+  if (!live.order.includes(ev.partId)) live.order.push(ev.partId);
+  live.parts.set(ev.partId, ev.text);
+  if (live.holder) {
+    let el = live.parts.get(ev.partId + '|el');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'solo-part-md';
+      live.holder.appendChild(el);
+      live.parts.set(ev.partId + '|el', el);
+    }
+    const stick = soloAtBottom();
+    el.innerHTML = renderMd(ev.text);
+    if (stick) soloScroll();
+  }
+}
+
+// 思考快照：弱化展示（默认收起，点标签展开）
+function soloStreamReasoning(ev) {
+  const live = soloEnsureLive(ev.sessionId || curOcId);
+  live.reasoning = ev.text;
+  if (live.reasoningEl) {
+    live.reasoningEl.style.display = '';
+    live.reasoningEl.querySelector('.sr-body').textContent = ev.text;
+    if (!live._rBound) {
+      live._rBound = true;
+      live.reasoningEl.querySelector('.sr-tag').onclick = () => {
+        const b = live.reasoningEl.querySelector('.sr-body');
+        b.style.display = b.style.display === 'none' ? '' : 'none';
+      };
+    }
+    if (soloAtBottom()) soloScroll();
+  }
+}
+
+// 工具调用：追加过程行
+function soloStreamTool(ev) {
+  const live = soloEnsureLive(ev.sessionId || curOcId);
+  live.tools.push(ev.summary || ev.name);
+  if (live.toolsEl) {
+    const div = document.createElement('div');
+    div.textContent = ev.summary || `[工具] ${ev.name}`;
+    live.toolsEl.appendChild(div);
+    if (soloAtBottom()) soloScroll();
+  }
+}
+
+// 封口：本轮结束，产出正式消息对象入会话数组（DOM 保留，避免重绘闪烁）
+function sealSoloStream(key) {
+  const live = soloLive.get(key);
+  if (!live) return;
+  soloLive.delete(key);
+  const content = live.order.map(id => live.parts.get(id)).filter(Boolean).join('\n\n').trim();
+  if (content) {
+    const m = { role: 'assistant', agentId: 'solo', agentName: 'OpenCode', phase: 'work', taskId: key, content, ts: Date.now() };
+    getSess(key).push(m);
+    m._dom = live.row; // 已在屏上：重绘时跳过（renderMessages 全量重绘不涉及 solo）
+  }
+}
+
+// ---------- 对话发送 ----------
+function updateSoloSendBtn() {
+  const btn = document.getElementById('soloSendBtn');
+  if (soloBusy) {
+    btn.textContent = soloStopAsked ? '停止中…' : '停止';
+    btn.classList.add('stop');
+    btn.disabled = soloStopAsked;
+  } else {
+    btn.textContent = '发送';
+    btn.classList.remove('stop');
+    btn.disabled = false;
+  }
+}
+async function onSoloSendBtn() {
+  if (soloBusy) {
+    soloStopAsked = true;
+    updateSoloSendBtn();
+    try {
+      await api('/api/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'solo' }) });
+      toast('已请求停止，正在等待进程结束…');
+    } catch { toast('停止请求失败，请重试'); }
+    return;
+  }
+  soloSend();
+}
+
+async function soloSend() {
+  const el = document.getElementById('soloInput');
+  const text = el.value.trim();
+  if (!text) return;
+  if (!curOcId) { toast('请先点左上角「✚ 新会话」创建单聊会话'); return; }
+  if (soloBusy) return;
+  soloBusy = true;
+  soloStopAsked = false;
+  updateSoloSendBtn();
+  el.value = '';
+  pushSoloMsg(curOcId, { role: 'user', content: text, ts: Date.now() });
+  try {
+    await streamSSE('/api/oc/chat', { sessionId: curOcId, message: text, model: curOcModel }, (e) => {
+      if (e.type === 'text') {
+        soloStreamText({ taskId: e.sessionId, partId: e.partId, text: e.text });
+      } else if (e.type === 'reasoning') {
+        soloStreamReasoning(e);
+      } else if (e.type === 'tool') {
+        soloStreamTool(e);
+      } else if (e.type === 'session') {
+        const s = ocSessions.find(x => x.id === e.sessionId);
+        if (s && !s.ocSessionId) s.ocSessionId = e.ocSessionId;
+      } else if (e.type === 'done') {
+        sealSoloStream(e.sessionId);
+        if (e.error) addSoloSys('执行出错: ' + e.error, e.sessionId);
+        if (e.noResume) addSoloSys('ℹ 当前内核不支持会话续聊：每轮为独立对话（OpenCode 内核可多轮续聊）', e.sessionId);
+        finalizeSoloLinks(e.sessionId);
+      } else if (e.type === 'error') {
+        addSoloSys('单聊异常: ' + e.content, e.sessionId || curOcId);
+      }
+    });
+  } catch (err) {
+    addSoloSys('处理异常：' + (err && err.message || err), curOcId);
+  } finally {
+    sealSoloStream(curOcId);
+    soloBusy = false;
+    soloStopAsked = false;
+    updateSoloSendBtn();
+    loadOcSessions(); // 侧栏标题/时间刷新
+  }
+}
+
+// 定稿消息中的 .md 路径变成可点击预览链接（solo 气泡内）
+function finalizeSoloLinks(key) {
+  if (chatMode !== 'solo' || key !== curOcId) return;
+  const arr = getSess(key);
+  for (let i = arr.length - 1; i >= 0; i--) {
+    const m = arr[i];
+    if (m.role !== 'assistant' || m._soloLinked) continue;
+    const dom = m._dom;
+    if (!dom || !document.contains(dom)) { m._soloLinked = true; continue; }
+    const tx = dom.querySelector('.solo-part-md');
+    if (tx) {
+      const e = esc(m.content || '');
+      const h = linkifyMd(e);
+      if (h !== e) tx.innerHTML = h;
+    }
+    m._soloLinked = true;
+  }
+}
+
+// ---------- 单聊任务执行（OpenCode 单体逐个完成） ----------
+async function soloExecTasks(taskIds) {
+  if (taskBusy) { toast('正在执行中，请先停止当前批次'); return; }
+  taskBusy = true;
+  stopAsked = false;
+  updateRunAllBtn();
+  let gotAllDone = false;
+  try {
+    taskIds.forEach(id => { const t = tasks.find(x => x.id === id); if (t) t.status = 'running'; });
+    renderSidebar();
+    if (taskIds.length === 1) switchSoloSession(taskIds[0]);
+
+    await streamSSE('/api/tasks/run', { taskIds, scope: 'solo' }, (e) => {
+      if (e.type === 'task_start') {
+        switchSoloSession(e.taskId);
+        addSoloSys(`开始执行（OpenCode）：${e.title}`, e.taskId);
+      } else if (e.type === 'text') {
+        soloStreamText({ taskId: e.taskId, partId: e.partId, text: e.text });
+      } else if (e.type === 'notice') {
+        addSoloSys(e.content, e.taskId);
+      } else if (e.type === 'task_done') {
+        sealSoloStream(e.taskId);
+        finalizeSoloLinks(e.taskId);
+        const t = tasks.find(x => x.id === e.taskId);
+        if (t) t.status = e.status;
+        renderSidebar();
+        addSoloSys(`任务${e.status === 'done' ? '完成' : e.status === 'pending' ? '已停止（可重新执行）' : '失败'}：${e.title}`, e.taskId);
+        if (e.status === 'done') showDoneToast(e.taskId, `任务完成：${e.title}`);
+      } else if (e.type === 'all_done') {
+        gotAllDone = true;
+        addSoloSys('全部单聊任务执行完毕', curOcId);
+      } else if (e.type === 'error') {
+        addSoloSys('执行出错: ' + e.content, e.taskId);
+      }
+    });
+    if (!gotAllDone) addSoloSys('⚠ 与服务的连接中断，任务可能仍在后台执行；刷新页面可查看最新进度', curOcId);
+  } catch (err) {
+    addSoloSys('处理异常：' + (err && err.message || err), curOcId);
+  } finally {
+    taskBusy = false;
+    stopAsked = false;
+    updateRunAllBtn();
+  }
+  await loadTasks();
+  renderHeader();
+}
+
 function renderMembers() {
   const el = document.getElementById('members');
   el.innerHTML = agents.map(a =>
@@ -843,32 +1283,83 @@ function statusText(s) {
 }
 
 // 侧栏可见任务（顺序视图）：仅顺序任务；定时任务在「⏰ 定时任务」视图中管理
+// 单聊任务（runner='solo'）只在单聊模式侧栏显示，群聊侧栏反之
 function visibleTasks() {
-  return tasks.filter(t => t.kind !== 'scheduled');
+  const solo = chatMode === 'solo';
+  return tasks.filter(t => t.kind !== 'scheduled' && (solo ? t.runner === 'solo' : t.runner !== 'solo'));
 }
 
 function renderSidebar() {
   const el = document.getElementById('sessionList');
   const badge = document.getElementById('pendingBadge');
 
-  // ---- 单聊模式：终端快捷命令面板（顺序/定时任务在群聊模式侧栏） ----
+  // ---- 单聊模式：单聊会话列表 + 单聊任务（终端快捷命令收进「⌨ 终端」标签顶部区域不再展示） ----
   if (chatMode === 'solo') {
-    badge.style.display = 'none';
-    el.innerHTML = `<div class="term-quick">
-      <div class="tq-title">🚀 常用命令（点击执行）</div>
-      ${QUICK_CMDS.map((c, i) => `<button class="tq-btn" title="${escAttr(c)}" onclick="termRunQuick(${i})">${esc(c)}</button>`).join('')}
-      <div class="tq-note">单聊 = 直接与本机终端交互，可运行 opencode / git / npm 等任何命令。<br><br>
-      · 交互式 TUI（直接输入 <b>opencode</b>）在网页终端里受限，请先用 <b>opencode run "提示词"</b> 方式<br>
-      · cd 会保留在当前终端会话；<b>Ctrl+C</b> 按钮中断当前命令；「清屏」清空显示<br>
-      · 输入框 ↑↓ 键切换历史命令<br>
-      · 切回「👥 群聊」即回到多智能体协作</div>
-    </div>`;
+    const sessHtml = ocSessions.length
+      ? ocSessions.map(s => `
+        <div class="task-item ${curOcId === s.id ? 'active' : ''}" onclick="switchSoloSession('${escAttr(s.id)}')">
+          ${unreadSess.has(s.id) ? '<span class="unread-dot"></span>' : ''}
+          <div class="task-avatar st-done" style="background:#10aeff">💬</div>
+          <div class="task-main">
+            <div class="task-title">${esc(s.title || '新会话')}</div>
+            <div class="task-sub"><span>${esc(s.model || '默认模型')}</span><span>${fmtTime(s.updatedAt)}</span></div>
+          </div>
+          <button class="mini-btn danger" title="删除会话及其消息" onclick="event.stopPropagation();delOcSession('${escAttr(s.id)}')">✕</button>
+        </div>`).join('')
+      : '<div class="task-empty">暂无单聊会话<br>点右上角「✚ 新会话」开始</div>';
+
+    let tasksHtml = '';
+    if (taskView === 'sched') {
+      const sched = tasks.filter(t => t.kind === 'scheduled' && t.runner === 'solo').sort((a, b) => (a.scheduledAt || 0) - (b.scheduledAt || 0));
+      const pend = sched.filter(t => t.status === 'pending').length;
+      badge.style.display = pend ? 'inline' : 'none';
+      badge.textContent = pend;
+      tasksHtml = sched.length ? sched.map(t => {
+        const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : '⏰';
+        const st = t.status === 'pending'
+          ? `<span class="sched-time">${fmtSched(t.scheduledAt || t.createdAt)}</span> · ${schedCountdown(t.scheduledAt)}`
+          : statusText(t.status);
+        return `<div class="task-item ${curOcId === t.id ? 'active' : ''}" ${t.status === 'pending' ? '' : `onclick="switchSoloSession('${escAttr(t.id)}')"`}>
+          ${unreadSess.has(t.id) ? '<span class="unread-dot"></span>' : ''}
+          <div class="task-avatar st-${t.status === 'pending' ? 'scheduled' : t.status}">${icon}</div>
+          <div class="task-main">
+            <div class="task-title">${esc(t.title)}</div>
+            <div class="task-sub"><span>${st}</span></div>
+          </div>
+          ${t.status === 'pending' ? `<button class="mini-btn" title="不再等到点，立即执行" onclick="event.stopPropagation();runSchedNow('${escAttr(t.id)}')">立即执行</button>` : ''}
+          ${t.status === 'failed' ? `<button class="mini-btn" title="重新执行" onclick="event.stopPropagation();runSchedNow('${escAttr(t.id)}')">重跑</button>` : ''}
+          <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
+        </div>`;
+      }).join('') : '<div class="task-empty">暂无定时任务<br>点右上角「导入任务」→「定时任务」标签添加</div>';
+    } else {
+      const vis = visibleTasks();
+      const pend = vis.filter(t => t.status === 'pending').length;
+      badge.style.display = pend ? 'inline' : 'none';
+      badge.textContent = pend;
+      tasksHtml = vis.length ? vis.map(t => {
+        const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : '•';
+        return `<div class="task-item ${curOcId === t.id ? 'active' : ''}" draggable="${!taskBusy && t.status !== 'running'}" ondragstart="onDragStart('${escAttr(t.id)}',event)" ondragover="onDragOver(event)" ondragleave="this.classList.remove('drag-over')" ondrop="onDrop('${escAttr(t.id)}',event)" onclick="switchSoloSession('${escAttr(t.id)}')">
+          ${unreadSess.has(t.id) ? '<span class="unread-dot"></span>' : ''}
+          <div class="task-avatar st-${t.status}">${icon}</div>
+          <div class="task-main">
+            <div class="task-title">${esc(t.title)}</div>
+            <div class="task-sub"><span>${statusText(t.status)}</span><span>${fmtTime(t.createdAt)}</span></div>
+          </div>
+          ${t.status === 'pending' || t.status === 'failed' ? `<button class="mini-btn" onclick="event.stopPropagation();runTask('${escAttr(t.id)}')">执行</button>` : ''}
+          <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
+        </div>`;
+      }).join('') : '<div class="task-empty">暂无顺序任务<br>点右上角「导入任务」添加<br>（单聊任务由 OpenCode 单体执行）</div>';
+    }
+
+    el.innerHTML =
+      '<div class="list-sep">单聊会话（OpenCode 多轮续聊）</div>' + sessHtml +
+      `<div class="list-sep">${taskView === 'sched' ? '定时任务（单聊 · 到点自动执行）' : '单聊任务（点击查看会话，可拖拽排序）'}</div>` + tasksHtml;
     return;
   }
 
   // ---- 定时视图：全部定时任务（含未触发），按启动时间排序 ----
   if (taskView === 'sched') {
-    const sched = tasks.filter(t => t.kind === 'scheduled').sort((a, b) => (a.scheduledAt || 0) - (b.scheduledAt || 0));
+    const sched = tasks.filter(t => t.kind === 'scheduled' && t.runner !== 'solo').sort((a, b) => (a.scheduledAt || 0) - (b.scheduledAt || 0));
     const pend = sched.filter(t => t.status === 'pending').length;
     badge.style.display = pend ? 'inline' : 'none';
     badge.textContent = pend;
@@ -967,10 +1458,12 @@ async function delTask(id) {
   });
   if (data.success) {
     if (curTaskId === id) switchSession('');
+    if (curOcId === id) { curOcId = ''; renderHeader(); soloRenderMessages(); }
     tasks = data.tasks || [];
     renderSidebar();
     await loadMessages(); // 会话列表同步移除被删任务的消息
     renderMessages();
+    if (chatMode === 'solo') soloRenderMessages();
     toast('任务已删除');
   } else toast(data.error || '删除失败');
 }
@@ -1002,11 +1495,15 @@ function markUnread(key) {
   renderSidebar();
 }
 
-// 取某会话最后一条汇总（report）消息文本，作为弹窗预览内容
+// 取某会话最后一条汇总消息文本（群聊取 report 阶段；单聊任务取最后一条 assistant），作为弹窗预览内容
 function lastReportText(taskId) {
   const arr = getSess(sessKey(taskId));
   for (let i = arr.length - 1; i >= 0; i--) {
-    if (arr[i].phase === 'report' && arr[i].content) return String(arr[i].content).replace(/\s+/g, ' ').trim();
+    const m = arr[i];
+    if (m.phase === 'report' && m.content) return String(m.content).replace(/\s+/g, ' ').trim();
+  }
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i].role === 'assistant' && arr[i].content) return String(arr[i].content).replace(/\s+/g, ' ').trim();
   }
   return '';
 }
@@ -1014,7 +1511,7 @@ function lastReportText(taskId) {
 // 右下角弹窗：显示最终回答部分内容，点击跳回原会话；不处理 3 秒后自动消失（保留绿点）
 function showDoneToast(taskId, title) {
   const key = sessKey(taskId || '');
-  if (key === curKey()) return; // 用户正在看该会话，无需提醒
+  if (key === curKey() || (chatMode === 'solo' && key === curOcId)) return; // 用户正在看该会话，无需提醒
   markUnread(key);
   const old = document.querySelector('.done-toast');
   if (old) old.remove();
@@ -1025,7 +1522,7 @@ function showDoneToast(taskId, title) {
   t.title = '点击查看完整对话';
   t.innerHTML = `<div class="dt-head">✅ ${esc(title || (taskId ? '任务完成' : '已回复'))}</div><div class="dt-body">${esc(text.slice(0, 120))}${text.length > 120 ? '…' : ''}</div>`;
   t.onclick = () => {
-    switchSession(taskId || '');
+    jumpToSession(taskId || '');
     t.remove();
     if (doneToastTimer) { clearTimeout(doneToastTimer); doneToastTimer = null; }
   };
@@ -1033,11 +1530,21 @@ function showDoneToast(taskId, title) {
   doneToastTimer = setTimeout(() => { t.remove(); doneToastTimer = null; }, 3000);
 }
 
+// 跳转到某会话：solo 任务进单聊视图，其余进群聊视图
+function jumpToSession(taskId) {
+  const t = taskId ? tasks.find(x => x.id === taskId) : null;
+  if (t && t.runner === 'solo') switchSoloSession(taskId);
+  else switchSession(taskId);
+}
+
 function renderHeader() {
   if (chatMode === 'solo') {
-    document.getElementById('chatTitle').textContent = '单聊 · 本机终端';
-    document.getElementById('members').innerHTML = '<span style="font-size:11px;color:#b2b2b2">直接操作本机命令行（opencode / git / npm…），与群聊互不影响</span>';
-    document.getElementById('newSessBtn').style.display = 'none';
+    const s = ocSessions.find(x => x.id === curOcId);
+    const t = curOcId ? tasks.find(x => x.id === curOcId && x.runner === 'solo') : null;
+    document.getElementById('chatTitle').textContent = t ? `单聊任务 · ${t.title}` : (s ? `单聊 · ${s.title || '新会话'}` : '单聊 · OpenCode 工作台');
+    const modelTxt = curOcModel || '默认模型';
+    document.getElementById('members').innerHTML = `<span style="font-size:11px;color:#b2b2b2">${t ? '单聊任务会话 · ' + statusText(t.status) + ' · ' : ''}模型：${esc(modelTxt)}${ocModelNoResume ? ' · 当前内核不支持续聊' : ' · 同会话多轮续聊'}</span>`;
+    document.getElementById('newSessBtn').style.display = '';
     document.getElementById('histBtn').style.display = 'none';
     return;
   }
@@ -1534,10 +2041,21 @@ function handleStreamEvent(e) {
 }
 
 // ---------- 任务执行 ----------
-async function runTask(taskId) { await execTasks([taskId]); }
+async function runTask(taskId) {
+  const t = tasks.find(x => x.id === taskId);
+  if (chatMode === 'solo' || (t && t.runner === 'solo')) { await soloExecTasks([taskId]); return; }
+  await execTasks([taskId]);
+}
 
 async function runAllTasks() {
-  // 仅顺序任务参与「执行全部」；定时任务由定时调度器/立即执行按钮负责
+  // 按当前模式执行对应待办：单聊=OpenCode 单体任务；群聊=管家编排任务
+  // 定时任务由定时调度器/立即执行按钮负责
+  if (chatMode === 'solo') {
+    const pending = visibleTasks().filter(t => t.status === 'pending' || t.status === 'failed');
+    if (pending.length === 0) { toast('没有待执行的单聊任务'); return; }
+    await soloExecTasks(pending.map(t => t.id));
+    return;
+  }
   const pending = visibleTasks().filter(t => t.status === 'pending' || t.status === 'failed');
   if (pending.length === 0) { toast('没有待执行的顺序任务'); return; }
   await execTasks(pending.map(t => t.id));
@@ -1603,8 +2121,11 @@ async function execTasks(taskIds) {
   renderHeader();
 }
 
-// ---------- 开启新会话（清空当前聊天显示，旧内容可在「历史」中查看，不再纳入上下文） ----------
+// ---------- 开启新会话 ----------
+// 群聊：清空当前聊天显示（旧内容可在「历史」中查看，不再纳入上下文）
+// 单聊：新建一个 OpenCode 单聊会话
 async function newSession() {
+  if (chatMode === 'solo') { newOcSession(); return; }
   if (chatBusy) { toast('当前消息处理中，请等待或停止后再开新会话'); return; }
   const data = await api('/api/session/new', { method: 'POST' });
   if (data.success) {
@@ -1667,14 +2188,18 @@ async function exportHistory() {
 }
 
 async function clearAllHistory() {
-  if (!confirm('确定清空全部会话记录？\n\n将删除：\n· 全部聊天消息（主会话 + 任务会话）\n· 会话产出文件（看板 / 过程存档）\n· 流转日志\n\n任务列表本身保留。此操作不可恢复。')) return;
+  if (!confirm('确定清空全部会话记录？\n\n将删除：\n· 全部聊天消息（主会话 + 任务会话 + 单聊会话）\n· 单聊会话列表\n· 会话产出文件（看板 / 过程存档）\n· 流转日志\n\n任务列表本身保留。此操作不可恢复。')) return;
   const data = await api('/api/history/clear', { method: 'POST' });
   if (data.success) {
     sessions.clear();
     curTaskId = '';
+    curOcId = '';
+    ocSessions = [];
     await loadMessages();
     closeHistory();
     renderHeader();
+    renderSidebar();
+    soloRenderMessages();
     toast(`已清空：${data.messages} 条消息、${data.outputDirs} 个会话产出目录`);
   } else toast(data.error || '清空失败');
 }
@@ -1785,17 +2310,24 @@ function importKeydown(e) {
 async function doImport() {
   const text = importText.value;
   if (!text.trim()) { toast('请先粘贴任务文本'); return; }
+  // 任务归属当前模式：单聊模式导入的任务由 OpenCode 单体执行，群聊模式走管家编排
   const data = await api('/api/tasks/import', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, mode: importMode })
+    body: JSON.stringify({ text, mode: importMode, runner: chatMode === 'solo' ? 'solo' : '' })
   });
   if (data.success) {
     tasks = data.tasks || [];
     renderSidebar();
-    addSys(importMode === 'scheduled'
-      ? `已添加 ${data.added} 个定时任务（可在「⏰ 定时任务」中管理）`
-      : `已提取 ${data.added} 个顺序任务`);
-    (data.warnings || []).forEach(w => addSys('⚠ ' + w));
+    if (chatMode === 'solo') {
+      addSoloSys(importMode === 'scheduled'
+        ? `已添加 ${data.added} 个单聊定时任务（到点由 OpenCode 自动执行）`
+        : `已提取 ${data.added} 个单聊任务（OpenCode 逐个执行）`);
+    } else {
+      addSys(importMode === 'scheduled'
+        ? `已添加 ${data.added} 个定时任务（可在「⏰ 定时任务」中管理）`
+        : `已提取 ${data.added} 个顺序任务`);
+    }
+    (data.warnings || []).forEach(w => chatMode === 'solo' ? addSoloSys('⚠ ' + w) : addSys('⚠ ' + w));
     closeImport();
     importText.value = '';
     if (importMode === 'scheduled' && schedOpen) renderSchedList();
@@ -1806,6 +2338,7 @@ async function clearTasks() {
   if (!confirm('确定清空全部任务？（任务会话的对话记录也会从列表移除）')) return;
   await api('/api/tasks/clear', { method: 'POST' });
   if (curTaskId) switchSession('');
+  if (curOcId && !ocSessions.some(s => s.id === curOcId)) { curOcId = ''; renderHeader(); soloRenderMessages(); }
   await loadTasks();
 }
 
@@ -1865,6 +2398,8 @@ function schedCountdown(ts) {
 
 async function runSchedNow(id) {
   if (taskBusy) { toast('正在执行中，请先停止当前批次'); return; }
+  const t = tasks.find(x => x.id === id);
+  if (chatMode === 'solo' || (t && t.runner === 'solo')) { await soloExecTasks([id]); return; }
   await execTasks([id]);
 }
 
@@ -2566,13 +3101,14 @@ function openHelp() {
       <li>结束后管家输出总结：<b>共识 / 分歧（注明持方）/ 建议行动</b>；发言与总结都存档，流转视图可回溯（紫色 ⚖ 圆点为主持人判定）</li>
     </ul>
   </div>
-  <div class="help-sec"><h4>👤 单聊 / 👥 群聊（左上角开关）</h4>
+  <div class="help-sec"><h4>👤 单聊工作台 / 👥 群聊（左上角开关）</h4>
     <ul>
-      <li>左上角「会话」下方的开关一键切换：<b>群聊</b> = 多智能体协作主界面；<b>单聊</b> = 本机网页终端</li>
-      <li>单聊把本机终端搬进网页：可运行 <code>opencode</code> / <code>git</code> / <code>npm</code> 等任何命令，输出实时回显，<code>cd</code> 在会话内保留</li>
-      <li>侧栏提供常用命令一键执行；输入框 ↑↓ 切换历史命令；<b>Ctrl+C</b> 中断当前命令，「清屏」清空显示</li>
-      <li>交互式 TUI（直接输入 <code>opencode</code>）在网页终端里受限，请先用命令式 <code>opencode run "提示词"</code>；后续版本将进一步适配</li>
-      <li>任务会话属于群聊模式：在群聊侧栏点击任务即可进入，单聊互不影响</li>
+      <li>左上角「会话」下方的开关一键切换：<b>群聊</b> = 多智能体协作主界面；<b>单聊</b> = OpenCode 一对一工作台</li>
+      <li><b>💬 AI 对话</b>：点「✚ 新会话」与 OpenCode 单聊，同一会话多轮续聊（上下文连续）；回复以 Markdown 渲染，思考过程与工具调用实时展示（思考默认收起，点标题展开）</li>
+      <li><b>模型选择</b>：顶部下拉切换模型（来自 <code>opencode models</code>），「⟳ 模型」重新拉取列表；选择会记忆，下次打开自动恢复</li>
+      <li><b>⌨ 终端</b>：把本机终端搬进网页，可运行 <code>opencode</code> / <code>git</code> / <code>npm</code> 等任何命令，<code>cd</code> 在会话内保留；↑↓ 切换历史命令，Ctrl+C 中断</li>
+      <li><b>单聊任务</b>：单聊模式下「导入任务」创建的任务由 OpenCode 单体逐个执行（顺序/定时与群聊同款用法），与群聊任务互不干扰；群聊任务走管家编排</li>
+      <li>非 OpenCode 内核（Claude Code / Codex / pi）下单聊退化为一次性对话（无续聊与模型列表），功能不受影响</li>
     </ul>
   </div>
   <div class="help-sec"><h4>📄 Markdown 预览</h4>
@@ -2584,7 +3120,7 @@ function openHelp() {
   </div>
   <div class="help-sec"><h4>🕘 历史与数据管理</h4>
     <ul>
-      <li>「🕘 历史」弹窗底部：<b>⬇ 导出 sessions.md</b> 把全部会话（含任务会话）导出为一个 Markdown 文件；<b>🗑 清空全部会话</b> 一键删除消息、会话产出文件与流转日志（任务列表保留）</li>
+      <li>「🕘 历史」弹窗底部：<b>⬇ 导出 sessions.md</b> 把全部会话（含任务会话与单聊会话）导出为一个 Markdown 文件；<b>🗑 清空全部会话</b> 一键删除消息、单聊会话、会话产出文件与流转日志（任务列表保留）</li>
       <li>全部页面关闭且无任务执行/审批等待/待触发定时任务时，后台服务空闲 3 分钟自动退出（<code>.env AGENTS_CHAT_AUTOSTOP=0</code> 可关闭），需要时重新运行 start 即可</li>
     </ul>
   </div>
