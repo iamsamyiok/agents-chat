@@ -107,17 +107,17 @@
   .typing i:nth-child(3) { animation-delay: .4s; }
   @keyframes blink { 0%,80%,100% { opacity: .25; } 40% { opacity: 1; } }
 
-  #composer { background: #fff; border-top: 1px solid #e7e7e7; padding: 12px 14px; position: relative; }
+  .composer { background: #fff; border-top: 1px solid #e7e7e7; padding: 12px 14px; position: relative; }
   .input-row { display: flex; gap: 10px; }
-  #input { flex: 1; border: 1px solid #e2e2e2; border-radius: 6px; padding: 10px 12px; font-size: 14px; outline: none; }
-  #input:focus { border-color: #07c160; }
-  #sendBtn { background: #07c160; color: #fff; border: none; border-radius: 6px; padding: 0 22px; font-size: 14px; cursor: pointer; }
+  #input, #soloInput { flex: 1; border: 1px solid #e2e2e2; border-radius: 6px; padding: 10px 12px; font-size: 14px; outline: none; }
+  #input:focus, #soloInput:focus { border-color: #07c160; }
+  #sendBtn, #soloSendBtn { background: #07c160; color: #fff; border: none; border-radius: 6px; padding: 0 22px; font-size: 14px; cursor: pointer; }
   #rtBtn { background: #f2f3f5; color: #555; border: none; border-radius: 6px; padding: 0 14px; font-size: 13px; cursor: pointer; white-space: nowrap; }
   #rtBtn:hover { background: #e8eaee; }
   #rtBtn.on { background: #8a6fe8; color: #fff; }
-  #sendBtn:disabled { background: #9ff0c1; cursor: not-allowed; }
-  #sendBtn.stop, .run-all.stop { background: #fa5151; color: #fff; }
-  #sendBtn.stop:hover, .run-all.stop:hover { background: #e04840; }
+  #sendBtn:disabled, #soloSendBtn:disabled { background: #9ff0c1; cursor: not-allowed; }
+  #sendBtn.stop, #soloSendBtn.stop, .run-all.stop { background: #fa5151; color: #fff; }
+  #sendBtn.stop:hover, #soloSendBtn.stop:hover, .run-all.stop:hover { background: #e04840; }
   .msg-file { font-size: 11px; color: #8a6fe8; background: #f4f1fd; border-radius: 4px; padding: 3px 8px; margin-top: 4px; max-width: 100%; word-break: break-all; cursor: default; }
 
   /* 过程内容折叠：默认约 3 行，点击展开 */
@@ -182,8 +182,8 @@
   .at-tx i { font-style: normal; color: #999; font-size: 11px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
 
   /* ---------- 弹窗 ---------- */
-  #modalMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask, #memMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
-  #modalMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show, #memMask.show { display: flex; }
+  #modalMask, #batchMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask, #memMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
+  #modalMask.show, #batchMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show, #memMask.show { display: flex; }
   /* 团队仓库卡片 */
   .team-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
   .team-card .tc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -251,6 +251,23 @@
 
   .modal.wide { width: 680px; }
   #historyList { max-height: 62vh; overflow-y: auto; background: #f5f5f5; border-radius: 8px; padding: 12px; }
+
+  /* ---------- 批量管理任务弹窗 ---------- */
+  #batchList { max-height: 56vh; overflow-y: auto; border: 1px solid #eee; border-radius: 8px; margin-bottom: 12px; }
+  .batch-group { font-size: 11px; color: #999; padding: 8px 12px 4px; background: #fafafa; position: sticky; top: 0; }
+  .batch-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid #f5f5f5; }
+  .batch-item:last-child { border-bottom: none; }
+  .batch-item input[type="checkbox"] { flex: none; cursor: pointer; }
+  .batch-item .bi-title { flex: 1; min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .batch-item .bi-sub { font-size: 11px; color: #b2b2b2; white-space: nowrap; }
+  .bi-state { font-size: 11px; border-radius: 4px; padding: 1px 6px; flex: none; }
+  .bi-state.pending { background: #f0f0f0; color: #888; }
+  .bi-state.running { background: #e8f4ff; color: #10aeff; }
+  .bi-state.done { background: #eef7f0; color: #07c160; }
+  .bi-state.failed { background: #fbeceb; color: #fa5151; }
+  .batch-bar { display: flex; align-items: center; gap: 10px; }
+  .batch-bar label { font-size: 12.5px; color: #555; display: flex; align-items: center; gap: 5px; cursor: pointer; flex: none; }
+  .batch-empty { color: #b0b0b0; font-size: 13px; text-align: center; padding: 30px 20px; line-height: 1.8; }
   .task-item[draggable="true"] { cursor: grab; }
   .task-item.drag-over { outline: 2px dashed #07c160; outline-offset: -2px; }
   .mini-btn.danger { color: #d54941; border-color: #ecc; }
@@ -262,46 +279,23 @@
   }
   #menuBtn { display: none; background: none; border: none; font-size: 18px; cursor: pointer; color: #555; margin-right: 10px; }
 
-  /* ---------- 单聊/群聊模式开关（侧栏顶部「会话」位置） ---------- */
-  .side-header { flex-wrap: wrap; gap: 8px; }
+  /* ---------- 侧栏顶部：单聊/群聊开关 + 任务操作按钮 ---------- */
+  .side-header { padding: 12px 12px 10px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid #f0f0f0; }
   .mode-switch { display: inline-flex; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
-  .mode-switch button { border: none; background: #fff; font-size: 13px; padding: 5px 14px; cursor: pointer; color: #666; }
+  .mode-switch button { border: none; background: #fff; font-size: 13px; padding: 5px 0; cursor: pointer; color: #666; flex: 1; }
   .mode-switch button + button { border-left: 1px solid #ddd; }
   .mode-switch button.active { background: #07c160; color: #fff; font-weight: 600; }
-  .side-header .hdr-line { display: flex; align-items: center; justify-content: space-between; width: 100%; }
-  .side-header .hdr-line b { font-size: 14px; }
+  .side-header .side-actions { display: flex; gap: 6px; width: 100%; }
+  .side-header .side-actions .mini-btn { flex: 1; padding: 4px 0; text-align: center; }
   .ttab .badge { margin-left: 4px; vertical-align: 1px; }
 
-  /* ---------- 单聊模式：Web 终端（OpenCode 交互） ---------- */
+  /* ---------- 单聊工作台（OpenCode）：模型输入框 / 过程块 ---------- */
   #soloView { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #f7f7f7; }
-  #soloTermPane { background: #0d1117; display: flex; flex-direction: column; flex: 1; min-height: 0; }
-  .term-bar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #161b22; border-bottom: 1px solid #21262d; font-size: 12px; color: #8b949e; flex: none; }
-  .term-bar .tb-title { color: #c9d1d9; font-weight: 600; font-size: 13px; }
-  .term-bar .tb-cwd { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; font-family: Consolas, Menlo, monospace; }
-  .term-btn { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 4px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; }
-  .term-btn:hover { background: #30363d; }
-  .term-btn.warn { color: #f85149; border-color: #f8514955; }
-  .term-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px; font: 13px/1.7 Consolas, Menlo, "Courier New", monospace; color: #c9d1d9; white-space: pre-wrap; word-break: break-all; }
-  .term-body .t-cmd { color: #7ee787; }
-  .term-body .t-sys { color: #8b949e; }
-  .term-input-row { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: #161b22; border-top: 1px solid #21262d; flex: none; }
-  .term-input-row .t-prompt { color: #7ee787; font: 14px Consolas, Menlo, monospace; flex: none; }
-  #termInput { flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 9px 12px; font: 13px Consolas, Menlo, monospace; color: #c9d1d9; outline: none; }
-  #termInput:focus { border-color: #238636; }
-  .term-quick { padding: 10px 14px; }
-  .term-quick .tq-title { font-size: 12px; color: #8b949e; margin-bottom: 8px; }
-  .term-quick .tq-btn { display: block; width: 100%; text-align: left; background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 7px 10px; font: 12px Consolas, Menlo, monospace; cursor: pointer; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .term-quick .tq-btn:hover { background: #21262d; border-color: #238636; }
-  .term-quick .tq-note { font-size: 11px; color: #6e7681; line-height: 1.7; margin-top: 8px; }
-
-  /* ---------- 单聊工作台（OpenCode）：顶栏 / 模型下拉 / 过程块 ---------- */
-  .solo-topbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #fff; border-bottom: 1px solid #e7e7e7; flex: none; }
-  .solo-tabs { display: inline-flex; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
-  .solo-tabs .stab { border: none; background: #fff; font-size: 13px; padding: 5px 14px; cursor: pointer; color: #666; }
-  .solo-tabs .stab + .stab { border-left: 1px solid #ddd; }
-  .solo-tabs .stab.active { background: #07c160; color: #fff; font-weight: 600; }
-  .solo-model { border: 1px solid #ddd; border-radius: 8px; font-size: 12px; padding: 5px 8px; color: #333; max-width: 300px; background: #fff; }
-  .solo-model-hint { font-size: 11px; color: #b2b2b2; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #soloChatPane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .oc-model-box { display: flex; align-items: center; }
+  #ocModelInput { width: 200px; border: 1px solid #e2e2e2; border-radius: 4px; padding: 4px 10px; font-size: 12px; outline: none; color: #333; background: #fff; }
+  #ocModelInput:focus { border-color: #07c160; }
+  #ocModelInput::placeholder { color: #b2b2b2; }
   #soloMessages { flex: 1; overflow-y: auto; padding: 16px 18px; }
   .solo-empty { text-align: center; color: #b2b2b2; font-size: 13px; padding: 60px 20px; line-height: 2; }
   .avatar.solo-av { background: #10aeff; }
@@ -360,16 +354,14 @@
 <div id="app">
   <aside id="sidebar">
     <div class="side-header">
-      <div class="hdr-line">
-        <b>会话</b>
-        <div class="side-actions">
-          <button class="mini-btn" onclick="openImport()">导入任务</button>
-          <button class="mini-btn gray" onclick="clearTasks()">清空</button>
-        </div>
-      </div>
       <div class="mode-switch" id="modeSwitch">
         <button id="modeSoloBtn" onclick="setChatMode('solo')">👤 单聊</button>
         <button id="modeGroupBtn" class="active" onclick="setChatMode('group')">👥 群聊</button>
+      </div>
+      <div class="side-actions">
+        <button class="mini-btn" onclick="openImport()">导入任务</button>
+        <button class="mini-btn gray" onclick="openBatchMgr()" title="批量管理全部顺序任务与定时任务（删除/执行）">批量管理</button>
+        <button class="mini-btn gray" onclick="clearTasks()">清空</button>
       </div>
     </div>
     <div class="task-tabs" id="taskTabs">
@@ -394,17 +386,21 @@
         </div>
       </div>
       <div class="hdr-right">
+        <div class="oc-model-box" id="ocModelBox" style="display:none" title="默认模型：可直接输入 provider/model 筛选选择，点击自动刷新列表">
+          <input id="ocModelInput" list="ocModelList" placeholder="默认模型" autocomplete="off" spellcheck="false">
+          <datalist id="ocModelList"></datalist>
+        </div>
         <button class="cfg-btn" id="newSessBtn" onclick="newSession()">✚ 新会话</button>
         <button class="cfg-btn" id="histBtn" onclick="openHistory()">🕘 历史</button>
         <button class="cfg-btn" id="flowEntryBtn" onclick="openFlow()">🔭 流转</button>
-        <button class="cfg-btn" onclick="openAgents()">⚙ 智能体配置</button>
+        <button class="cfg-btn" id="agentsCfgBtn" onclick="openAgents()">⚙ 智能体配置</button>
         <span class="runner-tag" id="runnerTag" style="display:none"></span>
         <button class="cfg-btn" id="helpBtn" onclick="openHelp()" title="使用帮助">❓ 帮助</button>
       </div>
     </header>
     <div id="groupView" style="flex:1;min-height:0;display:flex;flex-direction:column">
       <div id="messages"></div>
-      <footer id="composer">
+      <footer class="composer" id="groupComposer">
         <div class="input-row">
           <button id="rtBtn" onclick="toggleRoundtable()" title="圆桌讨论模式：所有被 @ 的智能体（未 @ 则全体）围绕主题轮流发言、互相反驳，管家当主持人控制轮数并总结共识与分歧">💬 圆桌</button>
           <input id="input" placeholder="输入消息，@ 可点名智能体…" autocomplete="off">
@@ -414,41 +410,33 @@
       </footer>
     </div>
     <div id="soloView" style="display:none">
-      <div class="solo-topbar">
-        <div class="solo-tabs">
-          <button id="soloTabChat" class="stab active" onclick="setSoloTab('chat')">💬 AI 对话</button>
-          <button id="soloTabTerm" class="stab" onclick="setSoloTab('term')">⌨ 终端</button>
-        </div>
-        <select id="ocModelSel" class="solo-model" onchange="onSoloModelPick()" title="模型选择（来自 opencode models）"></select>
-        <button class="term-btn" style="background:#fff;color:#666;border-color:#ddd" onclick="refreshOcModels()" title="重新拉取模型列表（opencode models）">⟳ 模型</button>
-        <span class="solo-model-hint" id="soloModelHint"></span>
-      </div>
       <div id="soloChatPane" style="flex:1;min-height:0;display:flex;flex-direction:column">
         <div id="soloMessages"></div>
-        <footer id="composer">
+        <footer class="composer" id="soloComposer">
           <div class="input-row">
-            <input id="soloInput" placeholder="输入消息，与 OpenCode 单聊（会话内多轮续聊）…" autocomplete="off">
+            <input id="soloInput" placeholder="输入消息，与 AI 单聊（同会话多轮续聊）…" autocomplete="off">
             <button id="soloSendBtn" onclick="onSoloSendBtn()">发送</button>
           </div>
         </footer>
       </div>
-      <div id="soloTermPane" style="display:none">
-        <div class="term-bar">
-          <span class="tb-title">⌨ 终端</span>
-          <span class="tb-cwd" id="termCwd" title="工作目录"></span>
-          <button class="term-btn" onclick="termRun('opencode --version 2>&1 || echo 未安装 opencode')">检查 opencode</button>
-          <button class="term-btn" onclick="termClear()">清屏</button>
-          <button class="term-btn warn" onclick="termSignal('int')" title="中断当前命令（Ctrl+C）">Ctrl+C</button>
-        </div>
-        <div class="term-body" id="termBody"></div>
-        <div class="term-input-row">
-          <span class="t-prompt" id="termPrompt">$</span>
-          <input id="termInput" placeholder="输入命令回车执行，↑↓ 切换历史命令…" autocomplete="off" spellcheck="false">
-          <button class="term-btn" style="background:#238636;border-color:#238636;color:#fff" onclick="sendTerm()">运行</button>
-        </div>
-      </div>
     </div>
   </main>
+</div>
+
+<!-- 批量管理任务弹窗 -->
+<div id="batchMask">
+  <div class="modal wide">
+    <h3>批量管理任务</h3>
+    <div class="tip">全部顺序任务与定时任务（含单聊/群聊两类）。勾选后可批量删除；顺序任务可批量执行。</div>
+    <div id="batchList"></div>
+    <div class="batch-bar">
+      <label><input type="checkbox" id="batchAll" onchange="toggleBatchAll(this.checked)"> 全选</label>
+      <span style="flex:1"></span>
+      <button class="mini-btn" onclick="batchRunSel()">▶ 执行选中（顺序）</button>
+      <button class="mini-btn danger" onclick="batchDeleteSel()">🗑 删除选中</button>
+      <button class="mini-btn gray" onclick="closeBatchMgr()">关闭</button>
+    </div>
+  </div>
 </div>
 
 <!-- 导入任务弹窗 -->
@@ -626,7 +614,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.13.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.14.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -647,7 +635,6 @@ let chatMode = 'group';        // 当前模式：group=群聊（多智能体）|
 const sessions = new Map();    // key: 'main' | taskId | oc会话id → 消息数组
 
 // ---------- 单聊工作台状态 ----------
-let soloTab = 'chat';          // solo 视图子标签：chat=AI 对话 | term=终端
 let ocSessions = [];           // 单聊会话列表（服务端 oc-sessions.json）
 let curOcId = '';              // 当前单聊会话 id（'' = 未选，显示空态引导）
 let soloBusy = false;          // 单聊进行中（发送按钮变「停止」）
@@ -734,19 +721,17 @@ async function init() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   });
 
-  // 单聊终端输入：回车执行、上下键切换历史命令
-  const ti = document.getElementById('termInput');
-  ti.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); sendTerm(); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); if (termCmdIdx > 0) { termCmdIdx--; ti.value = termCmdHist[termCmdIdx] || ''; } }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); if (termCmdIdx < termCmdHist.length - 1) { termCmdIdx++; ti.value = termCmdHist[termCmdIdx] || ''; } else { termCmdIdx = termCmdHist.length; ti.value = ''; } }
-  });
-
   // 单聊对话输入：回车发送
   const si = document.getElementById('soloInput');
   si.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); soloSend(); }
   });
+
+  // 单聊模型输入框：点击自动刷新列表；输入/选择即生效（精确匹配 id 或名称，或合法 provider/model）
+  const om = document.getElementById('ocModelInput');
+  om.addEventListener('focus', () => { loadOcModels(true); });
+  om.addEventListener('change', onOcModelPick);
+  om.addEventListener('blur', onOcModelPick);
 
   // Markdown 预览：消息中的 .md 路径 / 过程存档行 → 点击打开预览弹窗
   document.addEventListener('click', (e) => {
@@ -775,120 +760,17 @@ function setChatMode(mode) {
   document.getElementById('modeGroupBtn').classList.toggle('active', chatMode === 'group');
   document.getElementById('groupView').style.display = chatMode === 'group' ? 'flex' : 'none';
   document.getElementById('soloView').style.display = chatMode === 'solo' ? 'flex' : 'none';
-  // 顺序/定时任务标签两种模式共用（内容按 runner 过滤：单聊任务只在单聊侧栏显示）
-  document.getElementById('flowEntryBtn').style.display = chatMode === 'group' ? '' : 'none';
   renderSidebar();
   renderHeader();
+  updateFooterBtns();
   if (chatMode === 'solo') {
-    connectTerm();
     loadOcSessions();
     loadOcModels();
     setTimeout(() => { try { document.getElementById('soloInput').focus(); } catch {} }, 100);
   }
 }
 
-// ---------- 单聊模式：Web 终端 ----------
-let termSrc = null;
-let termCmdHist = [];
-let termCmdIdx = 0;
-const QUICK_CMDS = [
-  'pwd && ls -la',
-  'opencode --version 2>&1 || echo [未安装 opencode]',
-  'opencode auth login 2>&1 || opencode login 2>&1',
-  'opencode run "你好，请介绍一下你自己"',
-  'opencode --help 2>&1 | head -40',
-  'git status 2>&1 || echo [当前目录不是 git 仓库]'
-];
-
-function connectTerm() {
-  const body = document.getElementById('termBody');
-  if (!termSrc) {
-    try {
-      termSrc = new EventSource('/api/term/stream');
-      termSrc.onmessage = (ev) => {
-        let d;
-        try { d = JSON.parse(ev.data); } catch { return; }
-        if (d.type === 'init') {
-          document.getElementById('termCwd').textContent = d.cwd || '';
-          document.getElementById('termPrompt').textContent = d.platform === 'win32' ? '>' : '$';
-        } else if (d.type === 'data') {
-          termAppend(d.data);
-        } else if (d.type === 'clear') {
-          body.innerHTML = '';
-        }
-      };
-    } catch { /* 终端不可用时其余功能不受影响 */ }
-  }
-  setTimeout(() => { try { document.getElementById('termInput').focus(); } catch {} }, 100);
-}
-
-function termAppend(text) {
-  const body = document.getElementById('termBody');
-  const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 80;
-  body.appendChild(document.createTextNode(text));
-  while (body.childNodes.length > 4000) body.removeChild(body.firstChild);
-  if (atBottom) body.scrollTop = body.scrollHeight;
-}
-
-function termEcho(cmd) {
-  const body = document.getElementById('termBody');
-  const span = document.createElement('span');
-  span.className = 't-cmd';
-  span.textContent = `$ ${cmd}\n`;
-  body.appendChild(span);
-  body.scrollTop = body.scrollHeight;
-}
-
-async function sendTerm() {
-  const el = document.getElementById('termInput');
-  const cmd = el.value;
-  if (!cmd.trim()) return;
-  el.value = '';
-  termCmdHist.push(cmd);
-  termCmdIdx = termCmdHist.length;
-  termEcho(cmd);
-  try {
-    await api('/api/term/input', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: cmd }) });
-  } catch { termAppend('[发送失败：服务未响应]\n'); }
-}
-
-function termRunQuick(i) {
-  const cmd = QUICK_CMDS[i];
-  if (!cmd) return;
-  document.getElementById('termInput').value = cmd;
-  sendTerm();
-}
-
-async function termSignal(sig) {
-  try {
-    await api('/api/term/signal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signal: sig || 'int' }) });
-    termAppend('^C\n');
-  } catch { /* ignore */ }
-}
-
-async function termClear() {
-  try { await api('/api/term/clear', { method: 'POST' }); } catch { /* ignore */ }
-  document.getElementById('termBody').innerHTML = '';
-}
-
-// 顶栏快捷命令：填入输入框直接执行
-function termRun(cmd) {
-  document.getElementById('termInput').value = cmd;
-  sendTerm();
-}
-
 // ==================== 单聊工作台（OpenCode） ====================
-
-// ---------- 子标签：AI 对话 / 终端 ----------
-function setSoloTab(tab) {
-  soloTab = tab === 'term' ? 'term' : 'chat';
-  document.getElementById('soloTabChat').classList.toggle('active', soloTab === 'chat');
-  document.getElementById('soloTabTerm').classList.toggle('active', soloTab === 'term');
-  document.getElementById('soloChatPane').style.display = soloTab === 'chat' ? 'flex' : 'none';
-  document.getElementById('soloTermPane').style.display = soloTab === 'term' ? 'flex' : 'none';
-  if (soloTab === 'chat') setTimeout(() => { try { document.getElementById('soloInput').focus(); } catch {} }, 100);
-  else connectTerm();
-}
 
 // ---------- 模型列表 ----------
 async function loadOcModels(refresh) {
@@ -901,22 +783,32 @@ async function loadOcModels(refresh) {
     renderOcModelSel();
   } catch { /* 模型列表加载失败不影响聊天（用默认模型） */ }
 }
-function refreshOcModels() { loadOcModels(true).then(() => toast(ocModels.length ? `已刷新模型列表（${ocModels.length} 个）` : '模型列表为空：可先在终端运行 opencode auth login 配置')); }
+// 填充输入框 datalist：value=id（发送给内核），展示 label
 function renderOcModelSel() {
-  const sel = document.getElementById('ocModelSel');
+  const dl = document.getElementById('ocModelList');
   const saved = localStorage.getItem('ocModel') || '';
-  curOcModel = ocModels.some(m => m.id === saved) ? saved : '';
-  sel.innerHTML = '<option value="">默认模型</option>' + ocModels.map(m =>
-    `<option value="${escAttr(m.id)}" ${m.id === curOcModel ? 'selected' : ''}>${esc(m.label || m.id)}</option>`).join('');
-  const hint = document.getElementById('soloModelHint');
-  if (ocModelDemo) hint.textContent = '演示模式：模型列表为模拟数据';
-  else if (ocModelNoResume) hint.textContent = '当前内核不支持会话续聊与模型列表，每轮为独立对话';
-  else if (!ocModels.length) hint.textContent = '未获取到模型列表（默认模型可用；可在终端运行 opencode models 检查）';
-  else hint.textContent = `共 ${ocModels.length} 个模型可选`;
+  if (!curOcModel && ocModels.some(m => m.id === saved)) curOcModel = saved;
+  dl.innerHTML = ocModels.map(m => `<option value="${escAttr(m.id)}">${esc(m.label || m.id)}</option>`).join('');
+  syncOcModelInput();
 }
-function onSoloModelPick() {
-  curOcModel = document.getElementById('ocModelSel').value;
+function syncOcModelInput() {
+  const el = document.getElementById('ocModelInput');
+  if (!el) return;
+  if (document.activeElement !== el) el.value = curOcModel || '';
+  el.placeholder = ocModels.length ? '默认模型' : (ocModelDemo ? '默认模型（演示）' : '默认模型（未获取列表）');
+}
+// 输入/选择生效：精确匹配模型 id 或名称；或合法 provider/model 格式；否则回退
+function onOcModelPick() {
+  const el = document.getElementById('ocModelInput');
+  if (!el) return;
+  const v = el.value.trim();
+  if (!v) { curOcModel = ''; localStorage.setItem('ocModel', ''); syncOcModelInput(); return; }
+  const hit = ocModels.find(m => m.id === v || m.label === v);
+  if (hit) { curOcModel = hit.id; }
+  else if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(v)) { curOcModel = v; }
+  else { toast('未匹配到模型，已回退为默认模型'); curOcModel = ''; }
   localStorage.setItem('ocModel', curOcModel);
+  syncOcModelInput();
 }
 
 // ---------- 会话管理 ----------
@@ -994,10 +886,9 @@ function soloMsgNode(m) {
 function soloRenderMessages() {
   const box = document.getElementById('soloMessages');
   if (!curOcId) {
-    box.innerHTML = `<div class="solo-empty">👋 欢迎使用单聊工作台<br>
-      点左上角「✚ 新会话」开始与 OpenCode 一对一对话（多轮续聊）<br>
-      顶部可切换模型；「⌨ 终端」标签可直接执行本机命令<br>
-      「导入任务」创建的任务在单聊模式下由 OpenCode 单体逐个执行</div>`;
+    box.innerHTML = `<div class="solo-empty">👋 欢迎使用单聊<br>
+      点顶部「✚ 新会话」开始与 AI 一对一对话（同会话多轮续聊）<br>
+      顶部输入框可选择默认模型；「导入任务」创建的任务在单聊模式下逐个执行</div>`;
     return;
   }
   box.innerHTML = '';
@@ -1026,7 +917,7 @@ function soloEnsureLive(key) {
   if (live) return live;
   live = { parts: new Map(), order: [], tools: [], reasoning: '', row: null };
   soloLive.set(key, live);
-  if (chatMode === 'solo' && key === curOcId && soloTab === 'chat') {
+  if (chatMode === 'solo' && key === curOcId) {
     const row = document.createElement('div');
     row.className = 'msg-row';
     row.innerHTML = `
@@ -1293,7 +1184,7 @@ function renderSidebar() {
   const el = document.getElementById('sessionList');
   const badge = document.getElementById('pendingBadge');
 
-  // ---- 单聊模式：单聊会话列表 + 单聊任务（终端快捷命令收进「⌨ 终端」标签顶部区域不再展示） ----
+  // ---- 单聊模式：单聊会话列表 + 单聊任务 ----
   if (chatMode === 'solo') {
     const sessHtml = ocSessions.length
       ? ocSessions.map(s => `
@@ -1306,7 +1197,7 @@ function renderSidebar() {
           </div>
           <button class="mini-btn danger" title="删除会话及其消息" onclick="event.stopPropagation();delOcSession('${escAttr(s.id)}')">✕</button>
         </div>`).join('')
-      : '<div class="task-empty">暂无单聊会话<br>点右上角「✚ 新会话」开始</div>';
+      : '<div class="task-empty">暂无单聊会话<br>点顶部「✚ 新会话」开始</div>';
 
     let tasksHtml = '';
     if (taskView === 'sched') {
@@ -1330,7 +1221,7 @@ function renderSidebar() {
           ${t.status === 'failed' ? `<button class="mini-btn" title="重新执行" onclick="event.stopPropagation();runSchedNow('${escAttr(t.id)}')">重跑</button>` : ''}
           <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
         </div>`;
-      }).join('') : '<div class="task-empty">暂无定时任务<br>点右上角「导入任务」→「定时任务」标签添加</div>';
+      }).join('') : '<div class="task-empty">暂无定时任务<br>点上方「导入任务」→「定时任务」标签添加</div>';
     } else {
       const vis = visibleTasks();
       const pend = vis.filter(t => t.status === 'pending').length;
@@ -1348,7 +1239,7 @@ function renderSidebar() {
           ${t.status === 'pending' || t.status === 'failed' ? `<button class="mini-btn" onclick="event.stopPropagation();runTask('${escAttr(t.id)}')">执行</button>` : ''}
           <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
         </div>`;
-      }).join('') : '<div class="task-empty">暂无顺序任务<br>点右上角「导入任务」添加<br>（单聊任务由 OpenCode 单体执行）</div>';
+      }).join('') : '<div class="task-empty">暂无顺序任务<br>点上方「导入任务」添加<br>（单聊任务由 OpenCode 单体执行）</div>';
     }
 
     el.innerHTML =
@@ -1365,7 +1256,7 @@ function renderSidebar() {
     badge.textContent = pend;
     let html;
     if (!sched.length) {
-      html = '<div class="task-empty">暂无定时任务<br>点右上角「导入任务」→「定时任务」标签添加</div>';
+      html = '<div class="task-empty">暂无定时任务<br>点上方「导入任务」→「定时任务」标签添加</div>';
     } else {
       html = `<div class="list-sep">定时任务（${schedEnabled ? '到点自动执行' : '调度已关闭，到点不执行'}）</div>` + sched.map(t => {
         const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : '⏰';
@@ -1398,7 +1289,7 @@ function renderSidebar() {
 
   let tasksHtml;
   if (vis.length === 0) {
-    tasksHtml = '<div class="task-empty">暂无顺序任务<br>点右上角「导入任务」添加<br>定时任务请切到上方「⏰ 定时任务」</div>';
+    tasksHtml = '<div class="task-empty">暂无顺序任务<br>点上方「导入任务」添加<br>定时任务请切到上方「⏰ 定时任务」</div>';
   } else {
     tasksHtml = vis.map((t) => {
       const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : '•';
@@ -1538,14 +1429,19 @@ function jumpToSession(taskId) {
 }
 
 function renderHeader() {
+  // 顶栏按钮按模式显隐：单聊=模型输入框+新会话+历史+帮助（配置/流转属群聊功能）
+  document.getElementById('ocModelBox').style.display = chatMode === 'solo' ? '' : 'none';
+  document.getElementById('flowEntryBtn').style.display = chatMode === 'group' ? '' : 'none';
+  document.getElementById('agentsCfgBtn').style.display = chatMode === 'group' ? '' : 'none';
   if (chatMode === 'solo') {
     const s = ocSessions.find(x => x.id === curOcId);
     const t = curOcId ? tasks.find(x => x.id === curOcId && x.runner === 'solo') : null;
-    document.getElementById('chatTitle').textContent = t ? `单聊任务 · ${t.title}` : (s ? `单聊 · ${s.title || '新会话'}` : '单聊 · OpenCode 工作台');
-    const modelTxt = curOcModel || '默认模型';
-    document.getElementById('members').innerHTML = `<span style="font-size:11px;color:#b2b2b2">${t ? '单聊任务会话 · ' + statusText(t.status) + ' · ' : ''}模型：${esc(modelTxt)}${ocModelNoResume ? ' · 当前内核不支持续聊' : ' · 同会话多轮续聊'}</span>`;
+    document.getElementById('chatTitle').textContent = t ? `单聊任务 · ${t.title}` : (s ? `单聊 · ${s.title || '新会话'}` : '单聊');
+    document.getElementById('members').innerHTML = t
+      ? `<span style="font-size:11px;color:#b2b2b2">单聊任务会话 · ${statusText(t.status)}</span>`
+      : '';
     document.getElementById('newSessBtn').style.display = '';
-    document.getElementById('histBtn').style.display = 'none';
+    document.getElementById('histBtn').style.display = '';
     return;
   }
   document.getElementById('chatTitle').textContent = curTaskId
@@ -2342,6 +2238,74 @@ async function clearTasks() {
   await loadTasks();
 }
 
+// ---------- 批量管理任务（全部顺序/定时任务，含单聊与群聊） ----------
+function openBatchMgr() {
+  renderBatchList();
+  document.getElementById('batchMask').classList.add('show');
+}
+function closeBatchMgr() {
+  document.getElementById('batchMask').classList.remove('show');
+}
+function renderBatchList() {
+  const el = document.getElementById('batchList');
+  document.getElementById('batchAll').checked = false;
+  const groups = [
+    { label: '顺序任务 · 群聊', list: tasks.filter(t => t.kind !== 'scheduled' && t.runner !== 'solo') },
+    { label: '顺序任务 · 单聊', list: tasks.filter(t => t.kind !== 'scheduled' && t.runner === 'solo') },
+    { label: '定时任务 · 群聊', list: tasks.filter(t => t.kind === 'scheduled' && t.runner !== 'solo') },
+    { label: '定时任务 · 单聊', list: tasks.filter(t => t.kind === 'scheduled' && t.runner === 'solo') }
+  ].filter(g => g.list.length);
+  if (!groups.length) {
+    el.innerHTML = '<div class="batch-empty">暂无任务<br>点侧栏「导入任务」添加</div>';
+    return;
+  }
+  el.innerHTML = groups.map(g => `
+    <div class="batch-group">${g.label}（${g.list.length}）</div>
+    ${g.list.map(t => `
+      <div class="batch-item">
+        <input type="checkbox" class="batch-ck" value="${escAttr(t.id)}">
+        <span class="bi-state ${t.status}">${statusText(t.status)}</span>
+        <div class="bi-title" title="${escAttr(t.title)}">${esc(t.title)}</div>
+        <span class="bi-sub">${t.kind === 'scheduled' ? fmtSched(t.scheduledAt || t.createdAt) : fmtTime(t.createdAt)}</span>
+      </div>`).join('')}`).join('');
+}
+function toggleBatchAll(on) {
+  document.querySelectorAll('.batch-ck').forEach(c => { c.checked = on; });
+}
+function batchSelIds() {
+  return [...document.querySelectorAll('.batch-ck:checked')].map(c => c.value);
+}
+async function batchDeleteSel() {
+  const ids = batchSelIds();
+  if (!ids.length) { toast('请先勾选任务'); return; }
+  if (!confirm(`确定删除选中的 ${ids.length} 个任务及其会话记录？`)) return;
+  let n = 0;
+  for (const id of ids) {
+    const r = await api('/api/tasks/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    if (r.success) n++;
+  }
+  if (curTaskId && ids.includes(curTaskId)) switchSession('');
+  if (curOcId && ids.includes(curOcId) && !ocSessions.some(s => s.id === curOcId)) { curOcId = ''; renderHeader(); soloRenderMessages(); }
+  await loadTasks();
+  await loadMessages();
+  renderMessages();
+  if (chatMode === 'solo') soloRenderMessages();
+  renderBatchList();
+  toast(`已删除 ${n} 个任务`);
+}
+async function batchRunSel() {
+  const ids = batchSelIds();
+  if (!ids.length) { toast('请先勾选任务'); return; }
+  // 只执行顺序任务（定时任务按其触发时间自动执行，也可在侧栏单独「立即执行」）
+  const seq = ids.map(id => tasks.find(t => t.id === id)).filter(t => t && t.kind !== 'scheduled' && t.status !== 'running');
+  if (!seq.length) { toast('选中项没有可执行的顺序任务'); return; }
+  const groups = seq.filter(t => t.runner !== 'solo').map(t => t.id);
+  const solos = seq.filter(t => t.runner === 'solo').map(t => t.id);
+  closeBatchMgr();
+  if (groups.length) await execTasks(groups);
+  if (solos.length) await soloExecTasks(solos);
+}
+
 // ---------- 定时任务（侧栏「⏰ 定时任务」视图） ----------
 let taskView = 'seq';      // 'seq' 顺序任务 | 'sched' 定时任务（同一位置切换显示）
 let schedEnabled = true;   // 定时调度总开关（服务端持久化）
@@ -2354,13 +2318,15 @@ function setTaskView(v) {
   updateFooterBtns();
 }
 
-// 底部主按钮：顺序视图=执行全部/停止；定时视图=启动/关闭定时调度
+// 底部主按钮：顺序视图=执行全部/停止；定时视图=启动/关闭定时调度；流转按钮仅群聊显示
 function updateFooterBtns() {
   const run = document.getElementById('runAllBtn');
   const sp = document.getElementById('schedPowerBtn');
+  const fl = document.getElementById('flowBtn');
   const isSeq = taskView === 'seq';
   run.style.display = isSeq ? '' : 'none';
   sp.style.display = isSeq ? 'none' : '';
+  if (fl) fl.style.display = chatMode === 'group' ? '' : 'none';
   if (!isSeq) {
     sp.textContent = schedEnabled ? '⏸ 关闭定时任务' : '▶ 启动定时任务';
     sp.classList.toggle('off', !schedEnabled);
@@ -3101,27 +3067,32 @@ function openHelp() {
       <li>结束后管家输出总结：<b>共识 / 分歧（注明持方）/ 建议行动</b>；发言与总结都存档，流转视图可回溯（紫色 ⚖ 圆点为主持人判定）</li>
     </ul>
   </div>
-  <div class="help-sec"><h4>👤 单聊工作台 / 👥 群聊（左上角开关）</h4>
+  <div class="help-sec"><h4>👤 单聊 / 👥 群聊（左上角开关）</h4>
     <ul>
-      <li>左上角「会话」下方的开关一键切换：<b>群聊</b> = 多智能体协作主界面；<b>单聊</b> = OpenCode 一对一工作台</li>
-      <li><b>💬 AI 对话</b>：点「✚ 新会话」与 OpenCode 单聊，同一会话多轮续聊（上下文连续）；回复以 Markdown 渲染，思考过程与工具调用实时展示（思考默认收起，点标题展开）</li>
-      <li><b>模型选择</b>：顶部下拉切换模型（来自 <code>opencode models</code>），「⟳ 模型」重新拉取列表；选择会记忆，下次打开自动恢复</li>
-      <li><b>⌨ 终端</b>：把本机终端搬进网页，可运行 <code>opencode</code> / <code>git</code> / <code>npm</code> 等任何命令，<code>cd</code> 在会话内保留；↑↓ 切换历史命令，Ctrl+C 中断</li>
-      <li><b>单聊任务</b>：单聊模式下「导入任务」创建的任务由 OpenCode 单体逐个执行（顺序/定时与群聊同款用法），与群聊任务互不干扰；群聊任务走管家编排</li>
+      <li>左上角开关一键切换：<b>群聊</b> = 多智能体协作主界面；<b>单聊</b> = 与一个 AI 一对一对话</li>
+      <li>单聊直接输入消息即可，同一会话多轮续聊（上下文连续）；回复以 Markdown 渲染，思考过程与工具调用实时展示（思考默认收起，点标题展开）</li>
+      <li><b>默认模型</b>：顶部输入框点开下拉选择（列表来自 <code>opencode models</code>，点击时自动刷新），也可直接输入 <code>provider/model</code>；清空则用内核默认模型，选择会记忆</li>
+      <li><b>单聊任务</b>：单聊模式下「导入任务」创建的任务由 AI 逐个执行（顺序/定时与群聊同款用法），与群聊任务互不干扰；群聊任务走管家编排</li>
       <li>非 OpenCode 内核（Claude Code / Codex / pi）下单聊退化为一次性对话（无续聊与模型列表），功能不受影响</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>🗂 批量管理任务</h4>
+    <ul>
+      <li>侧栏「批量管理」打开任务总览：全部顺序任务与定时任务（含单聊/群聊两类）分组展示</li>
+      <li>勾选后可<b>批量删除</b>；顺序任务可<b>批量执行</b>（先群聊后单聊，依次完成）</li>
     </ul>
   </div>
   <div class="help-sec"><h4>📄 Markdown 预览</h4>
     <ul>
       <li>聊天内容与最终交付中出现的 <code>.md</code> 文件完整路径会显示为紫色链接，点击即在弹出页预览渲染后的 Markdown</li>
       <li>消息下方的「📄 过程存档」为 .md 时同样可点击预览；预览页右上角「✕ 关闭」或按 Esc 退出</li>
-      <li>仅支持数据目录与工作目录内的文本文件（≤2MB），其他文件按原路径提示查看</li>
+      <li>本机任意路径的文本文件均可预览（限文本扩展名，≤2MB）</li>
     </ul>
   </div>
   <div class="help-sec"><h4>🕘 历史与数据管理</h4>
     <ul>
       <li>「🕘 历史」弹窗底部：<b>⬇ 导出 sessions.md</b> 把全部会话（含任务会话与单聊会话）导出为一个 Markdown 文件；<b>🗑 清空全部会话</b> 一键删除消息、单聊会话、会话产出文件与流转日志（任务列表保留）</li>
-      <li>全部页面关闭且无任务执行/审批等待/待触发定时任务时，后台服务空闲 3 分钟自动退出（<code>.env AGENTS_CHAT_AUTOSTOP=0</code> 可关闭），需要时重新运行 start 即可</li>
+      <li>全部页面关闭且无任务执行/审批等待时，后台服务空闲约 1 分钟自动退出（需要定时任务到点执行请保持页面打开；<code>.env AGENTS_CHAT_AUTOSTOP=0</code> 可关闭），需要时重新运行 start 即可</li>
     </ul>
   </div>
   <div class="help-sec"><h4>🛂 协作通道（看板 / 委派 / 审批）</h4>

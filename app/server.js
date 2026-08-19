@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.13.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.14.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -112,6 +112,8 @@ function serveStatic(res, filePath) {
 
 // SSE helper
 // sseConns：活跃 SSE 连接计数（聊天/任务/终端），页面关闭后归零，供自动退出判断
+// 注意：body 被 readBody 消费后 req 的 'close' 在部分 Node 版本不再触发，
+// 因此以 res 的 'close'（响应结束或连接断开都触发）为准，双保险 + 幂等
 let sseConns = 0;
 function sse(req, res) {
   res.writeHead(200, {
@@ -127,15 +129,26 @@ function sse(req, res) {
   const hb = setInterval(() => {
     try { res.write(': hb\n\n'); } catch { clearInterval(hb); }
   }, 15000);
-  req.on('close', () => { clearInterval(hb); sseConns--; });
+  let closed = false;
+  const onClose = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(hb);
+    sseConns--;
+  };
+  req.on('close', onClose);
+  res.on('close', onClose);
   return send;
 }
 
 // ---------- 页面全关自动退出（便携免维护体验） ----------
-// 前端页面每 25s 心跳一次；所有页面关闭且无 SSE 连接、无审批等待、无编排执行、
-// 无待触发的定时任务时，空闲 3 分钟自动退出（.env AGENTS_CHAT_AUTOSTOP=0 可关闭）
+// 前端页面每 25s 心跳一次；所有页面关闭且无 SSE 连接、无审批等待、无编排执行后，
+// 空闲约 1 分钟自动退出（含有待触发的定时任务：需要定时任务请保持页面打开；
+// .env AGENTS_CHAT_AUTOSTOP=0 可关闭）
 const AUTOSTOP = process.env.AGENTS_CHAT_AUTOSTOP !== '0';
-const AUTOSTOP_IDLE_MS = 3 * 60 * 1000;
+const AUTOSTOP_IDLE_MS = Number(process.env.AGENTS_CHAT_AUTOSTOP_IDLE_MS) > 0
+  ? Number(process.env.AGENTS_CHAT_AUTOSTOP_IDLE_MS)
+  : 50 * 1000;
 let lastClientSeen = 0;
 let everSeenClient = false;
 function touchClient() {
@@ -150,10 +163,10 @@ function startAutoStop() {
     if (Date.now() - lastClientSeen < AUTOSTOP_IDLE_MS) return;
     const hasSched = store.getSchedEnabled() && store.getTasks().some(t =>
       t.kind === 'scheduled' && t.status === 'pending' && t.scheduledAt && t.scheduledAt > Date.now());
-    if (hasSched) return; // 有等待触发的定时任务：进程需要常驻
-    console.log('所有页面已关闭且空闲 3 分钟，服务自动退出（重开 start.bat 即可）');
+    if (hasSched) console.log('所有页面已关闭且空闲约 1 分钟，服务自动退出（有待触发的定时任务也一并退出；需要定时任务请保持页面打开。重开 start 即可）');
+    else console.log('所有页面已关闭且空闲约 1 分钟，服务自动退出（重开 start 即可）');
     shutdown(0);
-  }, 15000);
+  }, 10000);
   timer.unref();
 }
 
@@ -647,7 +660,7 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/term/stream' && req.method === 'GET') {
     const send = sse(req, res);
     termClients.add(send);
-    req.on('close', () => termClients.delete(send));
+    res.on('close', () => termClients.delete(send));
     send({ type: 'init', cwd: termCwd(), platform: process.platform });
     termPush(''); // no-op 占位，确保连接建立
     if (termBuf.length) send({ type: 'data', data: termBuf.join('') });
@@ -805,14 +818,9 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // ---------- Markdown 文件预览（只读，限文本扩展名与白名单目录） ----------
+  // ---------- Markdown 文件预览（只读，限文本扩展名与大小；本机任意路径均可） ----------
   if (p === '/api/file' && req.method === 'GET') {
     const fp = path.resolve(String(parsed.query.path || ''));
-    const roots = [path.resolve(store.DATA_DIR)];
-    const gc = String(store.getConfig().globalCwd || '').trim();
-    if (gc) roots.push(path.resolve(gc));
-    const allowed = roots.some(r => fp === r || fp.startsWith(r + path.sep));
-    if (!allowed) { json(res, 403, { success: false, error: '只能预览数据目录 / 工作目录内的文件' }); return; }
     if (!/\.(md|markdown|txt|json|log|csv|js|mjs|ts|html|htm|css|py|sh|yml|yaml|xml)$/i.test(fp)) {
       json(res, 403, { success: false, error: '仅支持文本类文件预览' });
       return;
