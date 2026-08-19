@@ -473,10 +473,10 @@
       <div class="ag-row">
         <select id="kernelSel"></select>
       </div>
-      <div class="lbl" style="margin-top:10px">📁 工作目录（可选）</div>
-      <div class="tip" style="margin:4px 0 6px">不是上传文件：这里指定一个本机文件夹，所有智能体的工作记录与产出文件都会保存在其中。可不设置（留空则用程序默认目录）。</div>
+      <div class="lbl" style="margin-top:10px">📁 产出存档目录（可选）</div>
+      <div class="tip" style="margin:4px 0 6px">智能体工作中产生的文档与成果文件都存档到这个本机文件夹（填写文件夹完整路径即可，会自动创建）。可不设置（留空则用程序默认目录）。</div>
       <div class="ag-row">
-        <input id="globalCwdInput" placeholder="文件夹完整路径，如 /Users/me/agents-work 或 D:\agents-work（可不填）">
+        <input id="globalCwdInput" placeholder="文件夹完整路径，如 /Users/me/agents-work 或 D:\agents-work（智能体产出的存档地址，可不填）">
         <button class="mini-btn" onclick="pickGlobalDir()">选文件夹</button>
       </div>
       <div class="lbl" style="margin-top:10px">💾 管家记忆</div>
@@ -1642,7 +1642,7 @@ function msgNode(m) {
     <div class="msg-body">
       <div class="msg-name">${esc(m.agentName || m.agentId || 'AI')}${m.agentId === butlerId ? ' · 管家' : ''}</div>
       ${bodyHtml}
-      ${m.outputPath ? `<div class="msg-file" ${/\.md$/i.test(m.outputPath) ? `data-path="${escAttr(m.outputPath)}" title="点击预览该 Markdown 存档"` : `title="系统过程存档：该智能体本阶段完整输出（内部交接用）。用户最终要的成果文件在工作目录中，以管家交付清单里的完整路径为准"`}>📄 过程存档 ${fileNodeText(m.outputPath)}</div>` : ''}
+      ${m.outputPath ? `<div class="msg-file" ${/\.md$/i.test(m.outputPath) ? `data-path="${escAttr(m.outputPath)}" title="点击预览该 Markdown 存档"` : `title="系统过程存档：该智能体本阶段完整输出（内部交接用）。用户最终要的成果文件在产出存档目录中，以管家交付清单里的完整路径为准"`}>📄 过程存档 ${fileNodeText(m.outputPath)}</div>` : ''}
     </div>`;
   row.querySelector('.tx').textContent = m.content;
   m._tx = row.querySelector('.tx');
@@ -1765,7 +1765,7 @@ function onSaved(ev) {
           file.dataset.path = ev.path;
           file.title = '点击预览该 Markdown 存档';
         } else {
-          file.title = '系统过程存档：该智能体本阶段完整输出（内部交接用）。用户最终要的成果文件在工作目录中，以管家交付清单里的完整路径为准';
+          file.title = '系统过程存档：该智能体本阶段完整输出（内部交接用）。用户最终要的成果文件在产出存档目录中，以管家交付清单里的完整路径为准';
         }
         file.innerHTML = '📄 过程存档 ' + fileNodeText(ev.path);
         m._dom.querySelector('.msg-body').appendChild(file);
@@ -3011,7 +3011,7 @@ function openHelp() {
       <li>支持四种内核：<b>OpenCode</b>（多 Provider）、<b>Claude Code</b>（Anthropic）、<b>Codex</b>（OpenAI）、<b>pi</b>（多 Provider），安装即可被自动识别</li>
       <li>「⚙ 智能体配置」顶部的下拉框选择内核：「自动」按检测顺序取第一个已安装的，或指定某一内核</li>
       <li>切换内核后所有智能体（含管家）统一使用新内核执行；认证、模型、密钥都在各内核自己的 CLI 里配置</li>
-      <li>各内核能力一致：读写文件、执行命令、联网检索，工作记录与产出统一保存在「工作目录」</li>
+      <li>各内核能力一致：读写文件、执行命令、联网检索，工作记录与产出统一保存在「产出存档目录」</li>
     </ul>
   </div>
   <div class="help-sec"><h4>💬 聊天与 @ 点名</h4>
@@ -3137,16 +3137,16 @@ function openHelp() {
   </div>
   <div class="help-sec"><h4>📄 产出文件与数据</h4>
     <ul>
-      <li><b>成果文件</b>（用户最终要的东西）：智能体在「工作目录」中真实创建的文件；管家最终交付时会列出每个成果文件的完整绝对路径</li>
+      <li><b>成果文件</b>（用户最终要的东西）：智能体在「产出存档目录」中真实创建的文件；管家最终交付时会列出每个成果文件的完整绝对路径</li>
       <li><b>过程存档</b>：每份正式输出完整保存在 <code>.data/outputs/&lt;会话&gt;/</code>，消息下方紫色的「📄 过程存档」路径指向它，供核验与内部交接，非最终成果</li>
       <li>全部数据在 <code>.data/</code> 目录（聊天、任务、配置）；网页里可「清空」，删除 .data/ = 恢复出厂</li>
-      <li>智能体读写文件的默认位置：配置页设置的「工作目录」（可选），或 <code>.data/workspace/</code></li>
+      <li>智能体读写文件的默认位置：配置页设置的「产出存档目录」（可选），或 <code>.data/workspace/</code></li>
     </ul>
   </div>
   <div class="help-sec"><h4>❓ 常见问题</h4>
     <ul>
       <li>换端口：编辑启动脚本里的 PORT；单任务超时：.env 中调大 <code>AGENTS_CHAT_TIMEOUT_MS</code>（默认 10 分钟）</li>
-      <li>自动核查定制：.env 中 <code>AGENTS_CHAT_VERIFY_CMD="npm test"</code> 可让每轮验收前自动跑测试/构建（在工作目录执行）；<code>AGENTS_CHAT_AUTOVERIFY=0</code> 关闭全部自动核查</li>
+      <li>自动核查定制：.env 中 <code>AGENTS_CHAT_VERIFY_CMD="npm test"</code> 可让每轮验收前自动跑测试/构建（在产出存档目录执行）；<code>AGENTS_CHAT_AUTOVERIFY=0</code> 关闭全部自动核查</li>
       <li>加/改智能体：「⚙ 智能体配置」可设名称、图标、技能说明、提示词；管家内置不可改；换内核也在该页顶部下拉框</li>
       <li>指定内核完整路径：.env 中设 <code>AGENTS_CHAT_OPENCODE_CMD</code> / <code>AGENTS_CHAT_CLAUDE_CMD</code> / <code>AGENTS_CHAT_CODEX_CMD</code> / <code>AGENTS_CHAT_PI_CMD</code></li>
       <li>页面行为异常：Ctrl+F5 强制刷新（版本不一致时会有提示）</li>
