@@ -13,41 +13,35 @@ if errorlevel 1 goto nonode
 set "NODE=node"
 
 :run
-echo ==============================================
-echo   Agents Chat  -  pi agents group chat
-echo   URL : http://localhost:%PORT%
-echo ==============================================
-echo.
-echo Starting server, please wait...
+rem 静默后台启动（无任何弹窗）：
+rem 网页打开期间服务保持运行；全部页面关闭且空闲 3 分钟后自动退出，
+rem 也可随时运行 stop.bat 手动停止。日志见 .data\server.log
+wscript "%~dp0start-hidden.vbs" %PORT% >nul 2>nul
+if not errorlevel 1 goto waitloop
 
+rem 极老系统无 wscript 时退回最小化窗口方式
 start "agents-chat-server" /min "%NODE%" "%~dp0app\server.js" --port %PORT%
 
+:waitloop
+set /a TRIES=30
 where curl >nul 2>nul
 if errorlevel 1 goto wait_plain
 
-set /a TRIES=30
-:waitloop
+:pollloop
 ping -n 2 127.0.0.1 >nul
 curl -s -o nul http://localhost:%PORT%/api/health
 if not errorlevel 1 goto ready
 set /a TRIES-=1
 if %TRIES% leq 0 goto fail
-goto waitloop
+goto pollloop
 
 :wait_plain
 ping -n 9 127.0.0.1 >nul
 goto ready
 
 :ready
-echo.
-echo Server ready. Opening browser...
+rem 打开浏览器后本窗口自动关闭，无需用户操作
 start "" http://localhost:%PORT%
-echo.
-echo OK. You can close this window now.
-echo The server runs in the minimized "agents-chat-server" window.
-echo To stop: run stop.bat  (log: .data\server.log)
-echo.
-pause
 exit /b 0
 
 :fail

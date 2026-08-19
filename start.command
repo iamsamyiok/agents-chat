@@ -14,8 +14,7 @@ else
   fi
 fi
 
-"$NODE" app/server.js --port "$PORT" &
-SERVER_PID=$!
+nohup "$NODE" app/server.js --port "$PORT" >/dev/null 2>&1 &
 for i in $(seq 1 30); do
   if curl -s -o /dev/null "http://localhost:$PORT/api/health"; then
     open "http://localhost:$PORT" 2>/dev/null || true
@@ -23,4 +22,4 @@ for i in $(seq 1 30); do
   fi
   sleep 0.5
 done
-wait $SERVER_PID
+# 服务在后台保持运行（全部页面关闭后空闲 3 分钟自动退出），本窗口可关闭

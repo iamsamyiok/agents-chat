@@ -14,11 +14,10 @@ else
 fi
 
 PORT="${AGENTS_CHAT_PORT:-3456}"
-echo "启动 Agents Chat (port $PORT)..."
-"$NODE" app/server.js --port "$PORT" &
-SERVER_PID=$!
+echo "启动 Agents Chat (port $PORT)...（后台运行，日志见 .data/server.log；全部页面关闭后空闲 3 分钟自动退出）"
+nohup "$NODE" app/server.js --port "$PORT" >/dev/null 2>&1 &
 
-# 等待服务就绪后自动打开浏览器
+# 等待服务就绪后自动打开浏览器，随后本脚本退出（终端窗口可关闭）
 for i in $(seq 1 30); do
   if curl -s -o /dev/null "http://localhost:$PORT/api/health"; then
     (xdg-open "http://localhost:$PORT" 2>/dev/null || open "http://localhost:$PORT" 2>/dev/null || true) &
@@ -26,5 +25,3 @@ for i in $(seq 1 30); do
   fi
   sleep 0.5
 done
-
-wait $SERVER_PID

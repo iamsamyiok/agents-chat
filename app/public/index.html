@@ -261,21 +261,95 @@
     .msg-body { max-width: 80%; }
   }
   #menuBtn { display: none; background: none; border: none; font-size: 18px; cursor: pointer; color: #555; margin-right: 10px; }
+
+  /* ---------- 单聊/群聊模式开关（侧栏顶部「会话」位置） ---------- */
+  .side-header { flex-wrap: wrap; gap: 8px; }
+  .mode-switch { display: inline-flex; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
+  .mode-switch button { border: none; background: #fff; font-size: 13px; padding: 5px 14px; cursor: pointer; color: #666; }
+  .mode-switch button + button { border-left: 1px solid #ddd; }
+  .mode-switch button.active { background: #07c160; color: #fff; font-weight: 600; }
+  .side-header .hdr-line { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+  .side-header .hdr-line b { font-size: 14px; }
+  .ttab .badge { margin-left: 4px; vertical-align: 1px; }
+
+  /* ---------- 单聊模式：Web 终端（OpenCode 交互） ---------- */
+  #soloView { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #0d1117; }
+  .term-bar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #161b22; border-bottom: 1px solid #21262d; font-size: 12px; color: #8b949e; flex: none; }
+  .term-bar .tb-title { color: #c9d1d9; font-weight: 600; font-size: 13px; }
+  .term-bar .tb-cwd { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; font-family: Consolas, Menlo, monospace; }
+  .term-btn { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 4px 12px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+  .term-btn:hover { background: #30363d; }
+  .term-btn.warn { color: #f85149; border-color: #f8514955; }
+  .term-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px; font: 13px/1.7 Consolas, Menlo, "Courier New", monospace; color: #c9d1d9; white-space: pre-wrap; word-break: break-all; }
+  .term-body .t-cmd { color: #7ee787; }
+  .term-body .t-sys { color: #8b949e; }
+  .term-input-row { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: #161b22; border-top: 1px solid #21262d; flex: none; }
+  .term-input-row .t-prompt { color: #7ee787; font: 14px Consolas, Menlo, monospace; flex: none; }
+  #termInput { flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 9px 12px; font: 13px Consolas, Menlo, monospace; color: #c9d1d9; outline: none; }
+  #termInput:focus { border-color: #238636; }
+  .term-quick { padding: 10px 14px; }
+  .term-quick .tq-title { font-size: 12px; color: #8b949e; margin-bottom: 8px; }
+  .term-quick .tq-btn { display: block; width: 100%; text-align: left; background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 7px 10px; font: 12px Consolas, Menlo, monospace; cursor: pointer; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .term-quick .tq-btn:hover { background: #21262d; border-color: #238636; }
+  .term-quick .tq-note { font-size: 11px; color: #6e7681; line-height: 1.7; margin-top: 8px; }
+
+  /* ---------- Markdown 预览弹窗 ---------- */
+  #previewMask { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 95; }
+  #previewMask.show { display: flex; }
+  .preview-card { background: #fff; border-radius: 10px; width: min(880px, 92vw); height: 88vh; display: flex; flex-direction: column; overflow: hidden; }
+  .preview-bar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid #eee; flex: none; }
+  .preview-bar .pv-name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .preview-bar .pv-path { flex: 1; min-width: 0; font-size: 11px; color: #999; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+  .pv-close { background: #fa5151; color: #fff; border: none; border-radius: 6px; padding: 5px 16px; font-size: 13px; cursor: pointer; flex: none; }
+  .md-body { flex: 1; overflow-y: auto; padding: 22px 28px; font-size: 14px; line-height: 1.85; color: #24292f; }
+  .md-body h1, .md-body h2, .md-body h3, .md-body h4 { margin: 18px 0 8px; line-height: 1.4; }
+  .md-body h1 { font-size: 21px; border-bottom: 1px solid #eaecef; padding-bottom: 6px; }
+  .md-body h2 { font-size: 18px; border-bottom: 1px solid #eaecef; padding-bottom: 5px; }
+  .md-body h3 { font-size: 16px; }
+  .md-body h4 { font-size: 14.5px; }
+  .md-body p { margin: 8px 0; }
+  .md-body ul, .md-body ol { padding-left: 24px; margin: 8px 0; }
+  .md-body li { margin: 3px 0; }
+  .md-body code { background: rgba(175,184,193,.22); border-radius: 4px; padding: 1px 6px; font: 12.5px Consolas, Menlo, monospace; }
+  .md-body pre { background: #f6f8fa; border: 1px solid #eaecef; border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 10px 0; }
+  .md-body pre code { background: none; padding: 0; font-size: 12.5px; line-height: 1.7; }
+  .md-body blockquote { border-left: 4px solid #dfe2e5; color: #6a737d; padding: 2px 14px; margin: 10px 0; background: #f9fafb; }
+  .md-body table { border-collapse: collapse; margin: 10px 0; font-size: 13px; }
+  .md-body th, .md-body td { border: 1px solid #dfe2e5; padding: 6px 12px; }
+  .md-body th { background: #f6f8fa; }
+  .md-body hr { border: none; border-top: 1px solid #eaecef; margin: 16px 0; }
+  .md-body a { color: #0969da; }
+  .md-link { color: #7d5ac8; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  .md-link:hover { color: #9d7ae8; }
+  .msg-file { cursor: pointer; }
+  .msg-file:hover .md-link { color: #9d7ae8; }
+
+  /* ---------- 流转视图全屏态 ---------- */
+  #flowMask .modal.flow.fs { width: 98vw; height: 96vh; }
+  .fd-close { float: right; font-size: 11px; color: #999; cursor: pointer; padding: 0 4px; }
+  .fd-close:hover { color: #fa5151; }
+
 </style>
 </head>
 <body>
 <div id="app">
   <aside id="sidebar">
     <div class="side-header">
-      <h2>会话 <span class="badge" id="pendingBadge" style="display:none">0</span></h2>
-      <div class="side-actions">
-        <button class="mini-btn" onclick="openImport()">导入任务</button>
-        <button class="mini-btn gray" onclick="clearTasks()">清空</button>
+      <div class="hdr-line">
+        <b>会话</b>
+        <div class="side-actions">
+          <button class="mini-btn" onclick="openImport()">导入任务</button>
+          <button class="mini-btn gray" onclick="clearTasks()">清空</button>
+        </div>
+      </div>
+      <div class="mode-switch" id="modeSwitch">
+        <button id="modeSoloBtn" onclick="setChatMode('solo')">👤 单聊</button>
+        <button id="modeGroupBtn" class="active" onclick="setChatMode('group')">👥 群聊</button>
       </div>
     </div>
-    <div class="task-tabs">
+    <div class="task-tabs" id="taskTabs">
       <button class="ttab active" id="ttabSeq" onclick="setTaskView('seq')">📋 顺序任务</button>
-      <button class="ttab" id="ttabSched" onclick="setTaskView('sched')">⏰ 定时任务</button>
+      <button class="ttab" id="ttabSched" onclick="setTaskView('sched')">⏰ 定时任务 <span class="badge" id="pendingBadge" style="display:none">0</span></button>
     </div>
     <div id="sessionList"></div>
     <div class="side-footer">
@@ -297,20 +371,38 @@
       <div class="hdr-right">
         <button class="cfg-btn" id="newSessBtn" onclick="newSession()">✚ 新会话</button>
         <button class="cfg-btn" id="histBtn" onclick="openHistory()">🕘 历史</button>
+        <button class="cfg-btn" id="flowEntryBtn" onclick="openFlow()">🔭 流转</button>
         <button class="cfg-btn" onclick="openAgents()">⚙ 智能体配置</button>
         <span class="runner-tag" id="runnerTag" style="display:none"></span>
         <button class="cfg-btn" id="helpBtn" onclick="openHelp()" title="使用帮助">❓ 帮助</button>
       </div>
     </header>
-    <div id="messages"></div>
-    <footer id="composer">
-      <div class="input-row">
-        <button id="rtBtn" onclick="toggleRoundtable()" title="圆桌讨论模式：所有被 @ 的智能体（未 @ 则全体）围绕主题轮流发言、互相反驳，管家当主持人控制轮数并总结共识与分歧">💬 圆桌</button>
-        <input id="input" placeholder="输入消息，@ 可点名智能体…" autocomplete="off">
-        <button id="sendBtn" onclick="onSendBtn()">发送</button>
+    <div id="groupView" style="flex:1;min-height:0;display:flex;flex-direction:column">
+      <div id="messages"></div>
+      <footer id="composer">
+        <div class="input-row">
+          <button id="rtBtn" onclick="toggleRoundtable()" title="圆桌讨论模式：所有被 @ 的智能体（未 @ 则全体）围绕主题轮流发言、互相反驳，管家当主持人控制轮数并总结共识与分歧">💬 圆桌</button>
+          <input id="input" placeholder="输入消息，@ 可点名智能体…" autocomplete="off">
+          <button id="sendBtn" onclick="onSendBtn()">发送</button>
+        </div>
+        <div id="atMenu"></div>
+      </footer>
+    </div>
+    <div id="soloView" style="display:none">
+      <div class="term-bar">
+        <span class="tb-title">⌨ 终端</span>
+        <span class="tb-cwd" id="termCwd" title="工作目录"></span>
+        <button class="term-btn" onclick="termRun('opencode --version 2>&1 || echo 未安装 opencode')">检查 opencode</button>
+        <button class="term-btn" onclick="termClear()">清屏</button>
+        <button class="term-btn warn" onclick="termSignal('int')" title="中断当前命令（Ctrl+C）">Ctrl+C</button>
       </div>
-      <div id="atMenu"></div>
-    </footer>
+      <div class="term-body" id="termBody"></div>
+      <div class="term-input-row">
+        <span class="t-prompt" id="termPrompt">$</span>
+        <input id="termInput" placeholder="输入命令回车执行，↑↓ 切换历史命令…" autocomplete="off" spellcheck="false">
+        <button class="term-btn" style="background:#238636;border-color:#238636;color:#fff" onclick="sendTerm()">运行</button>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -410,9 +502,13 @@
 <div id="historyMask">
   <div class="modal wide">
     <h3>聊天历史（主会话）</h3>
-    <div class="tip">按时间正序展示全部主会话记录（含已开启新会话前的内容），仅供查阅</div>
+    <div class="tip">按时间正序展示全部主会话记录（含已开启新会话前的内容），仅供查阅；消息中的 .md 文件路径可点击预览</div>
     <div id="historyList"></div>
-    <div class="modal-actions">
+    <div class="modal-actions" style="justify-content:space-between">
+      <div style="display:flex;gap:8px">
+        <button class="mini-btn" onclick="exportHistory()" title="全部会话（含任务会话）导出为 Markdown 文件">⬇ 导出 sessions.md</button>
+        <button class="mini-btn danger" onclick="clearAllHistory()" title="删除全部消息记录、会话产出文件与流转日志（任务列表保留）">🗑 清空全部会话</button>
+      </div>
       <button class="primary" onclick="closeHistory()">关闭</button>
     </div>
   </div>
@@ -452,6 +548,7 @@
       <select id="flowRunSel" onchange="onFlowRunChange()"></select>
       <label style="font-size:11px;color:#666;white-space:nowrap"><input type="checkbox" id="flowAutoChk" checked onchange="onFlowAutoChange()"> 自动刷新</label>
       <button class="mini-btn" onclick="loadFlowEvents()">刷新</button>
+      <button class="mini-btn" id="flowFsBtn" onclick="toggleFlowFs()" title="全屏显示，看完整泳道图">⤢ 全屏</button>
       <button class="mini-btn gray" onclick="closeFlow()">关闭</button>
     </div>
     <div class="flow-legend">
@@ -471,8 +568,20 @@
 </div>
 <div class="toast" id="toast"></div>
 
+<!-- Markdown 预览弹窗（点击聊天中的 .md 文件路径打开） -->
+<div id="previewMask">
+  <div class="preview-card">
+    <div class="preview-bar">
+      <span class="pv-name" id="pvName"></span>
+      <span class="pv-path" id="pvPath"></span>
+      <button class="pv-close" onclick="closePreview()">✕ 关闭</button>
+    </div>
+    <div class="md-body" id="pvBody"></div>
+  </div>
+</div>
+
 <script>
-const PAGE_VERSION = '3.11.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.12.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -489,6 +598,7 @@ let globalCwd = '';            // 全局统一工作目录
 let configKernel = 'auto';     // 配置的执行内核
 let configApproval = 'off';    // 人工审批关卡：off/plan/verify/all
 let teamPresets = [];          // 团队仓库预设（配置页「📦 团队仓库」）
+let chatMode = 'group';        // 当前模式：group=群聊（多智能体）| solo=单聊（本机终端）
 const sessions = new Map();    // key: 'main' | taskId → 消息数组
 
 const input = document.getElementById('input');
@@ -568,11 +678,131 @@ async function init() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   });
 
+  // 单聊终端输入：回车执行、上下键切换历史命令
+  const ti = document.getElementById('termInput');
+  ti.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); sendTerm(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (termCmdIdx > 0) { termCmdIdx--; ti.value = termCmdHist[termCmdIdx] || ''; } }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); if (termCmdIdx < termCmdHist.length - 1) { termCmdIdx++; ti.value = termCmdHist[termCmdIdx] || ''; } else { termCmdIdx = termCmdHist.length; ti.value = ''; } }
+  });
+
+  // Markdown 预览：消息中的 .md 路径 / 过程存档行 → 点击打开预览弹窗
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest('.md-link, .msg-file[data-path]');
+    if (el && el.dataset.path) { e.preventDefault(); e.stopPropagation(); openPreview(el.dataset.path); }
+  });
+  // Esc 关闭预览弹窗
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closePreview();
+  });
+
+  // 页面心跳：告知服务端「网页还开着」（全部页面关闭后服务端会自动退出）
+  setInterval(() => { fetch('/api/health').catch(() => {}); }, 25000);
+
   // 轻量轮询：感知定时任务自动触发引起的任务状态变化（执行批次进行中或页面隐藏时跳过）
   setInterval(() => {
     if (taskBusy || document.hidden) return;
     loadTasks(true);
   }, 8000);
+}
+
+// ---------- 单聊/群聊模式切换（左上角开关） ----------
+function setChatMode(mode) {
+  chatMode = mode === 'solo' ? 'solo' : 'group';
+  document.getElementById('modeSoloBtn').classList.toggle('active', chatMode === 'solo');
+  document.getElementById('modeGroupBtn').classList.toggle('active', chatMode === 'group');
+  document.getElementById('groupView').style.display = chatMode === 'group' ? 'flex' : 'none';
+  document.getElementById('soloView').style.display = chatMode === 'solo' ? 'flex' : 'none';
+  // 单聊模式：任务管理标签让位（顺序/定时任务在群聊侧栏），侧栏改为终端快捷命令
+  document.getElementById('taskTabs').style.display = chatMode === 'group' ? '' : 'none';
+  document.getElementById('flowEntryBtn').style.display = chatMode === 'group' ? '' : 'none';
+  renderSidebar();
+  renderHeader();
+  if (chatMode === 'solo') connectTerm();
+}
+
+// ---------- 单聊模式：Web 终端 ----------
+let termSrc = null;
+let termCmdHist = [];
+let termCmdIdx = 0;
+const QUICK_CMDS = [
+  'pwd && ls -la',
+  'opencode --version 2>&1 || echo [未安装 opencode]',
+  'opencode auth login 2>&1 || opencode login 2>&1',
+  'opencode run "你好，请介绍一下你自己"',
+  'opencode --help 2>&1 | head -40',
+  'git status 2>&1 || echo [当前目录不是 git 仓库]'
+];
+
+function connectTerm() {
+  const body = document.getElementById('termBody');
+  if (!termSrc) {
+    try {
+      termSrc = new EventSource('/api/term/stream');
+      termSrc.onmessage = (ev) => {
+        let d;
+        try { d = JSON.parse(ev.data); } catch { return; }
+        if (d.type === 'init') {
+          document.getElementById('termCwd').textContent = d.cwd || '';
+          document.getElementById('termPrompt').textContent = d.platform === 'win32' ? '>' : '$';
+        } else if (d.type === 'data') {
+          termAppend(d.data);
+        } else if (d.type === 'clear') {
+          body.innerHTML = '';
+        }
+      };
+    } catch { /* 终端不可用时其余功能不受影响 */ }
+  }
+  setTimeout(() => { try { document.getElementById('termInput').focus(); } catch {} }, 100);
+}
+
+function termAppend(text) {
+  const body = document.getElementById('termBody');
+  const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 80;
+  body.appendChild(document.createTextNode(text));
+  while (body.childNodes.length > 4000) body.removeChild(body.firstChild);
+  if (atBottom) body.scrollTop = body.scrollHeight;
+}
+
+function termEcho(cmd) {
+  const body = document.getElementById('termBody');
+  const span = document.createElement('span');
+  span.className = 't-cmd';
+  span.textContent = `$ ${cmd}\n`;
+  body.appendChild(span);
+  body.scrollTop = body.scrollHeight;
+}
+
+async function sendTerm() {
+  const el = document.getElementById('termInput');
+  const cmd = el.value;
+  if (!cmd.trim()) return;
+  el.value = '';
+  termCmdHist.push(cmd);
+  termCmdIdx = termCmdHist.length;
+  termEcho(cmd);
+  try {
+    await api('/api/term/input', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: cmd }) });
+  } catch { termAppend('[发送失败：服务未响应]\n'); }
+}
+
+function termRunQuick(i) {
+  const cmd = QUICK_CMDS[i];
+  if (!cmd) return;
+  document.getElementById('termInput').value = cmd;
+  sendTerm();
+}
+
+async function termSignal(sig) {
+  try {
+    await api('/api/term/signal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signal: sig || 'int' }) });
+    termAppend('^C\n');
+  } catch { /* ignore */ }
+}
+
+async function termClear() {
+  try { await api('/api/term/clear', { method: 'POST' }); } catch { /* ignore */ }
+  document.getElementById('termBody').innerHTML = '';
 }
 
 function renderMembers() {
@@ -621,6 +851,21 @@ function renderSidebar() {
   const el = document.getElementById('sessionList');
   const badge = document.getElementById('pendingBadge');
 
+  // ---- 单聊模式：终端快捷命令面板（顺序/定时任务在群聊模式侧栏） ----
+  if (chatMode === 'solo') {
+    badge.style.display = 'none';
+    el.innerHTML = `<div class="term-quick">
+      <div class="tq-title">🚀 常用命令（点击执行）</div>
+      ${QUICK_CMDS.map((c, i) => `<button class="tq-btn" title="${escAttr(c)}" onclick="termRunQuick(${i})">${esc(c)}</button>`).join('')}
+      <div class="tq-note">单聊 = 直接与本机终端交互，可运行 opencode / git / npm 等任何命令。<br><br>
+      · 交互式 TUI（直接输入 <b>opencode</b>）在网页终端里受限，请先用 <b>opencode run "提示词"</b> 方式<br>
+      · cd 会保留在当前终端会话；<b>Ctrl+C</b> 按钮中断当前命令；「清屏」清空显示<br>
+      · 输入框 ↑↓ 键切换历史命令<br>
+      · 切回「👥 群聊」即回到多智能体协作</div>
+    </div>`;
+    return;
+  }
+
   // ---- 定时视图：全部定时任务（含未触发），按启动时间排序 ----
   if (taskView === 'sched') {
     const sched = tasks.filter(t => t.kind === 'scheduled').sort((a, b) => (a.scheduledAt || 0) - (b.scheduledAt || 0));
@@ -654,20 +899,11 @@ function renderSidebar() {
     return;
   }
 
-  // ---- 顺序视图：主会话 + 顺序任务 ----
+  // ---- 顺序视图：顺序任务会话（群聊主会话由左上角「👥 群聊」开关进入） ----
   const vis = visibleTasks();
   const pending = vis.filter(t => t.status === 'pending').length;
   badge.style.display = pending ? 'inline' : 'none';
   badge.textContent = pending;
-
-  const mainItem = `<div class="task-item ${curTaskId === '' ? 'active' : ''}" onclick="switchSession('')">
-    ${unreadSess.has('main') ? '<span class="unread-dot"></span>' : ''}
-    <div class="task-avatar main-av">🏠</div>
-    <div class="task-main">
-      <div class="task-title">群聊 · 主会话</div>
-      <div class="task-sub"><span>${agents.map(a => esc(a.icon || agentIcon(a.id, a.name))).join(' ')}</span><span>${agents.length} 位智能体</span></div>
-    </div>
-  </div>`;
 
   let tasksHtml;
   if (vis.length === 0) {
@@ -688,7 +924,7 @@ function renderSidebar() {
       </div>`;
     }).join('');
   }
-  el.innerHTML = mainItem + '<div class="list-sep">任务会话（点击查看对话，可拖拽排序）</div>' + tasksHtml;
+  el.innerHTML = '<div class="list-sep">任务会话（点击查看对话，可拖拽排序）</div>' + tasksHtml;
 }
 
 function assignName(id) {
@@ -740,6 +976,7 @@ async function delTask(id) {
 }
 
 function switchSession(taskId) {
+  if (chatMode !== 'group') setChatMode('group'); // 任务会话属于群聊模式，点击自动切回
   curTaskId = taskId || '';
   const wasUnread = unreadSess.has(curKey());
   unreadSess.delete(curKey()); // 切到该会话 = 已读，清除绿点
@@ -797,6 +1034,13 @@ function showDoneToast(taskId, title) {
 }
 
 function renderHeader() {
+  if (chatMode === 'solo') {
+    document.getElementById('chatTitle').textContent = '单聊 · 本机终端';
+    document.getElementById('members').innerHTML = '<span style="font-size:11px;color:#b2b2b2">直接操作本机命令行（opencode / git / npm…），与群聊互不影响</span>';
+    document.getElementById('newSessBtn').style.display = 'none';
+    document.getElementById('histBtn').style.display = 'none';
+    return;
+  }
   document.getElementById('chatTitle').textContent = curTaskId
     ? (tasks.find(t => t.id === curTaskId) || {}).title || '任务会话'
     : 'Agents 群聊';
@@ -845,6 +1089,106 @@ function toggleFoldEl(el) {
 
 // 过程类消息（执行/验收/圆桌发言）默认折叠，仅显示约三行；最终交付（汇总）默认完整展示
 function isFoldPhase(phase) { return phase === 'work' || phase === 'review' || phase === 'talk'; }
+
+// ---------- Markdown 预览：消息中的 .md 绝对路径 → 可点击链接 ----------
+function linkifyMd(escaped) {
+  return escaped.replace(/(?:[A-Za-z]:[\\\/]|\/)[^\s'"`<>|*]+?\.md\b/gi, m =>
+    `<span class="md-link" data-path="${escAttr(m)}">${m}</span>`);
+}
+// 消息定稿后链接化（流式期间保持 textContent 高频更新，saved 封口后一次性处理）
+function finalizeMsgLinks(m) {
+  if (!m || !m._tx || !m._dom || !document.contains(m._dom)) return;
+  const e = esc(m.content || '');
+  const h = linkifyMd(e);
+  if (h !== e) m._tx.innerHTML = h;
+}
+// 过程存档行：.md 文件可点击预览，其他类型仅展示路径
+function fileNodeText(p) {
+  return /\.md$/i.test(p) ? `<span class="md-link" data-path="${escAttr(p)}">${esc(p)}</span>` : esc(p);
+}
+
+// 极简 Markdown 渲染（零依赖，支持标题/列表/代码块/引用/表格/链接/粗斜体）
+function renderMd(src) {
+  const esc2 = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const inline = (s) => s
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, '$1<i>$2</i>')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  const lines = String(src || '').split(/\r?\n/);
+  const html = [];
+  let inCode = false, codeBuf = [];
+  let listType = null, listBuf = [];
+  let tableBuf = [], tableHeader = false;
+  const flushList = () => {
+    if (!listType) return;
+    html.push(`<${listType}>${listBuf.join('')}</${listType}>`);
+    listType = null; listBuf = [];
+  };
+  const flushTable = () => {
+    if (!tableBuf.length) { tableHeader = false; return; }
+    let out = '<table>';
+    tableBuf.forEach((cells, i) => {
+      const tag = (i === 0 && tableHeader) ? 'th' : 'td';
+      out += '<tr>' + cells.map(c => `<${tag}>${inline(esc2(c))}</${tag}>`).join('') + '</tr>';
+    });
+    html.push(out + '</table>');
+    tableBuf = []; tableHeader = false;
+  };
+  for (const line of lines) {
+    const fence = line.match(/^\s*```(\w*)\s*$/);
+    if (fence) {
+      if (inCode) { html.push('<pre><code>' + esc2(codeBuf.join('\n')) + '</code></pre>'); inCode = false; codeBuf = []; }
+      else { flushList(); flushTable(); inCode = true; }
+      continue;
+    }
+    if (inCode) { codeBuf.push(line); continue; }
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      flushList();
+      const cells = line.trim().slice(1, -1).split('|').map(c => c.trim());
+      if (cells.length && cells.every(c => /^:?-{3,}:?$/.test(c))) { tableHeader = true; continue; }
+      tableBuf.push(cells);
+      continue;
+    }
+    flushTable();
+    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { flushList(); html.push('<hr>'); continue; }
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) { flushList(); const n = h[1].length; html.push(`<h${n}>${inline(esc2(h[2]))}</h${n}>`); continue; }
+    const ul = line.match(/^\s*[-*+]\s+(.*)$/);
+    const ol = line.match(/^\s*\d+[.、)]\s+(.*)$/);
+    if (ul || ol) {
+      const t = ul ? 'ul' : 'ol';
+      if (listType !== t) { flushList(); listType = t; }
+      listBuf.push(`<li>${inline(esc2((ul || ol)[1]))}</li>`);
+      continue;
+    }
+    const q = line.match(/^\s*>\s?(.*)$/);
+    if (q) { flushList(); html.push('<blockquote>' + inline(esc2(q[1])) + '</blockquote>'); continue; }
+    flushList();
+    if (line.trim()) html.push('<p>' + inline(esc2(line)) + '</p>');
+  }
+  if (inCode) html.push('<pre><code>' + esc2(codeBuf.join('\n')) + '</code></pre>');
+  flushList();
+  flushTable();
+  return html.join('\n');
+}
+
+async function openPreview(fp) {
+  document.getElementById('pvName').textContent = String(fp).split(/[\\\/]/).pop();
+  document.getElementById('pvPath').textContent = fp;
+  const body = document.getElementById('pvBody');
+  body.innerHTML = '<p style="color:#999">加载中…</p>';
+  document.getElementById('previewMask').classList.add('show');
+  try {
+    const r = await api('/api/file?path=' + encodeURIComponent(fp));
+    if (!r.success) throw new Error(r.error || '读取失败');
+    body.innerHTML = /\.md$/i.test(fp) ? renderMd(r.content) : '<pre style="white-space:pre-wrap">' + esc(r.content) + '</pre>';
+    body.scrollTop = 0;
+  } catch (e) {
+    body.innerHTML = '<p style="color:#c0392b">加载失败：' + esc(e.message) + '</p>';
+  }
+}
+function closePreview() { document.getElementById('previewMask').classList.remove('show'); }
 
 function msgNode(m) {
   if (m.role === 'sys') {
@@ -895,7 +1239,7 @@ function msgNode(m) {
     <div class="msg-body">
       <div class="msg-name">${esc(m.agentName || m.agentId || 'AI')}${m.agentId === butlerId ? ' · 管家' : ''}</div>
       ${bodyHtml}
-      ${m.outputPath ? `<div class="msg-file" title="系统过程存档：该智能体本阶段完整输出（内部交接用）。用户最终要的成果文件在工作目录中，以管家交付清单里的完整路径为准">📄 过程存档 ${esc(m.outputPath)}</div>` : ''}
+      ${m.outputPath ? `<div class="msg-file" ${/\.md$/i.test(m.outputPath) ? `data-path="${escAttr(m.outputPath)}" title="点击预览该 Markdown 存档"` : `title="系统过程存档：该智能体本阶段完整输出（内部交接用）。用户最终要的成果文件在工作目录中，以管家交付清单里的完整路径为准"`}>📄 过程存档 ${fileNodeText(m.outputPath)}</div>` : ''}
     </div>`;
   row.querySelector('.tx').textContent = m.content;
   m._tx = row.querySelector('.tx');
@@ -910,6 +1254,7 @@ function renderMessages() {
     const node = msgNode(m);
     m._dom = node;
     box.appendChild(node);
+    finalizeMsgLinks(m); // 定稿消息中的 .md 路径变成可点击预览链接
   }
   scrollBottom();
 }
@@ -1009,14 +1354,21 @@ function onSaved(ev) {
     const m = arr[i];
     if (m._live && m.agentId === ev.agentId && m.phase === ev.phase && !m.outputPath) {
       m.outputPath = ev.path;
+      m._live = false; // 封口：后续同名流不再追加进本条
       if (m._dom && document.contains(m._dom) && !m._dom.querySelector('.msg-file')) {
         const file = document.createElement('div');
         file.className = 'msg-file';
-        file.title = '系统过程存档：该智能体本阶段完整输出（内部交接用）。用户最终要的成果文件在工作目录中，以管家交付清单里的完整路径为准';
-        file.textContent = '📄 过程存档 ' + ev.path;
+        if (/\.md$/i.test(ev.path)) {
+          file.dataset.path = ev.path;
+          file.title = '点击预览该 Markdown 存档';
+        } else {
+          file.title = '系统过程存档：该智能体本阶段完整输出（内部交接用）。用户最终要的成果文件在工作目录中，以管家交付清单里的完整路径为准';
+        }
+        file.innerHTML = '📄 过程存档 ' + fileNodeText(ev.path);
         m._dom.querySelector('.msg-body').appendChild(file);
         scrollBottom();
       }
+      finalizeMsgLinks(m); // 交付文本中的成果文件路径也变成可点击链接
       return;
     }
   }
@@ -1285,10 +1637,10 @@ async function openHistory() {
         html += `<div class="msg-row"><div class="avatar butler">🎩</div><div class="msg-body"><div class="msg-name">${esc(m.agentName || '管家')} · 调度规划</div><div class="bubble left plan-card"><div class="plan-thought">${esc(m.plan.thought || '')}</div>${(m.plan.phases || []).map((g, gi) => `<div class="plan-phase"><b>阶段 ${gi + 1}</b>（${g.length > 1 ? g.length + ' 项并行' : '单执行'}）${g.map(s => `<div class="plan-step">▸ <b>${esc(s.agentName)}</b>：${esc(s.instruction)}</div>`).join('')}</div>`).join('')}</div></div></div>`;
       } else {
         const tag = m.phase && PHASE_LABEL[m.phase] ? `<span class="ph">【${PHASE_LABEL[m.phase]}】</span>` : '';
-        const fileTag = m.outputPath ? `<div class="msg-file">📄 过程存档 ${esc(m.outputPath)}</div>` : '';
+        const fileTag = m.outputPath ? `<div class="msg-file" ${/\.md$/i.test(m.outputPath) ? `data-path="${escAttr(m.outputPath)}" title="点击预览"` : ''}>📄 过程存档 ${fileNodeText(m.outputPath)}</div>` : '';
         const contentHtml = isFoldPhase(m.phase)
-          ? `<div class="bubble left"><div class="fold-wrap">${tag}${esc(m.content)}</div><div class="fold-toggle" onclick="toggleFoldEl(this)">展开全文 ▾</div></div>`
-          : `<div class="bubble left">${tag}${esc(m.content)}</div>`;
+          ? `<div class="bubble left"><div class="fold-wrap">${tag}${linkifyMd(esc(m.content))}</div><div class="fold-toggle" onclick="toggleFoldEl(this)">展开全文 ▾</div></div>`
+          : `<div class="bubble left">${tag}${linkifyMd(esc(m.content))}</div>`;
         html += `<div class="msg-row"><div class="avatar ${m.agentId === butlerId ? 'butler' : ''}" style="${m.agentId === butlerId ? '' : `background:${colorOf(m.agentId || 'x')}`}">${esc(agentIcon(m.agentId, m.agentName))}</div><div class="msg-body"><div class="msg-name">${esc(m.agentName || m.agentId || 'AI')}</div>${contentHtml}${fileTag}</div></div>`;
       }
     }
@@ -1298,6 +1650,34 @@ async function openHistory() {
   el.scrollTop = 0;
 }
 function closeHistory() { document.getElementById('historyMask').classList.remove('show'); }
+
+// ---------- 历史管理：一键导出 sessions.md / 一键清空全部会话 ----------
+async function exportHistory() {
+  try {
+    const r = await fetch('/api/history/export');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'sessions.md';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast('已导出 sessions.md（全部会话含任务会话）');
+  } catch (e) { toast('导出失败：' + (e && e.message || e)); }
+}
+
+async function clearAllHistory() {
+  if (!confirm('确定清空全部会话记录？\n\n将删除：\n· 全部聊天消息（主会话 + 任务会话）\n· 会话产出文件（看板 / 过程存档）\n· 流转日志\n\n任务列表本身保留。此操作不可恢复。')) return;
+  const data = await api('/api/history/clear', { method: 'POST' });
+  if (data.success) {
+    sessions.clear();
+    curTaskId = '';
+    await loadMessages();
+    closeHistory();
+    renderHeader();
+    toast(`已清空：${data.messages} 条消息、${data.outputDirs} 个会话产出目录`);
+  } else toast(data.error || '清空失败');
+}
 
 // ---------- 导入任务 ----------
 let importMode = 'sequential';
@@ -1501,7 +1881,17 @@ async function openFlow() {
 }
 function closeFlow() {
   document.getElementById('flowMask').classList.remove('show');
+  const m = document.querySelector('#flowMask .modal.flow');
+  if (m) m.classList.remove('fs');
+  const fb = document.getElementById('flowFsBtn');
+  if (fb) fb.textContent = '⤢ 全屏';
   stopFlowTimer();
+}
+// 全屏切换：泳道图看不全时一键放大到几乎整屏
+function toggleFlowFs() {
+  const m = document.querySelector('#flowMask .modal.flow');
+  const on = m.classList.toggle('fs');
+  document.getElementById('flowFsBtn').textContent = on ? '⤡ 退出全屏' : '⤢ 全屏';
 }
 function stopFlowTimer() { if (flowTimer) { clearInterval(flowTimer); flowTimer = null; } }
 function startFlowTimer() {
@@ -1688,7 +2078,7 @@ function showFlowDetail(i) {
   const p2 = (n) => String(n).padStart(2, '0');
   const d = new Date(e.t);
   const tm = `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
-  let html = `<div class="fd-title">${FLOW_TYPE_LABEL[e.type] || e.type} · ${tm}${e.from ? ` · ${esc(e.from)}` : ''}${e.to ? ` → ${esc(e.to)}` : ''}${e.stage ? ` · 阶段 ${e.stage}` : ''}${e.round ? ` · 第 ${e.round} 轮` : ''}</div>`;
+  let html = `<div class="fd-title">${FLOW_TYPE_LABEL[e.type] || e.type} · ${tm}${e.from ? ` · ${esc(e.from)}` : ''}${e.to ? ` → ${esc(e.to)}` : ''}${e.stage ? ` · 阶段 ${e.stage}` : ''}${e.round ? ` · 第 ${e.round} 轮` : ''}<span class="fd-close" title="收起详情" onclick="this.closest('.flow-detail').style.display='none'">✕</span></div>`;
   if (e.summary) html += `<div>${esc(e.summary)}</div>`;
   if (e.files && e.files.length) html += `<div class="fd-files" style="margin-top:6px">📄 成果文件：<br>${e.files.map(f => esc(f)).join('<br>')}</div>`;
   if (e.detail && Object.keys(e.detail).length) {
@@ -2156,7 +2546,7 @@ function openHelp() {
       <li>左侧底部「🔭 智能体流转」打开泳道时间线：每个智能体一条泳道，展示派发、执行、交接、返工全过程</li>
       <li>绿色块=执行完成，红色块=失败，虚线动画块=执行中；蓝色曲线=交接（产出交给下游），橙色曲线=返工</li>
       <li>点击执行块 / 连线 / 圆点查看详情：任务指令、交接说明、成果文件路径</li>
-      <li>顶部下拉切换历史编排记录，勾选「自动刷新」可实时观察进行中的任务</li>
+      <li>顶部下拉切换历史编排记录，勾选「自动刷新」可实时观察进行中的任务；弹窗较小看不全时点「⤢ 全屏」放大到整屏（也可横向滚动画布）</li>
       <li><b>断点重跑</b>：点击执行块或规划卡片详情中的「↻ 从阶段 N 重跑」，该阶段起重新执行与验收，之前阶段的产出自动作为背景复用（适合某环节翻车后不用整轮重来）</li>
     </ul>
   </div>
@@ -2174,6 +2564,28 @@ function openHelp() {
       <li>每轮每位智能体的发言都以独立气泡显示，默认折叠为约三行（点「展开全文」查看），只有管家的最终总结完整展示</li>
       <li>默认最多 2 轮（.env 中 <code>AGENTS_CHAT_ROUNDTABLE_ROUNDS</code> 可调）、每次发言限 600 字，防止讨论失控</li>
       <li>结束后管家输出总结：<b>共识 / 分歧（注明持方）/ 建议行动</b>；发言与总结都存档，流转视图可回溯（紫色 ⚖ 圆点为主持人判定）</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>👤 单聊 / 👥 群聊（左上角开关）</h4>
+    <ul>
+      <li>左上角「会话」下方的开关一键切换：<b>群聊</b> = 多智能体协作主界面；<b>单聊</b> = 本机网页终端</li>
+      <li>单聊把本机终端搬进网页：可运行 <code>opencode</code> / <code>git</code> / <code>npm</code> 等任何命令，输出实时回显，<code>cd</code> 在会话内保留</li>
+      <li>侧栏提供常用命令一键执行；输入框 ↑↓ 切换历史命令；<b>Ctrl+C</b> 中断当前命令，「清屏」清空显示</li>
+      <li>交互式 TUI（直接输入 <code>opencode</code>）在网页终端里受限，请先用命令式 <code>opencode run "提示词"</code>；后续版本将进一步适配</li>
+      <li>任务会话属于群聊模式：在群聊侧栏点击任务即可进入，单聊互不影响</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>📄 Markdown 预览</h4>
+    <ul>
+      <li>聊天内容与最终交付中出现的 <code>.md</code> 文件完整路径会显示为紫色链接，点击即在弹出页预览渲染后的 Markdown</li>
+      <li>消息下方的「📄 过程存档」为 .md 时同样可点击预览；预览页右上角「✕ 关闭」或按 Esc 退出</li>
+      <li>仅支持数据目录与工作目录内的文本文件（≤2MB），其他文件按原路径提示查看</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>🕘 历史与数据管理</h4>
+    <ul>
+      <li>「🕘 历史」弹窗底部：<b>⬇ 导出 sessions.md</b> 把全部会话（含任务会话）导出为一个 Markdown 文件；<b>🗑 清空全部会话</b> 一键删除消息、会话产出文件与流转日志（任务列表保留）</li>
+      <li>全部页面关闭且无任务执行/审批等待/待触发定时任务时，后台服务空闲 3 分钟自动退出（<code>.env AGENTS_CHAT_AUTOSTOP=0</code> 可关闭），需要时重新运行 start 即可</li>
     </ul>
   </div>
   <div class="help-sec"><h4>🛂 协作通道（看板 / 委派 / 审批）</h4>

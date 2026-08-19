@@ -1,10 +1,11 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.11.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.12.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
+const { spawn } = require('child_process');
 
 // 首先加载 .env（根目录，行为开关配置）
 const { loadEnv } = require('./lib/env');
@@ -109,12 +110,15 @@ function serveStatic(res, filePath) {
 }
 
 // SSE helper
+// sseConns：活跃 SSE 连接计数（聊天/任务/终端），页面关闭后归零，供自动退出判断
+let sseConns = 0;
 function sse(req, res) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive'
   });
+  sseConns++;
   const send = (obj) => {
     try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch { /* closed */ }
   };
@@ -122,8 +126,79 @@ function sse(req, res) {
   const hb = setInterval(() => {
     try { res.write(': hb\n\n'); } catch { clearInterval(hb); }
   }, 15000);
-  req.on('close', () => clearInterval(hb));
+  req.on('close', () => { clearInterval(hb); sseConns--; });
   return send;
+}
+
+// ---------- 页面全关自动退出（便携免维护体验） ----------
+// 前端页面每 25s 心跳一次；所有页面关闭且无 SSE 连接、无审批等待、无编排执行、
+// 无待触发的定时任务时，空闲 3 分钟自动退出（.env AGENTS_CHAT_AUTOSTOP=0 可关闭）
+const AUTOSTOP = process.env.AGENTS_CHAT_AUTOSTOP !== '0';
+const AUTOSTOP_IDLE_MS = 3 * 60 * 1000;
+let lastClientSeen = 0;
+let everSeenClient = false;
+function touchClient() {
+  lastClientSeen = Date.now();
+  everSeenClient = true;
+}
+function startAutoStop() {
+  if (!AUTOSTOP) return;
+  const timer = setInterval(() => {
+    if (!everSeenClient) return;
+    if (sseConns > 0 || pendingApprovals.size > 0 || runLocks.chat || runLocks.tasks) return;
+    if (Date.now() - lastClientSeen < AUTOSTOP_IDLE_MS) return;
+    const hasSched = store.getSchedEnabled() && store.getTasks().some(t =>
+      t.kind === 'scheduled' && t.status === 'pending' && t.scheduledAt && t.scheduledAt > Date.now());
+    if (hasSched) return; // 有等待触发的定时任务：进程需要常驻
+    console.log('所有页面已关闭且空闲 3 分钟，服务自动退出（重开 start.bat 即可）');
+    shutdown(0);
+  }, 15000);
+  timer.unref();
+}
+
+// ---------- 单聊模式：Web 终端（对接 OpenCode 等内核 CLI） ----------
+// 零依赖实现：常驻 shell 进程 + SSE 下行输出 + POST 上行输入；
+// 交互式 TUI（如直接运行 opencode）需要伪终端，本版先支持命令式使用（opencode run 等）
+const termClients = new Set(); // 活跃终端 SSE 的 send 函数
+let termProc = null;
+let termBuf = [];              // 输出回放缓冲（重连/刷新后补回）
+const TERM_BUF_MAX = 600;
+function termCwd() {
+  const gc = String(store.getConfig().globalCwd || '').trim();
+  if (gc) { try { if (fs.existsSync(gc)) return gc; } catch { /* ignore */ } }
+  return store.DATA_DIR;
+}
+// 终端输出清洗：去掉 ANSI 控制序列，避免网页端乱码
+function termClean(s) {
+  return String(s)
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
+}
+function termPush(raw) {
+  const data = termClean(raw);
+  if (!data) return;
+  termBuf.push(data);
+  if (termBuf.length > TERM_BUF_MAX) termBuf = termBuf.slice(termBuf.length - TERM_BUF_MAX);
+  for (const send of termClients) send({ type: 'data', data });
+}
+function termShell() {
+  if (termProc) return termProc;
+  const isWin = process.platform === 'win32';
+  const cmd = isWin ? (process.env.ComSpec || 'cmd.exe') : (process.env.SHELL || '/bin/bash');
+  try {
+    termProc = spawn(cmd, isWin ? ['/Q'] : [], { cwd: termCwd(), env: process.env });
+  } catch (err) {
+    termPush(`\n[无法启动 shell：${err && err.message || err}]\n`);
+    return null;
+  }
+  termProc.stdout.on('data', b => termPush(b.toString('utf8')));
+  termProc.stderr.on('data', b => termPush(b.toString('utf8')));
+  termProc.on('exit', (code) => {
+    termPush(`\n[shell 已退出（code=${code}），下次输入时自动重启]\n`);
+    termProc = null;
+  });
+  return termProc;
 }
 
 // ---------- @ 点名解析（支持中文名称） ----------
@@ -163,6 +238,8 @@ function buildHistoryText(taskId) {
 const server = http.createServer(async (req, res) => {
   const parsed = url.parse(req.url, true);
   const p = parsed.pathname;
+  // 页面存活感知：任何请求都视为「有客户端在看」，供自动退出判断
+  touchClient();
 
   // ---------- 静态 ----------
   if (req.method === 'GET' && (p === '/' || p === '/index.html')) {
@@ -555,6 +632,128 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ---------- 单聊模式：终端 API ----------
+  if (p === '/api/term/stream' && req.method === 'GET') {
+    const send = sse(req, res);
+    termClients.add(send);
+    req.on('close', () => termClients.delete(send));
+    send({ type: 'init', cwd: termCwd(), platform: process.platform });
+    termPush(''); // no-op 占位，确保连接建立
+    if (termBuf.length) send({ type: 'data', data: termBuf.join('') });
+    return;
+  }
+
+  if (p === '/api/term/input' && req.method === 'POST') {
+    const body = await readBody(req);
+    const data = String(body.data || '');
+    if (!data.trim()) { json(res, 200, { success: true }); return; }
+    const proc = termShell();
+    if (proc) {
+      // 输入回显由前端负责（提示符 + 命令），这里只写 stdin
+      try { proc.stdin.write(data + '\n'); } catch { termShell() && termProc.stdin.write(data + '\n'); }
+    }
+    json(res, 200, { success: true });
+    return;
+  }
+
+  if (p === '/api/term/signal' && req.method === 'POST') {
+    const body = await readBody(req);
+    if (termProc) {
+      try { termProc.kill(body.signal === 'kill' ? 'SIGKILL' : 'SIGINT'); } catch { /* ignore */ }
+    }
+    json(res, 200, { success: true });
+    return;
+  }
+
+  if (p === '/api/term/clear' && req.method === 'POST') {
+    termBuf = [];
+    for (const send of termClients) send({ type: 'clear' });
+    json(res, 200, { success: true });
+    return;
+  }
+
+  // ---------- Markdown 文件预览（只读，限文本扩展名与白名单目录） ----------
+  if (p === '/api/file' && req.method === 'GET') {
+    const fp = path.resolve(String(parsed.query.path || ''));
+    const roots = [path.resolve(store.DATA_DIR)];
+    const gc = String(store.getConfig().globalCwd || '').trim();
+    if (gc) roots.push(path.resolve(gc));
+    const allowed = roots.some(r => fp === r || fp.startsWith(r + path.sep));
+    if (!allowed) { json(res, 403, { success: false, error: '只能预览数据目录 / 工作目录内的文件' }); return; }
+    if (!/\.(md|markdown|txt|json|log|csv|js|mjs|ts|html|htm|css|py|sh|yml|yaml|xml)$/i.test(fp)) {
+      json(res, 403, { success: false, error: '仅支持文本类文件预览' });
+      return;
+    }
+    fs.stat(fp, (err, st) => {
+      if (err || !st.isFile()) { json(res, 404, { success: false, error: '文件不存在' }); return; }
+      if (st.size > 2 * 1024 * 1024) { json(res, 413, { success: false, error: '文件超过 2MB，不支持网页预览' }); return; }
+      fs.readFile(fp, 'utf8', (err2, data) => {
+        if (err2) { json(res, 500, { success: false, error: '读取失败' }); return; }
+        json(res, 200, { success: true, path: fp, name: path.basename(fp), size: st.size, content: data });
+      });
+    });
+    return;
+  }
+
+  // ---------- 历史管理：一键清空全部会话 / 导出 sessions.md ----------
+  if (p === '/api/history/clear' && req.method === 'POST') {
+    const msgCount = store.getMessages().length;
+    let outDirs = 0;
+    store.clearMessages();
+    // 会话产出目录（BOARD.md、过程存档等）一并清理
+    const outRoot = path.join(store.DATA_DIR, 'outputs');
+    try {
+      for (const d of fs.readdirSync(outRoot)) {
+        const full = path.join(outRoot, d);
+        try { if (fs.statSync(full).isDirectory()) { fs.rmSync(full, { recursive: true, force: true }); outDirs++; } } catch { /* ignore */ }
+      }
+    } catch { /* 目录不存在 */ }
+    // 流转日志（历史编排记录）同步清空
+    try { fs.writeFileSync(path.join(store.DATA_DIR, 'flow.jsonl'), ''); } catch { /* ignore */ }
+    json(res, 200, { success: true, messages: msgCount, outputDirs: outDirs });
+    return;
+  }
+
+  if (p === '/api/history/export' && req.method === 'GET') {
+    const msgs = store.getMessages();
+    const tasksAll = store.getTasks();
+    const fmtTs = (t) => { const d = new Date(t); const p2 = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
+    const roleOf = (m) => m.role === 'user' ? '👤 用户' : (m.agentName || '智能体') + (m.phase ? `（${m.phase}）` : '');
+    const lines = [
+      '# Agents Chat 会话导出', '',
+      `- 导出时间：${fmtTs(Date.now())}`,
+      `- 会话数：${1 + tasksAll.filter(t => store.getMessages(t.id).length > 0).length}（主会话 + 任务会话）`,
+      `- 消息总数：${msgs.length}`, ''
+    ];
+    const main = msgs.filter(m => !m.taskId);
+    lines.push('---', '', '## 主会话', '');
+    for (const m of main) {
+      lines.push(`### ${fmtTs(m.timestamp)} · ${roleOf(m)}`, '');
+      lines.push(String(m.content || '').trim() || '（无内容）');
+      if (m.outputPath) lines.push('', `> 过程存档：${m.outputPath}`);
+      lines.push('');
+    }
+    for (const t of tasksAll.sort((a, b) => (a.scheduledAt || a.createdAt) - (b.scheduledAt || b.createdAt))) {
+      const arr = store.getMessages(t.id);
+      if (!arr.length) continue;
+      lines.push('---', '', `## 任务：${t.title}`, '',
+        `- 状态：${({ pending: '待执行', running: '执行中', done: '已完成', failed: '失败' })[t.status] || t.status}`,
+        `- 类型：${t.kind === 'scheduled' ? '定时任务' : '顺序任务'}`, '');
+      for (const m of arr) {
+        lines.push(`### ${fmtTs(m.timestamp)} · ${roleOf(m)}`, '');
+        lines.push(String(m.content || '').trim() || '（无内容）');
+        if (m.outputPath) lines.push('', `> 过程存档：${m.outputPath}`);
+        lines.push('');
+      }
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/markdown; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="sessions.md"'
+    });
+    res.end(lines.join('\n'));
+    return;
+  }
+
   res.writeHead(404);
   res.end('Not Found');
 });
@@ -562,6 +761,7 @@ const server = http.createServer(async (req, res) => {
 // 优雅退出：停掉全部子进程、把执行中任务复位为待执行，避免残留与假死状态
 function shutdown(code) {
   try {
+    if (termProc) { try { termProc.kill(); } catch { /* ignore */ } termProc = null; }
     const n = stopAllChildren();
     const m = store.resetRunningTasks();
     if (n || m) console.log(`退出清理：终止 ${n} 个子进程，复位 ${m} 个执行中任务`);
@@ -654,6 +854,7 @@ server.listen(PORT, () => {
   const orphan = store.resetRunningTasks();
   if (orphan > 0) console.log(`检测到 ${orphan} 个上次未正常结束的任务，已复位为待执行`);
   startScheduler();
+  startAutoStop();
   console.log(`Agents Chat 已启动: http://localhost:${PORT}`);
   console.log(`运行内核: ${kindText}`);
   console.log(`本机可用内核: ${avail}（配置页可切换）`);
