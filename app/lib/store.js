@@ -9,6 +9,7 @@ const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 const TASKS_PATH = path.join(DATA_DIR, 'tasks.json');
 const MESSAGES_PATH = path.join(DATA_DIR, 'messages.json');
 const MEMORY_PATH = path.join(DATA_DIR, 'memory.json');
+const OC_SESSIONS_PATH = path.join(DATA_DIR, 'oc-sessions.json');
 
 function ensureDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -254,8 +255,9 @@ function saveTasks(tasks) {
 // mode='sequential'（顺序任务）：每行一个任务，仅支持「1.」编号格式，行末可 @智能体 指派
 // mode='scheduled'（定时任务）：行首时间 = 定时启动时间，
 //   支持完整日期（20260818-1307 / 2026-08-18 13:07）与当天时刻（13:07），行末可 @智能体
+// runner='solo' 时任务标记为单聊执行（由 opencode 单体完成，不经管家编排）
 // 返回 {tasks, warnings}
-function parseTasksFromText(text, mode) {
+function parseTasksFromText(text, mode, runner) {
   mode = mode === 'scheduled' ? 'scheduled' : 'sequential';
   const now = new Date();
   const baseTs = now.getTime();
@@ -337,7 +339,8 @@ function parseTasksFromText(text, mode) {
       status: 'pending',
       assign,
       result: '',
-      kind: mode
+      kind: mode,
+      runner: runner === 'solo' ? 'solo' : ''
     };
     if (mode === 'scheduled') rec.scheduledAt = scheduledAt !== null ? scheduledAt : createdAt;
     parsed.push(rec);
@@ -345,8 +348,8 @@ function parseTasksFromText(text, mode) {
   return { tasks: parsed, warnings };
 }
 
-function importTasks(text, mode) {
-  const { tasks: parsed, warnings } = parseTasksFromText(text, mode);
+function importTasks(text, mode, runner) {
+  const { tasks: parsed, warnings } = parseTasksFromText(text, mode, runner);
   const tasks = getTasks();
   // 若存在无 seq 的旧任务，先按现有顺序（createdAt）补齐
   let next = 0;
@@ -489,6 +492,43 @@ function listFlowRuns(limit) {
     .map(r => ({ ...r, agents: [...r.agents] }));
 }
 
+// ---------- 单聊工作台（OpenCode）会话 ----------
+// 每个网页会话对应一条记录：ocSessionId 为 opencode 的 ses_xxx（首次运行后回填，-s 续聊）
+// 聊天消息复用 messages.json（taskId = oc 会话 id），导出/清空历史自动生效
+function getOcSessions() {
+  const d = readJson(OC_SESSIONS_PATH, null);
+  const list = Array.isArray(d && d.sessions) ? d.sessions : [];
+  return list
+    .filter(s => s && s.id)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+function saveOcSessions(list) {
+  writeJson(OC_SESSIONS_PATH, { sessions: list });
+}
+
+// 新建或增量更新（patch 覆盖，updatedAt 自动刷新）
+function upsertOcSession(id, patch) {
+  const list = getOcSessions();
+  let rec = list.find(s => s.id === id);
+  if (!rec) {
+    rec = { id, title: '', ocSessionId: '', model: '', createdAt: Date.now(), updatedAt: Date.now() };
+    list.push(rec);
+  }
+  Object.assign(rec, patch || {}, { id, updatedAt: Date.now() });
+  saveOcSessions(list);
+  return rec;
+}
+
+function getOcSession(id) {
+  return getOcSessions().find(s => s.id === id) || null;
+}
+
+function deleteOcSession(id) {
+  saveOcSessions(getOcSessions().filter(s => s.id !== id));
+  writeJson(MESSAGES_PATH, readJson(MESSAGES_PATH, []).filter(m => (m.taskId || '') !== id));
+}
+
 // ---------- 管家长期记忆（跨会话偏好与教训，读写由 memory.js 负责） ----------
 function getMemoryData() {
   const d = readJson(MEMORY_PATH, null);
@@ -530,5 +570,10 @@ module.exports = {
   clearMessages,
   addFlowEvent,
   getFlow,
-  listFlowRuns
+  listFlowRuns,
+  getOcSessions,
+  saveOcSessions,
+  upsertOcSession,
+  getOcSession,
+  deleteOcSession
 };

@@ -24,7 +24,21 @@ function streamOutput(lines) {
   tick();
 }
 
-if (behavior === 'echo') {
+if (behavior === 'solo-chat') {
+  // 单聊工作台演示：流式输出模拟回复（含模拟工具调用行，验证过程事件渲染）
+  streamOutput([
+    '[工具] read（demo/notes.md） 读取参考资料',
+    `[单聊] 收到：${prompt.slice(0, 120)}`,
+    '思考中：正在组织回答…（演示）',
+    `已处理完成 ${DEMO_TAG}`
+  ]);
+} else if (behavior === 'solo-task') {
+  // 单聊任务执行演示：输出任务结果（作为 result 持久化）
+  streamOutput([
+    `[单聊任务] 开始处理：${prompt.slice(0, 120)}`,
+    `任务完成：产出模拟结果 ${DEMO_TAG}`
+  ]);
+} else if (behavior === 'echo') {
   if (prompt.includes('【委派背景】')) {
     // 中途委派演示：接手方正常完成，并附一条看板更新（验证共享看板的主动写入通道）
     output(`完成：已接手委派任务并解决，供后续协作者参考 ${DEMO_TAG}\n\n【看板更新】\n1. 已确认该任务由我接手，前一位智能体的参考内容已消化`);

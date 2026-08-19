@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.12.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.13.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -36,6 +36,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const store = require('./lib/store');
 const { runAgent, stopScope, stopAllChildren } = require('./lib/agent');
 const { runButler, runMentioned, runRoundtable, runTasks, prepareRerun } = require('./lib/orchestrator');
+const oc = require('./lib/oc');
 const memoryMod = require('./lib/memory');
 
 // ---------- 人工审批关卡：orchestrator 暂停等待用户放行（方案/交付），SSE 断线后可经 /api/approvals 恢复 ----------
@@ -65,9 +66,9 @@ function approvalSetting() {
 }
 
 // ---------- 执行互斥与停止控制 ----------
-// chat / tasks 两个作用域各自单飞（防止双击或 API 直调并发执行）；
+// chat / tasks / solo 三个作用域各自单飞（防止双击或 API 直调并发执行）；
 // 任务执行中仍可正常聊天，互不阻塞
-const runLocks = { chat: false, tasks: false };
+const runLocks = { chat: false, tasks: false, solo: false };
 // 停止令牌：每次停止递增，编排循环通过对比快照感知「执行期间被要求停止」
 const stopTokens = { chat: 0, tasks: 0 };
 
@@ -145,7 +146,7 @@ function startAutoStop() {
   if (!AUTOSTOP) return;
   const timer = setInterval(() => {
     if (!everSeenClient) return;
-    if (sseConns > 0 || pendingApprovals.size > 0 || runLocks.chat || runLocks.tasks) return;
+    if (sseConns > 0 || pendingApprovals.size > 0 || runLocks.chat || runLocks.tasks || runLocks.solo) return;
     if (Date.now() - lastClientSeen < AUTOSTOP_IDLE_MS) return;
     const hasSched = store.getSchedEnabled() && store.getTasks().some(t =>
       t.kind === 'scheduled' && t.status === 'pending' && t.scheduledAt && t.scheduledAt > Date.now());
@@ -275,8 +276,8 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/stop' && req.method === 'POST') {
     // 手动停止：kill 对应作用域的全部子进程；编排循环检测令牌后跳过剩余工作
     const body = await readBody(req);
-    const scope = body.scope === 'tasks' ? 'tasks' : 'chat';
-    stopTokens[scope]++;
+    const scope = ['tasks', 'solo', 'chat'].includes(body.scope) ? body.scope : 'chat';
+    if (scope === 'tasks') stopTokens.tasks++;
     const n = stopScope(scope);
     json(res, 200, { success: true, scope, stopped: n });
     return;
@@ -489,14 +490,16 @@ const server = http.createServer(async (req, res) => {
 
   if (p === '/api/tasks/import' && req.method === 'POST') {
     // 从文本自动提取任务；mode: sequential=顺序任务（1. 编号）| scheduled=定时任务（行首定时时间）
+    // runner='solo' 时任务由单聊 OpenCode 直接执行（不经管家编排），侧栏在单聊模式展示
     const body = await readBody(req);
     if (!body.text || !String(body.text).trim()) {
       json(res, 400, { success: false, error: 'text 不能为空' });
       return;
     }
     const mode = body.mode === 'scheduled' ? 'scheduled' : 'sequential';
-    const { added, warnings } = store.importTasks(body.text, mode);
-    json(res, 200, { success: true, added, warnings, mode, tasks: store.getTasks() });
+    const runner = body.runner === 'solo' ? 'solo' : '';
+    const { added, warnings } = store.importTasks(body.text, mode, runner);
+    json(res, 200, { success: true, added, warnings, mode, runner, tasks: store.getTasks() });
     return;
   }
 
@@ -522,7 +525,8 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/tasks/run' && req.method === 'POST') {
-    // 顺序执行任务：每个任务 = 独立会话 + 一次完整管家调度
+    // 顺序执行任务：scope='solo' 时由 OpenCode 单体逐个执行（每个任务独立一次性对话）；
+    // 默认（群聊）每个任务 = 独立会话 + 一次完整管家调度
     // 未指定 ids 时仅执行顺序待办（未到点的定时任务不在此列，由定时调度器负责）
     if (runLocks.tasks) {
       json(res, 409, { success: false, error: '已有一批任务正在执行，请等待完成或先停止' });
@@ -531,10 +535,13 @@ const server = http.createServer(async (req, res) => {
     runLocks.tasks = true;
     const myToken = stopTokens.tasks; // 执行期间令牌变化 = 用户请求了停止
     const body = await readBody(req);
+    const soloScope = body.scope === 'solo';
     const all = store.getTasks().slice().sort((a, b) => a.createdAt - b.createdAt);
     const selected = Array.isArray(body.taskIds) && body.taskIds.length > 0
       ? all.filter(t => body.taskIds.includes(t.id))
-      : all.filter(t => (t.status === 'pending' || t.status === 'failed') && !(t.kind === 'scheduled' && t.status === 'pending'));
+      : all.filter(t => (t.status === 'pending' || t.status === 'failed')
+        && !(t.kind === 'scheduled' && t.status === 'pending')
+        && (soloScope ? t.runner === 'solo' : t.runner !== 'solo'));
     if (selected.length === 0) {
       runLocks.tasks = false;
       json(res, 400, { success: false, error: '没有可执行的任务' });
@@ -543,7 +550,11 @@ const server = http.createServer(async (req, res) => {
 
     const send = sse(req, res);
     try {
-      await executeTaskBatch(selected, send, myToken);
+      if (soloScope) {
+        await executeSoloTaskBatch(selected, send, myToken);
+      } else {
+        await executeTaskBatch(selected, send, myToken);
+      }
     } catch (err) {
       console.error('[tasks/run] 编排异常:', err && (err.stack || err));
       send({ type: 'error', content: `任务编排异常：${err && err.message || err}` });
@@ -672,6 +683,128 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ---------- 单聊工作台（OpenCode）：模型与会话管理 ----------
+  if (p === '/api/oc/models' && req.method === 'GET') {
+    const { resolveRunner } = require('./lib/agent');
+    const runner = resolveRunner();
+    if (runner.kind === 'demo') {
+      json(res, 200, { success: true, demo: true, models: oc.demoModels() });
+      return;
+    }
+    if (runner.kind !== 'opencode') {
+      // 其他内核无模型列表命令：返回空 + 内核标注（前端提示手动填写或用默认）
+      json(res, 200, { success: true, models: [], kernel: runner.kernel ? runner.kernel.label : '', noResume: true });
+      return;
+    }
+    const models = oc.listOcModels(runner, parsed.query.refresh === '1');
+    json(res, 200, { success: true, models });
+    return;
+  }
+
+  if (p === '/api/oc/sessions' && req.method === 'GET') {
+    json(res, 200, { success: true, sessions: store.getOcSessions() });
+    return;
+  }
+
+  if (p === '/api/oc/sessions' && req.method === 'POST') {
+    // 新建单聊会话
+    const body = await readBody(req);
+    const id = `oc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const rec = store.upsertOcSession(id, { title: String(body.title || '').slice(0, 60) });
+    json(res, 200, { success: true, session: rec });
+    return;
+  }
+
+  if (p === '/api/oc/sessions/rename' && req.method === 'POST') {
+    const body = await readBody(req);
+    const id = String(body.id || '');
+    if (!store.getOcSession(id)) { json(res, 404, { success: false, error: '会话不存在' }); return; }
+    const rec = store.upsertOcSession(id, { title: String(body.title || '').trim().slice(0, 60) });
+    json(res, 200, { success: true, session: rec });
+    return;
+  }
+
+  if (p === '/api/oc/sessions/delete' && req.method === 'POST') {
+    const body = await readBody(req);
+    const id = String(body.id || '');
+    if (!store.getOcSession(id)) { json(res, 404, { success: false, error: '会话不存在' }); return; }
+    store.deleteOcSession(id);
+    json(res, 200, { success: true, sessions: store.getOcSessions() });
+    return;
+  }
+
+  if (p === '/api/oc/chat' && req.method === 'POST') {
+    // 单聊对话：opencode run（-s 续聊），SSE 转发快照事件
+    if (runLocks.solo) {
+      json(res, 409, { success: false, error: '上一条消息还在处理中，请等待完成或点「停止」' });
+      return;
+    }
+    const body = await readBody(req);
+    const sessionId = String(body.sessionId || '');
+    const message = String(body.message || '').trim();
+    const model = String(body.model || '');
+    const rec = store.getOcSession(sessionId);
+    if (!rec) { json(res, 404, { success: false, error: '会话不存在，请先新建' }); return; }
+    if (!message) { json(res, 400, { success: false, error: 'message 不能为空' }); return; }
+
+    const { resolveRunner, missingHint } = require('./lib/agent');
+    const runner = resolveRunner();
+    if (runner.kind === 'missing') {
+      json(res, 400, { success: false, error: missingHint(runner) });
+      return;
+    }
+
+    runLocks.solo = true;
+    store.addMessage({ role: 'user', content: message, taskId: sessionId, timestamp: new Date().toISOString() });
+    // 标题留空时取首条消息；模型选择随会话记忆
+    const patch = {};
+    if (!rec.title) patch.title = message.slice(0, 24);
+    if (model) patch.model = model;
+    store.upsertOcSession(sessionId, patch);
+
+    const send = sse(req, res);
+    const texts = new Map();  // partId -> 最新快照
+    const order = [];         // 正文 part 出现顺序（多段拼接用）
+    send({ type: 'start', sessionId, model });
+    try {
+      await new Promise((resolve) => {
+        const kind = runner.kind === 'demo' ? 'demo' : (runner.kind === 'opencode' ? 'opencode' : 'fallback');
+        oc.chatSolo(kind, runner, { prompt: message, model, ocSessionId: rec.ocSessionId || '' }, (ev) => {
+          if (ev.type === 'session') {
+            // 首个 sessionID 回填：后续轮次经 -s 在同一 opencode 会话续聊
+            store.upsertOcSession(sessionId, { ocSessionId: ev.ocSessionId });
+            send({ type: 'session', sessionId, ocSessionId: ev.ocSessionId });
+          } else if (ev.type === 'text') {
+            if (!texts.has(ev.partId)) order.push(ev.partId);
+            texts.set(ev.partId, ev.text);
+            send({ type: 'text', sessionId, partId: ev.partId, text: ev.text });
+          } else if (ev.type === 'reasoning') {
+            send({ type: 'reasoning', sessionId, partId: ev.partId, text: ev.text });
+          } else if (ev.type === 'tool') {
+            send({ type: 'tool', sessionId, name: ev.name, summary: ev.summary });
+          } else if (ev.type === 'done') {
+            send({ type: 'done', sessionId, error: ev.error || undefined, noResume: !!ev.noResume });
+            resolve();
+          }
+        });
+      });
+      // 最终正文快照落库（reasoning/tool 过程信息不持久化）
+      const finalText = order.map(id => texts.get(id)).join('\n\n').trim();
+      if (finalText) {
+        store.addMessage({ role: 'assistant', agentId: 'solo', agentName: 'OpenCode', phase: 'work', taskId: sessionId, content: finalText, timestamp: new Date().toISOString() });
+      }
+      store.upsertOcSession(sessionId, {}); // 刷新 updatedAt（侧栏排序）
+    } catch (err) {
+      console.error('[oc/chat] 单聊异常:', err && (err.stack || err));
+      send({ type: 'error', content: `单聊异常：${err && err.message || err}` });
+      send({ type: 'done', sessionId, error: '内部异常' });
+    } finally {
+      runLocks.solo = false;
+      try { res.end(); } catch { /* closed */ }
+    }
+    return;
+  }
+
   // ---------- Markdown 文件预览（只读，限文本扩展名与白名单目录） ----------
   if (p === '/api/file' && req.method === 'GET') {
     const fp = path.resolve(String(parsed.query.path || ''));
@@ -700,6 +833,8 @@ const server = http.createServer(async (req, res) => {
     const msgCount = store.getMessages().length;
     let outDirs = 0;
     store.clearMessages();
+    // 单聊会话记录一并清空（消息已清，保留空会话列表无意义）
+    store.saveOcSessions([]);
     // 会话产出目录（BOARD.md、过程存档等）一并清理
     const outRoot = path.join(store.DATA_DIR, 'outputs');
     try {
@@ -717,12 +852,13 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/history/export' && req.method === 'GET') {
     const msgs = store.getMessages();
     const tasksAll = store.getTasks();
+    const ocAll = store.getOcSessions();
     const fmtTs = (t) => { const d = new Date(t); const p2 = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
     const roleOf = (m) => m.role === 'user' ? '👤 用户' : (m.agentName || '智能体') + (m.phase ? `（${m.phase}）` : '');
     const lines = [
       '# Agents Chat 会话导出', '',
       `- 导出时间：${fmtTs(Date.now())}`,
-      `- 会话数：${1 + tasksAll.filter(t => store.getMessages(t.id).length > 0).length}（主会话 + 任务会话）`,
+      `- 会话数：${1 + tasksAll.filter(t => store.getMessages(t.id).length > 0).length + ocAll.filter(s => store.getMessages(s.id).length > 0).length}（主会话 + 任务会话 + 单聊会话）`,
       `- 消息总数：${msgs.length}`, ''
     ];
     const main = msgs.filter(m => !m.taskId);
@@ -738,11 +874,22 @@ const server = http.createServer(async (req, res) => {
       if (!arr.length) continue;
       lines.push('---', '', `## 任务：${t.title}`, '',
         `- 状态：${({ pending: '待执行', running: '执行中', done: '已完成', failed: '失败' })[t.status] || t.status}`,
-        `- 类型：${t.kind === 'scheduled' ? '定时任务' : '顺序任务'}`, '');
+        `- 类型：${t.kind === 'scheduled' ? '定时任务' : '顺序任务'}${t.runner === 'solo' ? '（单聊 OpenCode 执行）' : ''}`, '');
       for (const m of arr) {
         lines.push(`### ${fmtTs(m.timestamp)} · ${roleOf(m)}`, '');
         lines.push(String(m.content || '').trim() || '（无内容）');
         if (m.outputPath) lines.push('', `> 过程存档：${m.outputPath}`);
+        lines.push('');
+      }
+    }
+    for (const s of ocAll) {
+      const arr = store.getMessages(s.id);
+      if (!arr.length) continue;
+      lines.push('---', '', `## 单聊会话：${s.title || s.id}`, '',
+        `- 模型：${s.model || '默认'}`, '');
+      for (const m of arr) {
+        lines.push(`### ${fmtTs(m.timestamp)} · ${roleOf(m)}`, '');
+        lines.push(String(m.content || '').trim() || '（无内容）');
         lines.push('');
       }
     }
@@ -804,6 +951,69 @@ async function executeTaskBatch(selected, send, myToken) {
   );
 }
 
+// ---------- 单聊任务批次执行（OpenCode 单体逐个完成，不经管家编排） ----------
+// 每个任务 = 独立一次性对话（无 -s 续聊）；消息与结果持久化到任务会话
+// SSE 事件：task_start / text(快照) / tool / notice / task_done / all_done
+async function executeSoloTaskBatch(selected, send, myToken) {
+  const { resolveRunner, missingHint } = require('./lib/agent');
+  for (const task of selected) {
+    if (stopTokens.tasks !== myToken) break; // 用户请求停止：跳过剩余任务
+    store.updateTask(task.id, { status: 'running' });
+    send({ type: 'task_start', taskId: task.id, title: task.title, solo: true });
+    if (store.getMessages(task.id).length === 0) {
+      store.addMessage({
+        role: 'user',
+        content: `任务：${task.title}${task.notes ? `\n补充说明：${task.notes}` : ''}`,
+        taskId: task.id,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const runner = resolveRunner();
+    if (runner.kind === 'missing') {
+      store.updateTask(task.id, { status: 'failed', result: missingHint(runner).slice(0, 2000) });
+      send({ type: 'task_done', taskId: task.id, title: task.title, status: 'failed' });
+      continue;
+    }
+
+    const texts = new Map();
+    const order = [];
+    let doneError = '';
+    await new Promise((resolve) => {
+      const kind = runner.kind === 'demo' ? 'demo' : (runner.kind === 'opencode' ? 'opencode' : 'fallback');
+      oc.chatSolo(kind, runner, {
+        prompt: `请完成以下任务并给出结果：\n\n${task.title}${task.notes ? `\n补充说明：${task.notes}` : ''}`,
+        model: '',
+        ocSessionId: '',
+        behavior: 'solo-task'
+      }, (ev) => {
+        if (ev.type === 'text') {
+          if (!texts.has(ev.partId)) order.push(ev.partId);
+          texts.set(ev.partId, ev.text);
+          send({ type: 'text', taskId: task.id, partId: ev.partId, text: ev.text, agentId: 'solo', agentName: 'OpenCode', phase: 'work' });
+        } else if (ev.type === 'tool') {
+          send({ type: 'notice', content: ev.summary, taskId: task.id });
+        } else if (ev.type === 'done') {
+          doneError = ev.error || '';
+          resolve();
+        }
+      });
+    });
+
+    const finalText = order.map(id => texts.get(id)).join('\n\n').trim();
+    if (finalText) {
+      store.addMessage({ role: 'assistant', agentId: 'solo', agentName: 'OpenCode', phase: 'work', taskId: task.id, content: finalText, timestamp: new Date().toISOString() });
+    }
+    const stopped = stopTokens.tasks !== myToken;
+    store.updateTask(task.id, {
+      status: stopped ? 'pending' : (doneError ? 'failed' : 'done'),
+      result: (doneError ? `执行出错：${doneError}` : finalText).slice(0, 2000)
+    });
+    send({ type: 'task_done', taskId: task.id, title: task.title, status: stopped ? 'pending' : (doneError ? 'failed' : 'done') });
+  }
+  send({ type: 'all_done' });
+}
+
 // ---------- 定时调度器：到点的定时任务自动执行（无人值守） ----------
 // 执行过程照常持久化到对应任务会话，用户打开会话即可查看全过程
 const SCHED_INTERVAL_MS = 15000;
@@ -817,7 +1027,12 @@ function startScheduler() {
     runLocks.tasks = true;
     const myToken = stopTokens.tasks;
     console.log(`[scheduler] 定时触发 ${due.length} 个任务：${due.map(t => t.title).join('、')}`);
-    executeTaskBatch(due, () => {}, myToken)
+    const groups = due.filter(t => t.runner !== 'solo');
+    const solos = due.filter(t => t.runner === 'solo');
+    (async () => {
+      if (groups.length) await executeTaskBatch(groups, () => {}, myToken);
+      if (solos.length) await executeSoloTaskBatch(solos, () => {}, myToken);
+    })()
       .catch(err => console.error('[scheduler] 定时执行异常:', err && (err.stack || err)))
       .finally(() => { runLocks.tasks = false; });
   }, SCHED_INTERVAL_MS);
