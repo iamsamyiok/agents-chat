@@ -23,9 +23,8 @@
   .mini-btn.gray { color: #888; border-color: #ddd; }
   .mini-btn:hover { opacity: .8; }
 
-  #sessionList { flex: 1; overflow-y: auto; }
   .task-empty { color: #b0b0b0; font-size: 13px; text-align: center; padding: 30px 20px; line-height: 1.8; }
-  .list-sep { font-size: 11px; color: #b2b2b2; padding: 10px 14px 4px; }
+  .list-sep { font-size: 11px; color: #b2b2b2; padding: 10px 14px 4px; background: #fff; position: sticky; top: 0; z-index: 1; }
   .task-item { display: flex; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #f5f5f5; cursor: pointer; align-items: center; position: relative; }
   .task-item:hover { background: #f7f7f7; }
   .task-item.active { background: #eef7f0; }
@@ -282,7 +281,13 @@
   /* ---------- 侧栏顶部：单聊/群聊开关 + 任务操作按钮 ---------- */
   .side-header { padding: 12px 12px 10px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid #f0f0f0; }
   .mode-switch { display: inline-flex; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
-  .mode-switch button { border: none; background: #fff; font-size: 13px; padding: 5px 0; cursor: pointer; color: #666; flex: 1; }
+  .mode-switch button { border: none; background: #fff; font-size: 13px; padding: 5px 0; cursor: pointer; color: #666; flex: 1; white-space: nowrap; }
+
+  /* ---------- 侧栏中部：会话区（上，约5条）+ 任务区（下）各占一半，总高固定 ---------- */
+  .side-mid { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  #sessArea { flex: 0 0 50%; min-height: 0; max-height: 348px; overflow-y: auto; border-bottom: 1px solid #f0f0f0; }
+  .task-area { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  #taskList { flex: 1; min-height: 0; overflow-y: auto; }
   .mode-switch button + button { border-left: 1px solid #ddd; }
   .mode-switch button.active { background: #07c160; color: #fff; font-weight: 600; }
   .side-header .side-actions { display: flex; gap: 6px; width: 100%; }
@@ -304,6 +309,8 @@
   .bubble .solo-reasoning .sr-tag { font-style: normal; font-size: 11px; color: #b2b2b2; display: block; margin-bottom: 2px; }
   .bubble .solo-part-md { white-space: normal; }
   .bubble .solo-part-md p { margin: 0.35em 0; }
+  .bubble .solo-part-md > :first-child { margin-top: 0; }
+  .bubble .solo-part-md > :last-child { margin-bottom: 0; }
   .bubble .solo-part-md pre { background: #f6f6f6; border-radius: 6px; padding: 8px 10px; overflow-x: auto; font-size: 12.5px; }
   .bubble .solo-part-md code { background: #f0f0f0; border-radius: 3px; padding: 1px 4px; font-size: 12.5px; }
   .bubble .solo-part-md pre code { background: none; padding: 0; }
@@ -364,11 +371,16 @@
         <button class="mini-btn gray" onclick="clearTasks()">清空</button>
       </div>
     </div>
-    <div class="task-tabs" id="taskTabs">
-      <button class="ttab active" id="ttabSeq" onclick="setTaskView('seq')">📋 顺序任务</button>
-      <button class="ttab" id="ttabSched" onclick="setTaskView('sched')">⏰ 定时任务 <span class="badge" id="pendingBadge" style="display:none">0</span></button>
+    <div class="side-mid">
+      <div id="sessArea"></div>
+      <div class="task-area">
+        <div class="task-tabs" id="taskTabs">
+          <button class="ttab active" id="ttabSeq" onclick="setTaskView('seq')">📋 顺序任务</button>
+          <button class="ttab" id="ttabSched" onclick="setTaskView('sched')">⏰ 定时任务 <span class="badge" id="pendingBadge" style="display:none">0</span></button>
+        </div>
+        <div id="taskList"></div>
+      </div>
     </div>
-    <div id="sessionList"></div>
     <div class="side-footer">
       <button class="run-all" id="runAllBtn" onclick="onRunAllBtn()" style="margin-bottom:0">按顺序执行全部待办</button>
       <button class="run-all off" id="schedPowerBtn" onclick="toggleSchedPower()" style="display:none;margin-bottom:0">⏸ 关闭定时任务</button>
@@ -614,7 +626,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.14.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.15.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -786,8 +798,17 @@ async function loadOcModels(refresh) {
 // 填充输入框 datalist：value=id（发送给内核），展示 label
 function renderOcModelSel() {
   const dl = document.getElementById('ocModelList');
-  const saved = localStorage.getItem('ocModel') || '';
-  if (!curOcModel && ocModels.some(m => m.id === saved)) curOcModel = saved;
+  // localStorage 'ocModel'：null=从未选择过（自动优先挑免费模型）；''=用户主动清空（用内核默认模型）
+  const savedRaw = localStorage.getItem('ocModel');
+  if (!curOcModel) {
+    if (savedRaw === null) {
+      const free = ocModels.find(m => /free/i.test(m.id) || /free/i.test(m.label || ''));
+      if (free) curOcModel = free.id;
+    } else {
+      const saved = savedRaw || '';
+      if (ocModels.some(m => m.id === saved)) curOcModel = saved;
+    }
+  }
   dl.innerHTML = ocModels.map(m => `<option value="${escAttr(m.id)}">${esc(m.label || m.id)}</option>`).join('');
   syncOcModelInput();
 }
@@ -887,8 +908,8 @@ function soloRenderMessages() {
   const box = document.getElementById('soloMessages');
   if (!curOcId) {
     box.innerHTML = `<div class="solo-empty">👋 欢迎使用单聊<br>
-      点顶部「✚ 新会话」开始与 AI 一对一对话（同会话多轮续聊）<br>
-      顶部输入框可选择默认模型；「导入任务」创建的任务在单聊模式下逐个执行</div>`;
+      直接在下方输入消息即可开始（自动创建新会话，同会话多轮续聊）<br>
+      顶部输入框可选择默认模型（未选择时自动优先免费模型）</div>`;
     return;
   }
   box.innerHTML = '';
@@ -1032,7 +1053,17 @@ async function soloSend() {
   const el = document.getElementById('soloInput');
   const text = el.value.trim();
   if (!text) return;
-  if (!curOcId) { toast('请先点左上角「✚ 新会话」创建单聊会话'); return; }
+  if (!curOcId) {
+    // 未选会话时自动以首句为题新建，免手动点「✚ 新会话」
+    try {
+      const r = await api('/api/oc/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: text.slice(0, 30) }) });
+      if (!r.success) { toast(r.error || '自动新建会话失败'); return; }
+      ocSessions.unshift(r.session);
+      curOcId = r.session.id;
+      renderSidebar();
+      renderHeader();
+    } catch { toast('自动新建会话失败'); return; }
+  }
   if (soloBusy) return;
   soloBusy = true;
   soloStopAsked = false;
@@ -1180,11 +1211,15 @@ function visibleTasks() {
   return tasks.filter(t => t.kind !== 'scheduled' && (solo ? t.runner === 'solo' : t.runner !== 'solo'));
 }
 
+// 侧栏渲染：上半会话区（sessArea）+ 下半任务区（taskList），两区各占一半高度
 function renderSidebar() {
-  const el = document.getElementById('sessionList');
-  const badge = document.getElementById('pendingBadge');
+  renderSessions();
+  renderTasks();
+}
 
-  // ---- 单聊模式：单聊会话列表 + 单聊任务 ----
+// ---------- 会话区：当前模式的会话列表（约5条高度，其余滚动查看） ----------
+function renderSessions() {
+  const el = document.getElementById('sessArea');
   if (chatMode === 'solo') {
     const sessHtml = ocSessions.length
       ? ocSessions.map(s => `
@@ -1197,8 +1232,48 @@ function renderSidebar() {
           </div>
           <button class="mini-btn danger" title="删除会话及其消息" onclick="event.stopPropagation();delOcSession('${escAttr(s.id)}')">✕</button>
         </div>`).join('')
-      : '<div class="task-empty">暂无单聊会话<br>点顶部「✚ 新会话」开始</div>';
+      : '<div class="task-empty">暂无单聊会话<br>在输入框发消息即可自动创建</div>';
+    el.innerHTML = '<div class="list-sep">单聊会话（OpenCode 多轮续聊）</div>' + sessHtml;
+    return;
+  }
+  // 群聊会话：主会话 + 全部群聊任务会话（顺序/定时任务的对话记录）
+  const groupTasks = tasks.filter(t => t.runner !== 'solo');
+  const main = `<div class="task-item ${curTaskId === '' ? 'active' : ''}" onclick="switchSession('')">
+    <div class="task-avatar" style="background:#07c160">👥</div>
+    <div class="task-main">
+      <div class="task-title">群聊主会话</div>
+      <div class="task-sub"><span>多智能体协作 · @ 可点名</span></div>
+    </div>
+  </div>`;
+  const sessHtml = groupTasks.length ? groupTasks.map(t => {
+    const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : (t.kind === 'scheduled' ? '⏰' : '•');
+    const assign = t.assign && t.assign !== butlerId ? ` · @${esc(assignName(t.assign))}` : '';
+    return `<div class="task-item ${curTaskId === t.id ? 'active' : ''}" onclick="switchSession('${escAttr(t.id)}')">
+      ${unreadSess.has(t.id) ? '<span class="unread-dot"></span>' : ''}
+      <div class="task-avatar st-${t.status === 'pending' && t.kind === 'scheduled' ? 'scheduled' : t.status}">${icon}</div>
+      <div class="task-main">
+        <div class="task-title">${esc(t.title)}</div>
+        <div class="task-sub"><span>${statusText(t.status)}${t.kind === 'scheduled' ? ' · 定时' : ''}${assign}</span><span>${fmtTime(t.createdAt)}</span></div>
+      </div>
+    </div>`;
+  }).join('') : '';
+  el.innerHTML = '<div class="list-sep">群聊会话（主会话 + 任务会话）</div>' + main + sessHtml;
+}
 
+// ---------- 任务区：当前模式的任务列表（顺序/定时 tab，执行/删除/拖拽） ----------
+// 单聊任务的执行链徽标：- 续聊 / // 并行
+function linkBadge(t) {
+  if (t.runner !== 'solo' || !t.link || t.link === 'new') return '';
+  return t.link === 'continue'
+    ? '<span style="color:#8a6fe8;font-size:11px;margin-right:4px" title="在上一任务的会话中继续执行（同进程续聊）">↪ 续聊</span>'
+    : '<span style="color:#0a742e;font-size:11px;margin-right:4px" title="与相邻并行任务同时执行（独立进程）">⚡ 并行</span>';
+}
+function renderTasks() {
+  const el = document.getElementById('taskList');
+  const badge = document.getElementById('pendingBadge');
+
+  // ---- 单聊模式：单聊任务 ----
+  if (chatMode === 'solo') {
     let tasksHtml = '';
     if (taskView === 'sched') {
       const sched = tasks.filter(t => t.kind === 'scheduled' && t.runner === 'solo').sort((a, b) => (a.scheduledAt || 0) - (b.scheduledAt || 0));
@@ -1215,7 +1290,7 @@ function renderSidebar() {
           <div class="task-avatar st-${t.status === 'pending' ? 'scheduled' : t.status}">${icon}</div>
           <div class="task-main">
             <div class="task-title">${esc(t.title)}</div>
-            <div class="task-sub"><span>${st}</span></div>
+            <div class="task-sub"><span>${linkBadge(t)}${st}</span></div>
           </div>
           ${t.status === 'pending' ? `<button class="mini-btn" title="不再等到点，立即执行" onclick="event.stopPropagation();runSchedNow('${escAttr(t.id)}')">立即执行</button>` : ''}
           ${t.status === 'failed' ? `<button class="mini-btn" title="重新执行" onclick="event.stopPropagation();runSchedNow('${escAttr(t.id)}')">重跑</button>` : ''}
@@ -1234,21 +1309,18 @@ function renderSidebar() {
           <div class="task-avatar st-${t.status}">${icon}</div>
           <div class="task-main">
             <div class="task-title">${esc(t.title)}</div>
-            <div class="task-sub"><span>${statusText(t.status)}</span><span>${fmtTime(t.createdAt)}</span></div>
+            <div class="task-sub"><span>${linkBadge(t)}${statusText(t.status)}</span><span>${fmtTime(t.createdAt)}</span></div>
           </div>
           ${t.status === 'pending' || t.status === 'failed' ? `<button class="mini-btn" onclick="event.stopPropagation();runTask('${escAttr(t.id)}')">执行</button>` : ''}
           <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
         </div>`;
       }).join('') : '<div class="task-empty">暂无顺序任务<br>点上方「导入任务」添加<br>（单聊任务由 OpenCode 单体执行）</div>';
     }
-
-    el.innerHTML =
-      '<div class="list-sep">单聊会话（OpenCode 多轮续聊）</div>' + sessHtml +
-      `<div class="list-sep">${taskView === 'sched' ? '定时任务（单聊 · 到点自动执行）' : '单聊任务（点击查看会话，可拖拽排序）'}</div>` + tasksHtml;
+    el.innerHTML = `<div class="list-sep">${taskView === 'sched' ? '定时任务（单聊 · 到点自动执行）' : '单聊任务（点击查看会话，可拖拽排序）'}</div>` + tasksHtml;
     return;
   }
 
-  // ---- 定时视图：全部定时任务（含未触发），按启动时间排序 ----
+  // ---- 群聊模式：定时视图（全部定时任务，按启动时间排序） ----
   if (taskView === 'sched') {
     const sched = tasks.filter(t => t.kind === 'scheduled' && t.runner !== 'solo').sort((a, b) => (a.scheduledAt || 0) - (b.scheduledAt || 0));
     const pend = sched.filter(t => t.status === 'pending').length;
@@ -1281,7 +1353,7 @@ function renderSidebar() {
     return;
   }
 
-  // ---- 顺序视图：顺序任务会话（群聊主会话由左上角「👥 群聊」开关进入） ----
+  // ---- 群聊模式：顺序任务（可拖拽排序） ----
   const vis = visibleTasks();
   const pending = vis.filter(t => t.status === 'pending').length;
   badge.style.display = pending ? 'inline' : 'none';
@@ -1306,7 +1378,7 @@ function renderSidebar() {
       </div>`;
     }).join('');
   }
-  el.innerHTML = '<div class="list-sep">任务会话（点击查看对话，可拖拽排序）</div>' + tasksHtml;
+  el.innerHTML = '<div class="list-sep">顺序任务（可拖拽排序，点击查看会话）</div>' + tasksHtml;
 }
 
 function assignName(id) {
@@ -2108,9 +2180,18 @@ const IMPORT_TIP = {
   sequential: '每行一个任务，使用 <code>1.</code> <code>2.</code> 编号；行末可 <code>@智能体</code> 指派（输入 @ 有补全）——不指派则由管家调度，指派子智能体则独立完成。任务按编号顺序执行。',
   scheduled: '每行一个定时任务：行首写启动时间（格式 <code>20260818-1307</code>），行首输入 <code>[]</code> 自动填入当前日期时间（可修改）；行末可 <code>@智能体</code> 指派。到点自动执行。'
 };
+// 单聊模式导入语法：- 接续上一任务会话；// 并行独立进程
+const IMPORT_TIP_SOLO = {
+  sequential: '单聊任务语法（OpenCode 直接执行，不经管家）：<br>· <code>1.任务</code> 编号开头，无前缀 = 新会话独立执行<br>· <code>2.-任务</code> <b>-</b> 前缀 = 在上一任务的会话中继续（同进程续聊，AI 记得前面的成果）<br>· <code>3.//任务</code> <b>//</b> 前缀 = 并行执行：连续多个 <b>//</b> 任务各自独立进程同时跑<br>执行顺序：串行链按编号顺序，遇到连续 <b>//</b> 任务并行执行，之后再继续后续任务',
+  scheduled: '单聊定时任务：行首写启动时间（格式 <code>20260818-1307</code>，输入 <code>[]</code> 自动填入当前时间）；同样支持 <code>-</code> 续聊与 <code>//</code> 并行前缀（编号之后）。到点自动执行。'
+};
 const IMPORT_PH = {
   sequential: '1. 检查邮件并回复客户 @管家\n2. 编写周报初稿 @文案\n3. 修复登录页 bug @工程师',
   scheduled: '20260818-1307 生成今日日报 @文案\n20260818-1800 检查部署日志 @工程师'
+};
+const IMPORT_PH_SOLO = {
+  sequential: '1. 写个个人网页的文档\n2. -将网页做成html网页\n3. //查查惠州的天气\n4. //查查北京的天气',
+  scheduled: '20260818-1307 1. 生成今日日报\n20260818-1307 2. //检查部署日志\n20260818-1307 3. //汇总邮件摘要'
 };
 
 function openImport() {
@@ -2126,9 +2207,10 @@ function setImportMode(mode) {
   importMode = mode === 'scheduled' ? 'scheduled' : 'sequential';
   document.getElementById('tabSeq').className = 'tab' + (importMode === 'sequential' ? ' active' : '');
   document.getElementById('tabSch').className = 'tab' + (importMode === 'scheduled' ? ' active' : '');
-  document.getElementById('importTip').innerHTML = IMPORT_TIP[importMode];
+  const solo = chatMode === 'solo';
+  document.getElementById('importTip').innerHTML = (solo ? IMPORT_TIP_SOLO : IMPORT_TIP)[importMode];
   const ta = document.getElementById('importText');
-  ta.placeholder = IMPORT_PH[importMode];
+  ta.placeholder = (solo ? IMPORT_PH_SOLO : IMPORT_PH)[importMode];
   hideImportAt();
 }
 
@@ -3039,6 +3121,7 @@ function openHelp() {
       <li><b>顺序任务</b>：「导入任务」→ 顺序任务标签，每行 <code>1.</code> <code>2.</code> 编号，行末可 <code>@智能体</code> 指派；任务按编号顺序执行，列表可拖拽调序，每个任务 = 独立会话</li>
       <li><b>定时任务</b>：「导入任务」→ 定时任务标签，行首写启动时间（<code>20260818-1307</code>），输入 <code>[]</code> 自动填入当前时间；到点自动执行（需程序保持运行）</li>
       <li>定时任务视图显示启动时间与倒计时，支持「立即执行」「重跑」「删除」；点击已触发的任务可查看其会话</li>
+      <li><b>单聊任务链式语法</b>（单聊模式导入时生效）：<code>2.-任务</code> <b>-</b> 前缀 = 接续上一任务的会话继续执行（同进程续聊，AI 记得前面的成果）；<code>3.//任务</code> <b>//</b> 前缀 = 并行执行（连续多个 <b>//</b> 任务各自独立进程同时跑）；无前缀 = 新会话独立执行。例：<code>1.写文档</code> → <code>2.-做成网页</code>（同一进程接续）→ <code>3.//查惠州天气</code> + <code>4.//查北京天气</code>（两个进程并行）</li>
       <li><b>完成提醒</b>：任务完成时右下角弹窗显示最终回答部分内容，点击跳回该会话；不处理 3 秒后自动消失，会话左侧留绿色小圆点标记未读（执行中的任务显示「执行中」运转标识；空闲且无未读则无标识）</li>
     </ul>
   </div>

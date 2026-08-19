@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.14.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.15.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -960,14 +960,20 @@ async function executeTaskBatch(selected, send, myToken) {
 }
 
 // ---------- 单聊任务批次执行（OpenCode 单体逐个完成，不经管家编排） ----------
-// 每个任务 = 独立一次性对话（无 -s 续聊）；消息与结果持久化到任务会话
+// 单聊任务批量执行：按 link 字段编排（导入时 2.-xxx / 3.//xxx 语法解析而来）
+//   new（默认）：独立新会话执行；continue：接续上一串行任务的 opencode 会话（同进程续聊）；
+//   parallel：连续多个并行任务各自独立进程同时执行（Promise.all）
+// 排序：seq 优先，其次 createdAt；会话 ID 记录在任务上（task.ocSessionId）供续聊
 // SSE 事件：task_start / text(快照) / tool / notice / task_done / all_done
 async function executeSoloTaskBatch(selected, send, myToken) {
   const { resolveRunner, missingHint } = require('./lib/agent');
-  for (const task of selected) {
-    if (stopTokens.tasks !== myToken) break; // 用户请求停止：跳过剩余任务
+  const list = selected.slice().sort((a, b) => ((a.seq ?? 0) - (b.seq ?? 0)) || (a.createdAt - b.createdAt));
+
+  // 执行单个任务；ocSessionId 非空 = 在该 opencode 会话中续聊；返回本次会话 id
+  const runOne = async (task, ocSessionId) => {
     store.updateTask(task.id, { status: 'running' });
-    send({ type: 'task_start', taskId: task.id, title: task.title, solo: true });
+    send({ type: 'task_start', taskId: task.id, title: task.title, solo: true, link: task.link || 'new' });
+    const cont = !!ocSessionId; // 续聊：prompt 提示模型这是同一工作的延续
     if (store.getMessages(task.id).length === 0) {
       store.addMessage({
         role: 'user',
@@ -981,21 +987,28 @@ async function executeSoloTaskBatch(selected, send, myToken) {
     if (runner.kind === 'missing') {
       store.updateTask(task.id, { status: 'failed', result: missingHint(runner).slice(0, 2000) });
       send({ type: 'task_done', taskId: task.id, title: task.title, status: 'failed' });
-      continue;
+      return '';
     }
 
     const texts = new Map();
     const order = [];
     let doneError = '';
+    let sesId = ocSessionId || '';
     await new Promise((resolve) => {
       const kind = runner.kind === 'demo' ? 'demo' : (runner.kind === 'opencode' ? 'opencode' : 'fallback');
       oc.chatSolo(kind, runner, {
-        prompt: `请完成以下任务并给出结果：\n\n${task.title}${task.notes ? `\n补充说明：${task.notes}` : ''}`,
+        prompt: cont
+          ? `请在当前会话已有工作成果的基础上继续完成下一项任务：\n\n${task.title}${task.notes ? `\n补充说明：${task.notes}` : ''}`
+          : `请完成以下任务并给出结果：\n\n${task.title}${task.notes ? `\n补充说明：${task.notes}` : ''}`,
         model: '',
-        ocSessionId: '',
+        ocSessionId: sesId,
         behavior: 'solo-task'
       }, (ev) => {
-        if (ev.type === 'text') {
+        if (ev.type === 'session') {
+          // 首个 sessionID 回填：continue 链与手动重跑都能续上同一会话
+          sesId = ev.ocSessionId;
+          store.updateTask(task.id, { ocSessionId: sesId });
+        } else if (ev.type === 'text') {
           if (!texts.has(ev.partId)) order.push(ev.partId);
           texts.set(ev.partId, ev.text);
           send({ type: 'text', taskId: task.id, partId: ev.partId, text: ev.text, agentId: 'solo', agentName: 'OpenCode', phase: 'work' });
@@ -1018,6 +1031,31 @@ async function executeSoloTaskBatch(selected, send, myToken) {
       result: (doneError ? `执行出错：${doneError}` : finalText).slice(0, 2000)
     });
     send({ type: 'task_done', taskId: task.id, title: task.title, status: stopped ? 'pending' : (doneError ? 'failed' : 'done') });
+    return stopped ? '' : sesId;
+  };
+
+  // 编排：串行任务（new/continue）按序执行，continue 复用串行链会话；
+  // 连续 parallel 任务聚成一块同时执行（各独立会话），并行块等待前序串行任务完成
+  let lastChainSession = '';
+  for (let i = 0; i < list.length; i++) {
+    if (stopTokens.tasks !== myToken) break;
+    const link = list[i].link || 'new';
+    if (link === 'parallel') {
+      const block = [list[i]];
+      while (i + 1 < list.length && (list[i + 1].link || 'new') === 'parallel') block.push(list[++i]);
+      if (block.length > 1) {
+        send({ type: 'notice', content: `⚡ ${block.length} 个任务并行执行（各自独立进程）：${block.map(t => `「${t.title.slice(0, 20)}」`).join('、')}` });
+      }
+      await Promise.all(block.map(t => runOne(t, '')));
+      continue;
+    }
+    if (link === 'continue') {
+      const tt = String(list[i].title || '').slice(0, 20);
+      if (lastChainSession) send({ type: 'notice', content: `↪ 任务「${tt}」接续上一任务的会话执行（同进程续聊）`, taskId: list[i].id });
+      else send({ type: 'notice', content: `任务「${tt}」标记续聊但没有前序会话，已按新会话执行`, taskId: list[i].id });
+    }
+    const ses = await runOne(list[i], link === 'continue' ? lastChainSession : '');
+    if (ses) lastChainSession = ses;
   }
   send({ type: 'all_done' });
 }

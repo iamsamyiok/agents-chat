@@ -200,8 +200,8 @@ function chatSolo(runnerKind, runner, opts, onEvent) {
       { ...process.env, MOCK_BEHAVIOR: opts.behavior || 'solo-chat', MOCK_AGENT_ID: 'solo' },
       onEvent,
       (error) => {
-        // 演示模式的会话 ID：本地生成（无真实续聊，仅打通链路）
-        onEvent({ type: 'session', ocSessionId: 'ses_demo-' + Date.now().toString(36) });
+        // 演示模式的会话 ID：续聊时复用传入 ID（打通链路），新任务本地生成（无真实续聊）
+        onEvent({ type: 'session', ocSessionId: ocSessionId || 'ses_demo-' + Date.now().toString(36) });
         onEvent({ type: 'done', error });
       }
     );
