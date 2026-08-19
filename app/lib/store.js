@@ -323,8 +323,22 @@ function parseTasksFromText(text, mode, runner) {
     }
 
     // 列表符剥离：仅「1. / 1、 / 1)」编号格式（顺序与定时模式一致）
-    line = line.replace(/^(\d+[.、)])\s+/, '').trim();
+    // 单聊模式编号后空白可省略（1.写xxx 2.-xxx 3.//xxx）；群聊保持编号后须有空白
+    const soloRun = runner === 'solo';
+    line = line.replace(soloRun ? /^(\d+[.、)])\s*/ : /^(\d+[.、)])\s+/, '').trim();
     if (!line) continue;
+
+    // 单聊执行链前缀（编号剥离后识别）：
+    //   -    接续上一任务的会话继续执行（同一 opencode 进程续聊）
+    //   //   并行执行：连续多个 // 任务各自独立进程同时跑
+    //   无前缀 = 新会话独立执行（默认）
+    let link = 'new';
+    if (soloRun) {
+      if (/^\/\//.test(line)) { link = 'parallel'; line = line.replace(/^\/\/\s*/, ''); }
+      else if (/^-/.test(line)) { link = 'continue'; line = line.replace(/^-\s*/, ''); }
+      line = line.trim();
+      if (!line) continue;
+    }
 
     if (createdAt === null) {
       createdAt = baseTs + fallbackIdx * 1000;
@@ -342,6 +356,7 @@ function parseTasksFromText(text, mode, runner) {
       kind: mode,
       runner: runner === 'solo' ? 'solo' : ''
     };
+    if (soloRun) rec.link = link; // new=独立新会话 | continue=接续上一任务会话 | parallel=并行独立会话
     if (mode === 'scheduled') rec.scheduledAt = scheduledAt !== null ? scheduledAt : createdAt;
     parsed.push(rec);
   }

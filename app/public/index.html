@@ -1261,6 +1261,13 @@ function renderSessions() {
 }
 
 // ---------- 任务区：当前模式的任务列表（顺序/定时 tab，执行/删除/拖拽） ----------
+// 单聊任务的执行链徽标：- 续聊 / // 并行
+function linkBadge(t) {
+  if (t.runner !== 'solo' || !t.link || t.link === 'new') return '';
+  return t.link === 'continue'
+    ? '<span style="color:#8a6fe8;font-size:11px;margin-right:4px" title="在上一任务的会话中继续执行（同进程续聊）">↪ 续聊</span>'
+    : '<span style="color:#0a742e;font-size:11px;margin-right:4px" title="与相邻并行任务同时执行（独立进程）">⚡ 并行</span>';
+}
 function renderTasks() {
   const el = document.getElementById('taskList');
   const badge = document.getElementById('pendingBadge');
@@ -1283,7 +1290,7 @@ function renderTasks() {
           <div class="task-avatar st-${t.status === 'pending' ? 'scheduled' : t.status}">${icon}</div>
           <div class="task-main">
             <div class="task-title">${esc(t.title)}</div>
-            <div class="task-sub"><span>${st}</span></div>
+            <div class="task-sub"><span>${linkBadge(t)}${st}</span></div>
           </div>
           ${t.status === 'pending' ? `<button class="mini-btn" title="不再等到点，立即执行" onclick="event.stopPropagation();runSchedNow('${escAttr(t.id)}')">立即执行</button>` : ''}
           ${t.status === 'failed' ? `<button class="mini-btn" title="重新执行" onclick="event.stopPropagation();runSchedNow('${escAttr(t.id)}')">重跑</button>` : ''}
@@ -1302,7 +1309,7 @@ function renderTasks() {
           <div class="task-avatar st-${t.status}">${icon}</div>
           <div class="task-main">
             <div class="task-title">${esc(t.title)}</div>
-            <div class="task-sub"><span>${statusText(t.status)}</span><span>${fmtTime(t.createdAt)}</span></div>
+            <div class="task-sub"><span>${linkBadge(t)}${statusText(t.status)}</span><span>${fmtTime(t.createdAt)}</span></div>
           </div>
           ${t.status === 'pending' || t.status === 'failed' ? `<button class="mini-btn" onclick="event.stopPropagation();runTask('${escAttr(t.id)}')">执行</button>` : ''}
           <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
@@ -2173,9 +2180,18 @@ const IMPORT_TIP = {
   sequential: '每行一个任务，使用 <code>1.</code> <code>2.</code> 编号；行末可 <code>@智能体</code> 指派（输入 @ 有补全）——不指派则由管家调度，指派子智能体则独立完成。任务按编号顺序执行。',
   scheduled: '每行一个定时任务：行首写启动时间（格式 <code>20260818-1307</code>），行首输入 <code>[]</code> 自动填入当前日期时间（可修改）；行末可 <code>@智能体</code> 指派。到点自动执行。'
 };
+// 单聊模式导入语法：- 接续上一任务会话；// 并行独立进程
+const IMPORT_TIP_SOLO = {
+  sequential: '单聊任务语法（OpenCode 直接执行，不经管家）：<br>· <code>1.任务</code> 编号开头，无前缀 = 新会话独立执行<br>· <code>2.-任务</code> <b>-</b> 前缀 = 在上一任务的会话中继续（同进程续聊，AI 记得前面的成果）<br>· <code>3.//任务</code> <b>//</b> 前缀 = 并行执行：连续多个 <b>//</b> 任务各自独立进程同时跑<br>执行顺序：串行链按编号顺序，遇到连续 <b>//</b> 任务并行执行，之后再继续后续任务',
+  scheduled: '单聊定时任务：行首写启动时间（格式 <code>20260818-1307</code>，输入 <code>[]</code> 自动填入当前时间）；同样支持 <code>-</code> 续聊与 <code>//</code> 并行前缀（编号之后）。到点自动执行。'
+};
 const IMPORT_PH = {
   sequential: '1. 检查邮件并回复客户 @管家\n2. 编写周报初稿 @文案\n3. 修复登录页 bug @工程师',
   scheduled: '20260818-1307 生成今日日报 @文案\n20260818-1800 检查部署日志 @工程师'
+};
+const IMPORT_PH_SOLO = {
+  sequential: '1. 写个个人网页的文档\n2. -将网页做成html网页\n3. //查查惠州的天气\n4. //查查北京的天气',
+  scheduled: '20260818-1307 1. 生成今日日报\n20260818-1307 2. //检查部署日志\n20260818-1307 3. //汇总邮件摘要'
 };
 
 function openImport() {
@@ -2191,9 +2207,10 @@ function setImportMode(mode) {
   importMode = mode === 'scheduled' ? 'scheduled' : 'sequential';
   document.getElementById('tabSeq').className = 'tab' + (importMode === 'sequential' ? ' active' : '');
   document.getElementById('tabSch').className = 'tab' + (importMode === 'scheduled' ? ' active' : '');
-  document.getElementById('importTip').innerHTML = IMPORT_TIP[importMode];
+  const solo = chatMode === 'solo';
+  document.getElementById('importTip').innerHTML = (solo ? IMPORT_TIP_SOLO : IMPORT_TIP)[importMode];
   const ta = document.getElementById('importText');
-  ta.placeholder = IMPORT_PH[importMode];
+  ta.placeholder = (solo ? IMPORT_PH_SOLO : IMPORT_PH)[importMode];
   hideImportAt();
 }
 
@@ -3104,6 +3121,7 @@ function openHelp() {
       <li><b>顺序任务</b>：「导入任务」→ 顺序任务标签，每行 <code>1.</code> <code>2.</code> 编号，行末可 <code>@智能体</code> 指派；任务按编号顺序执行，列表可拖拽调序，每个任务 = 独立会话</li>
       <li><b>定时任务</b>：「导入任务」→ 定时任务标签，行首写启动时间（<code>20260818-1307</code>），输入 <code>[]</code> 自动填入当前时间；到点自动执行（需程序保持运行）</li>
       <li>定时任务视图显示启动时间与倒计时，支持「立即执行」「重跑」「删除」；点击已触发的任务可查看其会话</li>
+      <li><b>单聊任务链式语法</b>（单聊模式导入时生效）：<code>2.-任务</code> <b>-</b> 前缀 = 接续上一任务的会话继续执行（同进程续聊，AI 记得前面的成果）；<code>3.//任务</code> <b>//</b> 前缀 = 并行执行（连续多个 <b>//</b> 任务各自独立进程同时跑）；无前缀 = 新会话独立执行。例：<code>1.写文档</code> → <code>2.-做成网页</code>（同一进程接续）→ <code>3.//查惠州天气</code> + <code>4.//查北京天气</code>（两个进程并行）</li>
       <li><b>完成提醒</b>：任务完成时右下角弹窗显示最终回答部分内容，点击跳回该会话；不处理 3 秒后自动消失，会话左侧留绿色小圆点标记未读（执行中的任务显示「执行中」运转标识；空闲且无未读则无标识）</li>
     </ul>
   </div>
