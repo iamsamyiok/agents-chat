@@ -1,6 +1,6 @@
 {
   "name": "agents-chat-portable",
-  "version": "0.4.0",
+  "version": "3.16.0",
   "private": true,
   "description": "Agents 群聊 - 便携版（OpenCode 内核，任务队列，微信风格聊天）",
   "scripts": {
