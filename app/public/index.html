@@ -281,7 +281,7 @@
   /* ---------- 侧栏顶部：单聊/群聊开关 + 任务操作按钮 ---------- */
   .side-header { padding: 12px 12px 10px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid #f0f0f0; }
   .mode-switch { display: inline-flex; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
-  .mode-switch button { border: none; background: #fff; font-size: 13px; padding: 5px 0; cursor: pointer; color: #666; flex: 1; white-space: nowrap; }
+  .mode-switch button { border: none; background: #fff; font-size: 13px; padding: 5px 22px; min-width: 104px; cursor: pointer; color: #666; flex: 1; white-space: nowrap; }
 
   /* ---------- 侧栏中部：会话区（上，约5条）+ 任务区（下）各占一半，总高固定 ---------- */
   .side-mid { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
@@ -318,6 +318,9 @@
   .bubble .solo-part-md th, .bubble .solo-part-md td { border: 1px solid #ddd; padding: 4px 8px; font-size: 12.5px; }
   .bubble .solo-part-md blockquote { border-left: 3px solid #ccc; margin: 0.4em 0; padding: 2px 10px; color: #777; }
   .bubble .solo-part-md h1, .bubble .solo-part-md h2, .bubble .solo-part-md h3, .bubble .solo-part-md h4 { margin: 0.5em 0 0.3em; font-size: 1.05em; }
+  /* 列表符号防越界：全局 reset 清掉了 ul/ol 默认 padding，list-style-position outside 的 ·/数字 会画到气泡左边界外 */
+  .bubble .solo-part-md ul, .bubble .solo-part-md ol { padding-left: 1.4em; margin: 0.4em 0; }
+  .bubble .solo-part-md li { margin: 0.15em 0; }
 
   /* ---------- Markdown 预览弹窗 ---------- */
   #previewMask { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; align-items: center; justify-content: center; z-index: 95; }
@@ -384,7 +387,6 @@
     <div class="side-footer">
       <button class="run-all" id="runAllBtn" onclick="onRunAllBtn()" style="margin-bottom:0">按顺序执行全部待办</button>
       <button class="run-all off" id="schedPowerBtn" onclick="toggleSchedPower()" style="display:none;margin-bottom:0">⏸ 关闭定时任务</button>
-      <button class="sched-btn" onclick="openFlow()" id="flowBtn" title="智能体之间的派发/交接/返工可视化" style="margin:8px 0 0">🔭 智能体流转</button>
     </div>
   </aside>
 
@@ -495,6 +497,11 @@
       <div class="tip" style="margin:4px 0 6px">管家跨会话记住工作笔记与你的偏好，规划时自动参考、任务完成后自动沉淀。点此查看或手动编辑。</div>
       <div class="ag-row">
         <button class="mini-btn" style="flex:1" onclick="openMem()">查看 / 编辑管家记忆</button>
+      </div>
+      <div class="lbl" style="margin-top:10px">🧹 数据维护</div>
+      <div class="tip" style="margin:4px 0 6px">任务、消息、会话、产出文件与流转日志等工作数据超过 15 天会自动清理（.env 中 AGENTS_CHAT_PRUNE_DAYS 可调整天数）；管家记忆与配置永久保留。也可立即手动清理：</div>
+      <div class="ag-row">
+        <button class="mini-btn" style="flex:1" onclick="pruneHistory()">🗑 一键清理 15 天前的历史数据</button>
       </div>
       <div class="lbl" style="margin-top:10px">🛂 人工审批关卡</div>
       <div class="tip" style="margin:4px 0 6px">开启后编排会在关键节点暂停，等你点「同意」才继续（聊天与定时任务都生效）；超时 10 分钟未处理视为否决。</div>
@@ -739,11 +746,11 @@ async function init() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); soloSend(); }
   });
 
-  // 单聊模型输入框：点击自动刷新列表；输入/选择即生效（精确匹配 id 或名称，或合法 provider/model）
+  // 单聊模型输入框：点击自动刷新列表；仅 change（选择/修改）生效——不绑 blur，
+  // 否则用户只是点开看一眼，自动挑的免费模型就会被写进 localStorage，观感像被锁死
   const om = document.getElementById('ocModelInput');
   om.addEventListener('focus', () => { loadOcModels(true); });
   om.addEventListener('change', onOcModelPick);
-  om.addEventListener('blur', onOcModelPick);
 
   // Markdown 预览：消息中的 .md 路径 / 过程存档行 → 点击打开预览弹窗
   document.addEventListener('click', (e) => {
@@ -1065,6 +1072,8 @@ async function soloSend() {
     } catch { toast('自动新建会话失败'); return; }
   }
   if (soloBusy) return;
+  // 发送前兜底：模型输入框可能刚被修改但 change 尚未触发（如回车直接发送），先同步生效
+  onOcModelPick();
   soloBusy = true;
   soloStopAsked = false;
   updateSoloSendBtn();
@@ -2288,10 +2297,11 @@ function importKeydown(e) {
 async function doImport() {
   const text = importText.value;
   if (!text.trim()) { toast('请先粘贴任务文本'); return; }
-  // 任务归属当前模式：单聊模式导入的任务由 OpenCode 单体执行，群聊模式走管家编排
+  // 任务归属当前模式：单聊模式导入的任务由 OpenCode 单体执行，群聊模式走管家编排；
+  // 单聊导入时记录当前所选模型，定时触发时用它执行（页面关闭也不丢）
   const data = await api('/api/tasks/import', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, mode: importMode, runner: chatMode === 'solo' ? 'solo' : '' })
+    body: JSON.stringify({ text, mode: importMode, runner: chatMode === 'solo' ? 'solo' : '', model: chatMode === 'solo' ? (curOcModel || '') : '' })
   });
   if (data.success) {
     tasks = data.tasks || [];
@@ -2400,15 +2410,13 @@ function setTaskView(v) {
   updateFooterBtns();
 }
 
-// 底部主按钮：顺序视图=执行全部/停止；定时视图=启动/关闭定时调度；流转按钮仅群聊显示
+// 底部主按钮：顺序视图=执行全部/停止；定时视图=启动/关闭定时调度（流转入口在顶栏「🔭 流转」）
 function updateFooterBtns() {
   const run = document.getElementById('runAllBtn');
   const sp = document.getElementById('schedPowerBtn');
-  const fl = document.getElementById('flowBtn');
   const isSeq = taskView === 'seq';
   run.style.display = isSeq ? '' : 'none';
   sp.style.display = isSeq ? 'none' : '';
-  if (fl) fl.style.display = chatMode === 'group' ? '' : 'none';
   if (!isSeq) {
     sp.textContent = schedEnabled ? '⏸ 关闭定时任务' : '▶ 启动定时任务';
     sp.classList.toggle('off', !schedEnabled);
@@ -3036,6 +3044,26 @@ function applyCardImport() {
   renderAgentCards();
   closeCardImport();
   toast(`已导入名片「${c.name}」，点「保存」后生效`);
+}
+// 一键清理超期历史数据（任务/消息/会话/产出文件/流转日志；管家记忆与配置不动）
+async function pruneHistory() {
+  if (!confirm('将永久清理 15 天前的历史数据（已完结任务、过期消息与会话、产出存档、流转日志）。\n未完结任务、待触发定时任务、管家记忆与配置都会保留。确定清理？')) return;
+  try {
+    const r = await api('/api/maintenance/prune', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days: 15 }) });
+    if (r.success) {
+      const s = r.stat || {};
+      const parts = [
+        s.tasks ? `${s.tasks} 个任务` : '',
+        s.messages ? `${s.messages} 条消息` : '',
+        s.ocSessions ? `${s.ocSessions} 个会话` : '',
+        s.outputs ? `${s.outputs} 个产出目录` : '',
+        s.flowEvents ? `${s.flowEvents} 条流转日志` : ''
+      ].filter(Boolean);
+      toast(parts.length ? `已清理：${parts.join('、')}` : '没有需要清理的数据');
+      await loadTasks().catch(() => {});
+      renderSidebar();
+    } else toast(r.error || '清理失败');
+  } catch (e) { toast('清理失败：' + e.message); }
 }
 async function saveAgentsCfg() {
   const noName = editing.some(a => !String(a.name || '').trim());

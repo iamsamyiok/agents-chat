@@ -143,12 +143,14 @@ function sse(req, res) {
 
 // ---------- 页面全关自动退出（便携免维护体验） ----------
 // 前端页面每 25s 心跳一次；所有页面关闭且无 SSE 连接、无审批等待、无编排执行后，
-// 空闲约 1 分钟自动退出（含有待触发的定时任务：需要定时任务请保持页面打开；
-// .env AGENTS_CHAT_AUTOSTOP=0 可关闭）
+// 空闲约 1 分钟自动退出。例外：存在待触发的定时任务时保持存活（睡到任务触发后
+// 再给 10 分钟执行宽限，全部触发完才允许退出），保证无人值守定时任务可靠执行。
+// .env AGENTS_CHAT_AUTOSTOP=0 可完全关闭
 const AUTOSTOP = process.env.AGENTS_CHAT_AUTOSTOP !== '0';
 const AUTOSTOP_IDLE_MS = Number(process.env.AGENTS_CHAT_AUTOSTOP_IDLE_MS) > 0
   ? Number(process.env.AGENTS_CHAT_AUTOSTOP_IDLE_MS)
   : 50 * 1000;
+const SCHED_KEEPALIVE_GRACE_MS = 10 * 60 * 1000; // 定时任务触发后的执行宽限
 let lastClientSeen = 0;
 let everSeenClient = false;
 function touchClient() {
@@ -161,10 +163,19 @@ function startAutoStop() {
     if (!everSeenClient) return;
     if (sseConns > 0 || pendingApprovals.size > 0 || runLocks.chat || runLocks.tasks || runLocks.solo) return;
     if (Date.now() - lastClientSeen < AUTOSTOP_IDLE_MS) return;
-    const hasSched = store.getSchedEnabled() && store.getTasks().some(t =>
-      t.kind === 'scheduled' && t.status === 'pending' && t.scheduledAt && t.scheduledAt > Date.now());
-    if (hasSched) console.log('所有页面已关闭且空闲约 1 分钟，服务自动退出（有待触发的定时任务也一并退出；需要定时任务请保持页面打开。重开 start 即可）');
-    else console.log('所有页面已关闭且空闲约 1 分钟，服务自动退出（重开 start 即可）');
+    if (store.getSchedEnabled()) {
+      // 最近的待触发定时任务：未触发 → 推迟退出到触发点；已触发 → 推迟到执行宽限后
+      const pendingSched = store.getTasks()
+        .filter(t => t.kind === 'scheduled' && t.status === 'pending' && t.scheduledAt)
+        .map(t => t.scheduledAt)
+        .sort((a, b) => a - b)[0];
+      if (pendingSched !== undefined) {
+        // 未触发：睡到触发点；已到点（等待扫描/刚触发）：从现在起给执行宽限
+        const deadline = Math.max(pendingSched, Date.now()) + SCHED_KEEPALIVE_GRACE_MS;
+        if (Date.now() < deadline) return; // 保活：等定时任务触发/执行完成
+      }
+    }
+    console.log('所有页面已关闭且空闲约 1 分钟，服务自动退出（重开 start 即可）');
     shutdown(0);
   }, 10000);
   timer.unref();
@@ -501,6 +512,20 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (p === '/api/maintenance/prune' && req.method === 'POST') {
+    // 一键清理超期历史数据（智能体配置页「数据维护」调用）；days 默认 15
+    const body = await readBody(req).catch(() => ({}));
+    const days = Math.max(1, Number(body.days) || PRUNE_DAYS);
+    try {
+      const stat = store.pruneOldData(days);
+      console.log(`[maintenance] 手动清理完成（>${days} 天）：`, JSON.stringify(stat));
+      json(res, 200, { success: true, days, stat });
+    } catch (e) {
+      json(res, 500, { success: false, error: String((e && e.message) || e) });
+    }
+    return;
+  }
+
   if (p === '/api/tasks/import' && req.method === 'POST') {
     // 从文本自动提取任务；mode: sequential=顺序任务（1. 编号）| scheduled=定时任务（行首定时时间）
     // runner='solo' 时任务由单聊 OpenCode 直接执行（不经管家编排），侧栏在单聊模式展示
@@ -511,7 +536,7 @@ const server = http.createServer(async (req, res) => {
     }
     const mode = body.mode === 'scheduled' ? 'scheduled' : 'sequential';
     const runner = body.runner === 'solo' ? 'solo' : '';
-    const { added, warnings } = store.importTasks(body.text, mode, runner);
+    const { added, warnings } = store.importTasks(body.text, mode, runner, body.model);
     json(res, 200, { success: true, added, warnings, mode, runner, tasks: store.getTasks() });
     return;
   }
@@ -1000,7 +1025,7 @@ async function executeSoloTaskBatch(selected, send, myToken) {
         prompt: cont
           ? `请在当前会话已有工作成果的基础上继续完成下一项任务：\n\n${task.title}${task.notes ? `\n补充说明：${task.notes}` : ''}`
           : `请完成以下任务并给出结果：\n\n${task.title}${task.notes ? `\n补充说明：${task.notes}` : ''}`,
-        model: '',
+        model: task.model || '', // 导入时记录的用户所选模型（单聊定时任务用页面所选模型执行）
         ocSessionId: sesId,
         behavior: 'solo-task'
       }, (ev) => {
@@ -1086,6 +1111,22 @@ function startScheduler() {
   return timer;
 }
 
+// ---------- 历史数据自动清理（动态文件与历史记录超期滚动清理） ----------
+// 启动时清理一次 + 每日一次；天数 .env AGENTS_CHAT_PRUNE_DAYS 可调（默认 15）
+const PRUNE_DAYS = Number(process.env.AGENTS_CHAT_PRUNE_DAYS) > 0 ? Number(process.env.AGENTS_CHAT_PRUNE_DAYS) : 15;
+function pruneOldDataQuiet() {
+  try {
+    const stat = store.pruneOldData(PRUNE_DAYS);
+    const touched = Object.values(stat).reduce((a, b) => a + b, 0);
+    if (touched) console.log(`[maintenance] 自动清理超 ${PRUNE_DAYS} 天的历史数据：`, JSON.stringify(stat));
+  } catch (e) { console.error('[maintenance] 自动清理失败:', e && (e.message || e)); }
+}
+function startPruneTimer() {
+  pruneOldDataQuiet(); // 启动即清理一次
+  const timer = setInterval(pruneOldDataQuiet, 24 * 3600 * 1000); // 每日滚动清理
+  timer.unref();
+}
+
 server.on('error', (err) => {
   if (err && err.code === 'EADDRINUSE') {
     console.error(`\n❌ 端口 ${PORT} 已被占用：很可能有一个旧版 Agents Chat 进程还在运行！`);
@@ -1116,6 +1157,7 @@ server.listen(PORT, () => {
   if (orphan > 0) console.log(`检测到 ${orphan} 个上次未正常结束的任务，已复位为待执行`);
   startScheduler();
   startAutoStop();
+  startPruneTimer();
   console.log(`Agents Chat 已启动: http://localhost:${PORT}`);
   console.log(`运行内核: ${kindText}`);
   console.log(`本机可用内核: ${avail}（配置页可切换）`);

@@ -257,7 +257,7 @@ function saveTasks(tasks) {
 //   支持完整日期（20260818-1307 / 2026-08-18 13:07）与当天时刻（13:07），行末可 @智能体
 // runner='solo' 时任务标记为单聊执行（由 opencode 单体完成，不经管家编排）
 // 返回 {tasks, warnings}
-function parseTasksFromText(text, mode, runner) {
+function parseTasksFromText(text, mode, runner, model) {
   mode = mode === 'scheduled' ? 'scheduled' : 'sequential';
   const now = new Date();
   const baseTs = now.getTime();
@@ -363,13 +363,13 @@ function parseTasksFromText(text, mode, runner) {
   return { tasks: parsed, warnings };
 }
 
-function importTasks(text, mode, runner) {
+function importTasks(text, mode, runner, model) {
   const { tasks: parsed, warnings } = parseTasksFromText(text, mode, runner);
   const tasks = getTasks();
   // 若存在无 seq 的旧任务，先按现有顺序（createdAt）补齐
   let next = 0;
   for (const t of tasks) { if (t.seq === undefined) t.seq = next++; else next = Math.max(next, t.seq + 1); }
-  for (const t of parsed) t.seq = next++;
+  for (const t of parsed) { t.seq = next++; if (runner === 'solo' && model) t.model = String(model); }
   saveTasks(tasks.concat(parsed));
   return { added: parsed.length, warnings };
 }
@@ -559,6 +559,72 @@ function saveMemoryData(data) {
   });
 }
 
+// ---------- 历史数据清理（工作产生的动态文件与历史记录，超期自动/手动清理） ----------
+// 清理范围：已完结任务 + 任务消息 + 过期主会话消息 + 过期单聊会话 + 产出存档 outputs/ + 流转日志
+// 保留：未完结/待触发任务、管家记忆（memory 是长期记忆，不属于历史记录）、config
+// 返回 { tasks, messages, ocSessions, outputs, flowEvents } 各项清理计数
+function pruneOldData(days) {
+  const cutoff = Date.now() - Math.max(1, Number(days) || 15) * 24 * 3600 * 1000;
+  const stat = { tasks: 0, messages: 0, ocSessions: 0, outputs: 0, flowEvents: 0 };
+  const tsOf = (m) => { const t = Date.parse(m.timestamp || ''); return Number.isFinite(t) ? t : 0; };
+
+  // 1. 已完结任务（done/failed）；pending/scheduled 一律保留（含未触发的定时任务）
+  const tasks = getTasks();
+  const keptTasks = tasks.filter(t => {
+    const end = Number(t.updatedAt || t.createdAt) || 0;
+    const finished = t.status === 'done' || t.status === 'failed';
+    if (finished && end && end < cutoff) { stat.tasks++; return false; }
+    return true;
+  });
+  if (stat.tasks) saveTasks(keptTasks);
+
+  // 2. 单聊会话：updatedAt 超 cutoff → 删（连同其消息）
+  const keptSess = getOcSessions().filter(s => {
+    const u = Number(s.updatedAt || s.createdAt) || 0;
+    if (u && u < cutoff) { stat.ocSessions++; return false; }
+    return true;
+  });
+  if (stat.ocSessions) {
+    saveOcSessions(keptSess);
+    // 其消息由下方第 3 步统一按孤儿清理并计数（避免重复统计）
+  }
+
+  // 3. 消息：孤儿任务消息（任务已删）+ 过期的主会话/单聊会话消息（timestamp 超 cutoff）
+  const validIds = new Set([...keptTasks.map(t => t.id), ...keptSess.map(s => s.id)]);
+  const keptMsgs = readJson(MESSAGES_PATH, []).filter(m => {
+    const tid = m.taskId || '';
+    if (tid && !validIds.has(tid)) { stat.messages++; return false; } // 孤儿消息
+    if (!tid && tsOf(m) && tsOf(m) < cutoff) { stat.messages++; return false; } // 过期主会话
+    return true;
+  });
+  const allMsgs = readJson(MESSAGES_PATH, []);
+  if (keptMsgs.length !== allMsgs.length) writeJson(MESSAGES_PATH, keptMsgs);
+
+  // 4. 流转日志：超期事件行过滤重写
+  try {
+    const lines = fs.readFileSync(FLOW_PATH, 'utf8').split(/\r?\n/).filter(Boolean);
+    const kept = lines.filter(l => {
+      try { const e = JSON.parse(l); if (Number(e.t || 0) < cutoff) { stat.flowEvents++; return false; } } catch { stat.flowEvents++; return false; }
+      return true;
+    });
+    if (kept.length !== lines.length) fs.writeFileSync(FLOW_PATH, kept.length ? kept.join('\n') + '\n' : '');
+  } catch { /* 无文件 */ }
+
+  // 5. 产出存档目录 outputs/<会话>/：mtime 超 cutoff → 删除
+  const outputsDir = path.join(DATA_DIR, 'outputs');
+  try {
+    for (const name of fs.readdirSync(outputsDir)) {
+      const fp = path.join(outputsDir, name);
+      try {
+        const st = fs.statSync(fp);
+        if (st.isDirectory() && st.mtimeMs < cutoff) { fs.rmSync(fp, { recursive: true, force: true }); stat.outputs++; }
+      } catch { /* 单项失败跳过 */ }
+    }
+  } catch { /* 无目录 */ }
+
+  return stat;
+}
+
 module.exports = {
   DATA_DIR,
   BUTLER,
@@ -590,5 +656,6 @@ module.exports = {
   saveOcSessions,
   upsertOcSession,
   getOcSession,
-  deleteOcSession
+  deleteOcSession,
+  pruneOldData
 };
