@@ -1,4 +1,5 @@
-=== Agents Chat started 2026-08-17T14:49:06.779Z ===
-Agents Chat 已启动: http://localhost:3456
-运行内核: OpenCode 真实执行（C:\Users\muxinyide\AppData\Roaming\npm\opencode.cmd）
-数据目录: E:\download6\agents-chat\.data
+=== Agents Chat started 2026-08-19T14:12:20.969Z ===
+Agents Chat 已启动: http://localhost:3499
+运行内核: 演示模式（AGENTS_CHAT_MOCK=1，输出为模拟结果）
+本机可用内核: 无（配置页可切换）
+数据目录: /workspace/.data
