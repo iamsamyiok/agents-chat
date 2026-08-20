@@ -1,0 +1,3 @@
+[submodule "dual-agent"]
+	path = dual-agent
+	url = https://github.com/iamsamyiok/dual-agent.git
