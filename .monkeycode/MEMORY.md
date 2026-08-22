@@ -100,3 +100,16 @@ Entries discovered by the Agent during task execution should follow this format:
   - 撞 innerLock 时 handleInnerChat 走 queued 分支（只发 queued+done 事件），同步接口需检测 queued 事件返回排队文案 + queued:true 标记。
   - 发布 tag 前必须核对指向（git log --oneline -1 <tag>）：v0.9.27 曾被错打在 v0.9.26 的 commit 上；错位时 git tag -d + push :refs/tags/ 删远程后重打。
   - Channel API 实测方法：DUAL_AGENT_MOCK=1 + 隔离 DATA/WS/PLUGINS 环境变量起服务，curl POST /api/channel/chat 验证返回真实任务文本；排队场景配 DUAL_AGENT_TEST_HOLD=8000 并发双发，第二发应返回 queued:true。
+
+[Project Knowledge Summary]
+- Date: 2026-08-22
+- Context: v0.9.28 hwj 终端智能体开发与验证（类 opencode TUI）
+- Category: Testing Methods
+- Instructions:
+  - hwj TUI 交互模式验证方法：`timeout 8 script -qc "DUAL_AGENT_MOCK=1 <隔离env> node hwj/hwj.js" /dev/null < <(sleep 5; printf '任务\n'; sleep 2)` 分配伪 TTY 模拟双击终端；批处理 e2e 用 `--script "消息"`（非 TTY 自动降级 plain 输出）。
+  - 测试 hwj/core.js（模块顶层有 DATA_DIR 常量）必须先 `process.env.DUAL_AGENT_DATA=...` 再 require——ENV 对象只传子进程不生效，晚设会污染真实 .data/（踩过：hwj-state.json 写进真仓，需 git status 确认 untracked 后移走）。
+- Category: Project Knowledge (Architecture)
+- Instructions:
+  - hwj 架构：hwj/ 四文件（tui 渲染/core 编排/commands 命令/hwj 入口）require 复用 lib/inner+lib/plugins+lib/llmRetry，零改动 server/lib/plugins；会话独立 workspaces/<ws>/hwj-messages.json，配置共享 .data/config.json，process.md/inner-log.jsonl/inner-usage.json 与 server 同格式 append 共存。
+  - core.js 复刻 server handleInnerChat 的注意点：chatInnerReal 的 opts 无 readonly/abortCheck——plan 拦截与 SIGINT 中断都在 callPlugin 包装层做（工具调用边界抛 HwjAbortError，配对完整性天然保证）；意图抽取 hwj 比 server 更进一步（框架主动 extract，MOCK 下跳过）；活动区 reply 只是流式预览，最终交付文本以 core 返回的 finalText 为准（含核验缺口标注后处理），endTask 只沉降工具行。
+  - hwj.bat 路径解析顺序：HWJ_HOME 环境变量 → wslpath -a 映射 bat 所在目录 → 常见路径兜底探测（~/dual-agent 等）；启动用 `wsl.exe -e bash -lc "cd && exec node hwj/hwj.js"`（exec 让 Ctrl+C 直达 node）。
