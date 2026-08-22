@@ -89,3 +89,14 @@ Entries discovered by the Agent during task execution should follow this format:
   - 长文 verify 规则需包含：regex 检查章节标题格式（/^## 第[一二三四五六七八九十]+章/独占一行）、wc -m 真实字数≥目标、目录完整性（所有章节都存在）。仅靠 contains/line_count 不足。
   - 模型对"万字"的执行通常打折扣（报告 1.1 万字实际 6000 字符），交付说明中必须用 wc -m 客观数据，禁止信任模型的自报字数。
   - 工作区 doc-verify 的旧记忆（预算 PDF 解析）会污染后续任务——新任务必须 reset inner-messages.json 并明确告知"这是全新任务"。
+
+[Project Knowledge Summary]
+- Date: 2026-08-22
+- Context: v0.9.27 Channel API 开发与真实验证（Qwen Code Channels 接入）
+- Category: Troubleshooting & Debugging
+- Instructions:
+  - 复用 handleInnerChat 做同步接口（如 /api/channel/chat）的方法：它的事件走 sse(req,res) 直写 res（"data: {...}\n\n" 格式），mock res 必须在 write 里解析 data: 行收集事件；text 事件是快照式覆盖，取最后一个非空 text 才是最终回复，禁止 join 全部。
+  - sse() 工厂内部有 15s 心跳 setInterval，靠 req/res 的 close 事件清理——mock 对象必须是 EventEmitter 且 end() 时 emit('close')，否则每次调用泄漏一个定时器。
+  - 撞 innerLock 时 handleInnerChat 走 queued 分支（只发 queued+done 事件），同步接口需检测 queued 事件返回排队文案 + queued:true 标记。
+  - 发布 tag 前必须核对指向（git log --oneline -1 <tag>）：v0.9.27 曾被错打在 v0.9.26 的 commit 上；错位时 git tag -d + push :refs/tags/ 删远程后重打。
+  - Channel API 实测方法：DUAL_AGENT_MOCK=1 + 隔离 DATA/WS/PLUGINS 环境变量起服务，curl POST /api/channel/chat 验证返回真实任务文本；排队场景配 DUAL_AGENT_TEST_HOLD=8000 并发双发，第二发应返回 queued:true。
