@@ -59,3 +59,33 @@ Entries discovered by the Agent during task execution should follow this format:
 - Category: Environment Configuration
 - Instructions:
   - dual-agent 仓库需 local 配置 git 身份（同 agents-chat）：`git config user.name "iamsamyiok"` + `git config user.email "monkeycode-ai@chaitin.com"`；全局无身份配置，新仓库首次提交会报 Author identity unknown。
+[Project Knowledge Summary]
+- Date: 2026-08-22
+- Context: v0.9.13/v0.9.14 开发中踩坑与真实验证经验
+- Category: Testing Methods
+- Instructions:
+  - dual-agent test/smoke.js 中 sseResponse 是 const 定义于用例序列中部（mock SSE 构造器）；新增需要 mock fetch 的测试必须插在其定义之后，放前面会 TDZ 报错（withRetry 内非重试异常被 extractIntent 吞掉变成 null，表象是"优雅降级失败"而非 TDZ 直报）。
+  - 改动 server 执行块结构（如 chatInner 包裹层重构）后，既有"静态接线"正则断言可能失配——先跑全量 smoke 再提交，失败时同步更新正则。
+- Category: Troubleshooting & Debugging
+- Instructions:
+  - v0912-verify 验证时观察到的"首笔 curl 0 字节响应 + 旧区历史串入新区"现象，v0.9.15 已定性为 409 丢消息 + 界面渲染错位（旧任务回复排到新消息下方造成答非所问错觉），由消息排队机制（inner-queue.json + drainInnerQueue）修复。排查此类问题先查 process.md 任务头时间戳与请求时序的对应关系。
+  - 意图闭环真实验证方法：跑一个三步任务（两文件+一对比），检查 process.md 中"交付核验（第 N 次）"段落与 SSE info 中"自动返修（第 x/2 轮）"；.intent.json 的 acceptance 条款质量决定核验灵敏度，可在任务原文里写精确内容要求（如 JSON 字面量）让缺口可硬核验。
+  - 排队机制真实验证方法：后台起长任务（调研类 30s+），sleep 5-8s 后发第二条消息应收到 SSE queued 事件且 .data/inner-queue.json 有内容；主任务 done 后轮询 /api/inner/messages 确认排队消息自动执行入史、队列文件清空。注意短任务（文件已存在的重跑）5s 内就完成，撞不上锁窗口。
+[Project Knowledge Summary]
+- Date: 2026-08-22
+- Context: v0.9.16 文档处理开发与真实验证
+- Category: Project Knowledge (Architecture)
+- Instructions:
+  - mistralai/search-toolkit 仓库不存在（404）；实际项目是 mistralai/search-starter-app（Search Toolkit pypi 包的 Copier 脚手架，需 Docker+Vespa+Mistral key）。dual-agent 采用其"摄入+检索"思想做零依赖轻量版（plugins/doc.js），未引入向量库。
+  - dual-agent 文档链路（v0.9.16）：前端 base64 JSON POST /api/upload（≤20MB，重名加序号）→ workspaces/<ws>/uploads/ → doc 插件 list/read/search（PDF inflate+Tj/TJ、DOCX/XLSX 手写 zip 读取器）→ 任务消息自动附加 [已上传文档] 上下文。查看走 /files/<path>（直出）与 /view/<path>（mdRender 渲染页），前端把消息中的文件路径渲染成链接。
+  - PDF 纯 JS 提取的固有限界：latin1 内容流里的中文（无字体编码表）会损坏；扫描件/无 ToUnicode CID 字体提取不到文本——doc 插件对此返回可操作建议（转存 txt）。数字与英文提取可靠。
+  - 测试 fixture 技巧：手写 stored zip 生成器（local header+central directory+EOCD，CRC32 手算）可构造 DOCX/XLSX 单测样本；无压缩 PDF 流直接 latin1 拼 BT/Tj 文本块，压缩流用 zlib.deflateSync 包 /Filter /FlateDecode。
+[Project Knowledge Summary]
+- Date: 2026-08-22
+- Context: v0.9.19 长文创作质量加固真实验证
+- Category: Troubleshooting & Debugging
+- Instructions:
+  - 长文创作纪律（server.js isLongFormTask 注入）是软约束，实测 agnes-2.5-flash 对规则 2b（append 前 read tail）/ 规则 4b（每 3 章 memory.save 一致性检查）遵守率不达标。模型倾向跳过直接续写。如需硬约束，需在框架层加：runInner 完成后检查 deliverable 质量（章节连续性+字数），FAIL 则注入修复指令重入一次。
+  - 长文 verify 规则需包含：regex 检查章节标题格式（/^## 第[一二三四五六七八九十]+章/独占一行）、wc -m 真实字数≥目标、目录完整性（所有章节都存在）。仅靠 contains/line_count 不足。
+  - 模型对"万字"的执行通常打折扣（报告 1.1 万字实际 6000 字符），交付说明中必须用 wc -m 客观数据，禁止信任模型的自报字数。
+  - 工作区 doc-verify 的旧记忆（预算 PDF 解析）会污染后续任务——新任务必须 reset inner-messages.json 并明确告知"这是全新任务"。
