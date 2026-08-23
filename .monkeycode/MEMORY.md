@@ -124,3 +124,7 @@ Entries discovered by the Agent during task execution should follow this format:
   - server.js 与 hwj/core.js 的任务编排是"逐字对齐复刻"关系——新增框架级钩子必须两侧同步改（本轮：prefetch 注入在 finalMsg 组装尾 + push 之前；自动归档在 flushText 前，异步 fire-and-forget），并同步更新 hwj-smoke/memory-smoke。
   - 测试本地 mock embedding：node:http 起随机端口 /embeddings，按关键词映射正交基向量（同类文本高余弦、跨类≈0），DUAL_AGENT_DATA 下写 config.json 指向 mock——全链路离线可测（remember 合并/recall RRF/auth 头断言）。
   - 硅基流动 embeddings API 要点（v1.0.0 实测）：POST https://api.siliconflow.cn/v1/embeddings + Bearer；BAAI/bge-m3 免费单条 8192 tokens，但批量数组每条限 512 tokens、≤32 条（embedTexts 已统一截 480 字符保护）；假 key 返回 HTTP 401 code 30014 "Token is invalid"（可作为请求格式正确的验证信号）；密钥申请页 cloud.siliconflow.cn/account/ak。
+- Category: Build Methods
+- Instructions:
+  - npm 发布（v1.1.0 hwj-agent）：账户开启强制 2FA 时经典 token 发布会 403——须用 Granular Access Token（Packages Read and write，自动豁免 2FA）；发布用临时 userconfig（/tmp 下 600 权限 .npmrc，用完即删，token 永不进仓库）；prepublishOnly 挂三套 smoke 护航；发布后验证链：npm view → 干净目录 npm i → bin 链接 ls → require + MOCK e2e。
+  - hwj-agent 包结构：index.js → lib/sdk.js（chat/run/create 三入口，run 复用 hwj/core runTask + 静默 UI Proxy）；files 白名单 48 文件（排除 .data/workspaces/test/docs）；bin 双命令 hwj + hwj-agent；bin 脚本需 chmod +x 并 git update-index --add --chmod=+x。
