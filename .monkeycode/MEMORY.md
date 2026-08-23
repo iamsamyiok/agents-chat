@@ -123,3 +123,4 @@ Entries discovered by the Agent during task execution should follow this format:
   - 零依赖向量检索实现要点：L2 归一化后 Int8 量化（体积比 float JSON 小 5 倍，1 万条内全量加载毫秒级）；余弦用 Int8 点积近似；embedding 未配置自动降级 BM25（功能永不阻断）；remember 时为无向量存量条目批量补嵌 10 条/次（渐进迁移）。
   - server.js 与 hwj/core.js 的任务编排是"逐字对齐复刻"关系——新增框架级钩子必须两侧同步改（本轮：prefetch 注入在 finalMsg 组装尾 + push 之前；自动归档在 flushText 前，异步 fire-and-forget），并同步更新 hwj-smoke/memory-smoke。
   - 测试本地 mock embedding：node:http 起随机端口 /embeddings，按关键词映射正交基向量（同类文本高余弦、跨类≈0），DUAL_AGENT_DATA 下写 config.json 指向 mock——全链路离线可测（remember 合并/recall RRF/auth 头断言）。
+  - 硅基流动 embeddings API 要点（v1.0.0 实测）：POST https://api.siliconflow.cn/v1/embeddings + Bearer；BAAI/bge-m3 免费单条 8192 tokens，但批量数组每条限 512 tokens、≤32 条（embedTexts 已统一截 480 字符保护）；假 key 返回 HTTP 401 code 30014 "Token is invalid"（可作为请求格式正确的验证信号）；密钥申请页 cloud.siliconflow.cn/account/ak。
