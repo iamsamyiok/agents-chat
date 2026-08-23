@@ -197,6 +197,16 @@ Entries discovered by the Agent during task execution should follow this format:
 
 [Project Knowledge Summary]
 - Date: 2026-08-23
+- Context: v1.3.5 发布（移除会话标签栏，改为历史对话抽屉）
+- Category: Operations & Deployment | Build Methods
+- Instructions:
+  - v1.3.5：移除 sessRail 左缘细条 + sessToggle 折叠按钮，改为 header 顶部「历史」按钮。点击打开 hist-drawer 抽屉（340px 桌面/全屏移动端），支持搜索、切换、删除历史会话。
+  - gh CLI (gh release create/upload) 可用；REST API + ghs_ token 认证失败（Bad credentials）。git push dual-agent 仓仍失败（password auth not supported）。
+  - v1.3.5 构建：versionCode=9 / versionName=1.3.5，APK 44MB。
+  - 主仓 agents-chat submodule 引用已更新推送至 master。
+
+[Project Knowledge Summary]
+- Date: 2026-08-23
 - Context: v1.3.4 发布（会话标签栏折叠为侧边抽屉）
 - Category: Operations & Deployment | Build Methods
 - Instructions:
