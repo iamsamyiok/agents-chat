@@ -173,3 +173,13 @@ Entries discovered by the Agent during task execution should follow this format:
   - 版本三处同步：package.json / server.js APP_VERSION / android build.gradle versionCode+versionName；/api/state 会下发 APP_VERSION 供前端与 NodeService 使用。
   - 前端移动模式判定：/api/state 返回 mobile（来自 DUAL_AGENT_MOBILE=1 壳标记），前端 body.mobile-mode CSS 隐藏外层列/插件列；Kotlin NodeService.probeBusy 同源轮询 busy 更新通知文案。
   - v1.3.0 发布物：GitHub Release v1.3.0 + wsl-agent.apk（44MB，versionCode 4）；Show 下载页 https://smyg5y-hwj-agent.127.dev（2026-08-25 过期，续期重传即可）。
+
+[Project Knowledge Summary]
+- Date: 2026-08-23
+- Context: v1.3.1 发布（移动端固定布局 / 新图标 / LLM 测试 / 一键清除）
+- Category: Troubleshooting & Debugging | Build Methods
+- Instructions:
+  - 前端同名函数重复定义坑：public/index.html 曾有两处 addProfileRow，后定义（无 data-k）覆盖先定义（有 data-k），saveSettings 按 data-k 收集 → 设置弹窗里多路 API 永远存不上。改 HTML 内联 JS 前先 grep 同名函数确认唯一。
+  - App 图标自绘管线（图像生成 MCP 不可用时）：PIL 2048 超采样画对角渐变+轨道+核心球，缩放导出 mipmap 全密度（legacy/round/adaptive-fg 三套），脚本在 /tmp/opencode/genicon.py 可复用。
+  - adaptive icon 前景必须留 66% 安全区（108dp 画布内容占中央 71dp），否则桌面裁切成"顶格头"。
+  - v1.3.1 发布物：GitHub Release v1.3.1 + wsl-agent.apk（versionCode 5）；Show 下载页 https://w8efbg-hwj-agent.127.dev（2026-08-25 过期）。
