@@ -138,3 +138,17 @@ Entries discovered by the Agent during task execution should follow this format:
   - detached spawn 打开浏览器（xdg-open/open/start）必须链 .on('error', ()=>{})：无 xdg-open 的环境异步抛 ENOENT error 事件，try/catch 捕不到，曾致整进程崩溃（bin/hwj.js 两处 + hwj/hwj.js 一处同病）。
   - spawn 子进程 TTY 类错误提示走 stderr：hwj-smoke 的 runDisp 分开收集 out/err，断言提示文案须查 r.out + r.err 合并。
   - TUI 状态栏字段：version·mode·ws·model·任务时长（taskT0 走秒，结束转 lastTaskDur 定格）·运行时长（sessT0 每秒刷新，空闲也刷）·tokens·calls·queueN·busy；startClock 1s interval unref，close 时清理。空白行根因是框架偶发空 info 事件——三个 print 函数入口加 trim 守卫。
+
+[Project Knowledge Summary]
+- Date: 2026-08-23
+- Context: v1.2.0-alpha1 Android 版开发与 APK 构建（M1-M3 一次到位）
+- Category: Build Methods
+- Instructions:
+  - Android 构建链（容器内全套）：JDK17（apt openjdk-17-jdk-headless）+ cmdline-tools→sdkmanager 装 platforms;android-34 / build-tools;34.0.0 / cmake;3.22.1 / ndk;26.3 + gradle-8.7 发行版直跑（免 wrapper）。工具链与 SDK 全放 /tmp/opencode/，local.properties 写 sdk.dir。Gradle 后台跑配 memory_percent 45 / cpu 200（首次 ~14 分钟含依赖下载）。
+  - nodejs-mobile v18.20.4 要点：release zip = bin/<abi>/libnode.so + include/node；导出符号是 C++ 的 node::Start（_ZN4node5StartEiPPc），无 C 版 node_start——JNI 桥声明 namespace node { int Start(int,char**); } 后 pthread 调用。
+  - APK 集成模式（16KB 页规避）：libnode.so 放 assets/native/<abi>/，运行期解压到 filesDir 后 System.load 绝对路径加载；packaging.jniLibs.excludes += ['**/libnode.so'] 防止 CMake 链接输入被 AGP 自动收进 lib/ 造成双份（曾致 APK 双 ~50MB 冗余）。APK 最终 81MB（arm64+x86_64 双 ABI）。
+  - Gradle DSL 坑：build.gradle 是 Groovy——listOf()/isMinifyEnabled 等 Kotlin DSL 写法会报「Could not find method/property」，需用 [] 列表与 minifyEnabled。
+  - Android 工程结构：mobile-main.js（壳入口：argv[2]=数据目录、AUTOSTOP=0、MOBILE=1、PATH 探测 Termux→/system/bin）；NodeRuntime.kt（assets 释放带版本戳 + /api/health 30s 就绪轮询）；NodeService.kt（FGS dataSync + busy 通知）；Manifest 需 FOREGROUND_SERVICE_DATA_SYNC + network_security_config 放行 127.0.0.1 明文。
+  - bash 插件 toybox 适配层：MOBILE 开关模块加载时冻结——测试必须子进程带 DUAL_AGENT_MOBILE=1 跑（smoke.js 已有模板）；探测 stderr 必须 stdio:'ignore' 否则污染输出。
+  - copy-assets.sh 同步 45 文件（npm files 白名单同源）到 assets/nodejs-project/；gitignore 排除 .cxx/、assets/native/、cpp/nodejs-mobile/、assets/nodejs-project/、site/*.apk。
+  - APK 静态验证四件套：aapt dump badging（manifest/版本）、unzip -l（assets 完整性/so 份数）、apksigner verify（debug 签名侧载可用）、nm -D bridge.so（JNI 导出 + node::Start 未定义引用=动态链接正确）。
