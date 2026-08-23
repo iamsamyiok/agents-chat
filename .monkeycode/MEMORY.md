@@ -162,3 +162,14 @@ Entries discovered by the Agent during task execution should follow this format:
   - 移动端插件目录病根（alpha3 修复）：壳入口设 DUAL_AGENT_PLUGINS_DIR 指向空私有目录 → 全部插件从空目录加载失败（表象：memory 加载失败 + embedding 连带不可用）。lib/plugins.js 的 PLUGINS_DIR 是唯一目录语义，移动端不设该 env 即用随版本的内置 plugins/。
   - Hermes <tool_call> 文本兜底（alpha3 新增，lib/inner.js parseHermesToolCalls）：硅基流动 Qwen 系等模型不走原生 delta.tool_calls 通道，调用以残缺 Hermes 标记 / python-kwargs 混在 content 吐出。接入点在流式结束后的 !calls.size 分支；支持标准 JSON 块、name(k=v)（类型推断+引号内逗号）、截断无右括号三种形态；真机残缺样例已固化进 smoke 回归（153 项）。
   - 真机问题反馈闭环：NodeRuntime 落盘 filesDir/node-log.txt + 失败页直接渲染日志尾部（用户免 adb 截图反馈），是移动端排障的第一手段。
+
+[Project Knowledge Summary]
+- Date: 2026-08-23
+- Context: v1.3.0 发布（wsl agent 产品化：overlay 插件体系 / 配置原子持久 / 移动聊天流 UI）
+- Category: Build Methods | Troubleshooting & Debugging
+- Instructions:
+  - overlay 双目录语义迁移的隐蔽坑：lib/plugins.js 改为「内置只读 + 锻造区可写」后，所有按旧单目录世界观写的调用方必须同步迁移——本次 lib/approval.js 的 makeSnapshot/rollback/applyNoGuard-catch 仍操作 PLUGINS_DIR，导致审批创建的插件（实际落锻造区）回滚失效，smoke 连挂 3 项（沙盒回归预检自引用放大）。凡改插件目录语义，先 grep 所有 PLUGINS_DIR 引用点逐一核对。
+  - 构建时序纪律：gradle 构建启动后再改 lib/server 源码，产物即过时；正确顺序是 copy-assets.sh → gradle assembleDebug → 四件套验证，任何后置源码修改都必须重走全程。
+  - 版本三处同步：package.json / server.js APP_VERSION / android build.gradle versionCode+versionName；/api/state 会下发 APP_VERSION 供前端与 NodeService 使用。
+  - 前端移动模式判定：/api/state 返回 mobile（来自 DUAL_AGENT_MOBILE=1 壳标记），前端 body.mobile-mode CSS 隐藏外层列/插件列；Kotlin NodeService.probeBusy 同源轮询 busy 更新通知文案。
+  - v1.3.0 发布物：GitHub Release v1.3.0 + wsl-agent.apk（44MB，versionCode 4）；Show 下载页 https://smyg5y-hwj-agent.127.dev（2026-08-25 过期，续期重传即可）。
