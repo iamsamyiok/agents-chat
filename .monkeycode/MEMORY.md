@@ -113,3 +113,13 @@ Entries discovered by the Agent during task execution should follow this format:
   - hwj 架构：hwj/ 四文件（tui 渲染/core 编排/commands 命令/hwj 入口）require 复用 lib/inner+lib/plugins+lib/llmRetry，零改动 server/lib/plugins；会话独立 workspaces/<ws>/hwj-messages.json，配置共享 .data/config.json，process.md/inner-log.jsonl/inner-usage.json 与 server 同格式 append 共存。
   - core.js 复刻 server handleInnerChat 的注意点：chatInnerReal 的 opts 无 readonly/abortCheck——plan 拦截与 SIGINT 中断都在 callPlugin 包装层做（工具调用边界抛 HwjAbortError，配对完整性天然保证）；意图抽取 hwj 比 server 更进一步（框架主动 extract，MOCK 下跳过）；活动区 reply 只是流式预览，最终交付文本以 core 返回的 finalText 为准（含核验缺口标注后处理），endTask 只沉降工具行。
   - hwj.bat 路径解析顺序：HWJ_HOME 环境变量 → wslpath -a 映射 bat 所在目录 → 常见路径兜底探测（~/dual-agent 等）；启动用 `wsl.exe -e bash -lc "cd && exec node hwj/hwj.js"`（exec 让 Ctrl+C 直达 node）。
+
+[Project Knowledge Summary]
+- Date: 2026-08-23
+- Context: v0.9.30/31 五层记忆系统（归档 BM25 + 语义向量 RRF + 框架预取/自动归档接线）
+- Category: Project Knowledge (Architecture)
+- Instructions:
+  - 记忆五层架构：short/long（TF-IDF 20 条滚动）+ memory-archive.jsonl（BM25 全文，任务交付自动归档）+ .memory-vector.json（Int8 量化稠密向量 + RRF 混合检索）；embedding 配置存 .data/config.json 的 embedding 段（三端共享：网页面板/hwj /config/插件 readEmbeddingCfg）。
+  - 零依赖向量检索实现要点：L2 归一化后 Int8 量化（体积比 float JSON 小 5 倍，1 万条内全量加载毫秒级）；余弦用 Int8 点积近似；embedding 未配置自动降级 BM25（功能永不阻断）；remember 时为无向量存量条目批量补嵌 10 条/次（渐进迁移）。
+  - server.js 与 hwj/core.js 的任务编排是"逐字对齐复刻"关系——新增框架级钩子必须两侧同步改（本轮：prefetch 注入在 finalMsg 组装尾 + push 之前；自动归档在 flushText 前，异步 fire-and-forget），并同步更新 hwj-smoke/memory-smoke。
+  - 测试本地 mock embedding：node:http 起随机端口 /embeddings，按关键词映射正交基向量（同类文本高余弦、跨类≈0），DUAL_AGENT_DATA 下写 config.json 指向 mock——全链路离线可测（remember 合并/recall RRF/auth 头断言）。
