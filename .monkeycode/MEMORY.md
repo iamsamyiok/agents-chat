@@ -183,3 +183,13 @@ Entries discovered by the Agent during task execution should follow this format:
   - App 图标自绘管线（图像生成 MCP 不可用时）：PIL 2048 超采样画对角渐变+轨道+核心球，缩放导出 mipmap 全密度（legacy/round/adaptive-fg 三套），脚本在 /tmp/opencode/genicon.py 可复用。
   - adaptive icon 前景必须留 66% 安全区（108dp 画布内容占中央 71dp），否则桌面裁切成"顶格头"。
   - v1.3.1 发布物：GitHub Release v1.3.1 + wsl-agent.apk（versionCode 5）；Show 下载页 https://w8efbg-hwj-agent.127.dev（2026-08-25 过期）。
+
+[Project Knowledge Summary]
+- Date: 2026-08-23
+- Context: v1.3.2 发布（多会话系统 / 文件上传修复 / 滚动导航 / 审批中心）
+- Category: Troubleshooting & Debugging | Build Methods
+- Instructions:
+  - Android WebView 文件上传 bug：WebChromeClient 空实现时 <input type=file> 点击无反应。必须重写 onShowFileChooser 并通过 Intent + ActivityResult 回调 filePathCallback（parseResult）。注意上一回调未完结时的清空逻辑（防止死链）。
+  - 会话历史「看不到最上方」不是真丢失：pairSafeTail(60) 落盘 + /api/inner/messages slice(-60) 是框架保护（防上下文爆炸）。新方案：多会话（sessions/<id>.json）让用户自己归档旧任务，每会话内仍保留最近 60 条完整上下文——符合设计。
+  - wsMsgPath（旧 inner-messages.json 全局路径）与新 sessions 体系并存：loadInnerMessages 启动时做迁移，migration 后改名为 .migrated 防重复吸入。workspace switch 自动调 loadInnerMessages 换载新工作区的 sessions-index，旧会话不会串。
+  - 会话 tag 长按删除的 touchstart 实现：touchstart 起定时器、touchend 检查 fired 并 e.preventDefault()，配合 mouseup/mousedown/contextmenu 双通道覆盖桌面模拟场景；避免 click 与 hold 冲突用 fired 标志。
