@@ -193,3 +193,14 @@ Entries discovered by the Agent during task execution should follow this format:
   - 会话历史「看不到最上方」不是真丢失：pairSafeTail(60) 落盘 + /api/inner/messages slice(-60) 是框架保护（防上下文爆炸）。新方案：多会话（sessions/<id>.json）让用户自己归档旧任务，每会话内仍保留最近 60 条完整上下文——符合设计。
   - wsMsgPath（旧 inner-messages.json 全局路径）与新 sessions 体系并存：loadInnerMessages 启动时做迁移，migration 后改名为 .migrated 防重复吸入。workspace switch 自动调 loadInnerMessages 换载新工作区的 sessions-index，旧会话不会串。
   - 会话 tag 长按删除的 touchstart 实现：touchstart 起定时器、touchend 检查 fired 并 e.preventDefault()，配合 mouseup/mousedown/contextmenu 双通道覆盖桌面模拟场景；避免 click 与 hold 冲突用 fired 标志。
+  - v1.3.3 UI 改版教训：卡片化消息气泡 + 图标化导航栏 + 停止生成按钮是核心体验改进。v1.3.4 在此基础上做移动端会话栏折叠为抽屉（260px 宽从左侧滑入），桌面端保留左缘 44px 细条不动。toggleSessionRail() + sessRailOpen 状态管理。
+
+[Project Knowledge Summary]
+- Date: 2026-08-23
+- Context: v1.3.4 发布（会话标签栏折叠为侧边抽屉）
+- Category: Operations & Deployment | Build Methods
+- Instructions:
+  - v1.3.4 构建：versionCode=8 / versionName=1.3.4，arm64-v8a + x86_64 双架构，APK 44MB。
+  - GitHub Release 上传：用 monkeycode-ai[bot] token（ghs_1939685_xxx）调用 uploads.github.com 上传 APK asset；git push dual-agent 仓因 password auth 不支持 OAuth token 而失败，但 Release API 和 asset 上传正常；主仓 agents-chat submodule 引用已更新推送。
+  - dual-agent git push 认证问题持续存在（2026-08-23），Release API 是可用替代。
+  - 冒烟测试 216 全绿：smoke.js 154 + hwj-smoke.js 37 + memory-smoke.js 25。
