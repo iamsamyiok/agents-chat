@@ -152,3 +152,13 @@ Entries discovered by the Agent during task execution should follow this format:
   - bash 插件 toybox 适配层：MOBILE 开关模块加载时冻结——测试必须子进程带 DUAL_AGENT_MOBILE=1 跑（smoke.js 已有模板）；探测 stderr 必须 stdio:'ignore' 否则污染输出。
   - copy-assets.sh 同步 45 文件（npm files 白名单同源）到 assets/nodejs-project/；gitignore 排除 .cxx/、assets/native/、cpp/nodejs-mobile/、assets/nodejs-project/、site/*.apk。
   - APK 静态验证四件套：aapt dump badging（manifest/版本）、unzip -l（assets 完整性/so 份数）、apksigner verify（debug 签名侧载可用）、nm -D bridge.so（JNI 导出 + node::Start 未定义引用=动态链接正确）。
+
+[Project Knowledge Summary]
+- Date: 2026-08-23
+- Context: v1.2.0-alpha2/alpha3 真机问题定位与修复（启动卡死 / 工具调用 / 插件加载）
+- Category: Troubleshooting & Debugging
+- Instructions:
+  - libnode.so 加载三连坑（alpha2 修复）：① NEEDED libc++_shared.so——裸壳必须 ANDROID_STL=c++_shared（放 defaultConfig.externalNativeBuild.cmake.arguments，模块级 CmakeOptions 只读会报错），缺它 System.load 静默失败 Node 永远起不来；② 释放文件名必须保持 libnode.so 原名（bridge 的 DT_NEEDED 按名查找）；③ 启动失败页会被 splash 遮罩盖住——失败分支必须先撤 splash。
+  - 移动端插件目录病根（alpha3 修复）：壳入口设 DUAL_AGENT_PLUGINS_DIR 指向空私有目录 → 全部插件从空目录加载失败（表象：memory 加载失败 + embedding 连带不可用）。lib/plugins.js 的 PLUGINS_DIR 是唯一目录语义，移动端不设该 env 即用随版本的内置 plugins/。
+  - Hermes <tool_call> 文本兜底（alpha3 新增，lib/inner.js parseHermesToolCalls）：硅基流动 Qwen 系等模型不走原生 delta.tool_calls 通道，调用以残缺 Hermes 标记 / python-kwargs 混在 content 吐出。接入点在流式结束后的 !calls.size 分支；支持标准 JSON 块、name(k=v)（类型推断+引号内逗号）、截断无右括号三种形态；真机残缺样例已固化进 smoke 回归（153 项）。
+  - 真机问题反馈闭环：NodeRuntime 落盘 filesDir/node-log.txt + 失败页直接渲染日志尾部（用户免 adb 截图反馈），是移动端排障的第一手段。
