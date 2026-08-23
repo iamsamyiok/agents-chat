@@ -127,4 +127,14 @@ Entries discovered by the Agent during task execution should follow this format:
 - Category: Build Methods
 - Instructions:
   - npm 发布（v1.1.0 hwj-agent）：账户开启强制 2FA 时经典 token 发布会 403——须用 Granular Access Token（Packages Read and write，自动豁免 2FA）；发布用临时 userconfig（/tmp 下 600 权限 .npmrc，用完即删，token 永不进仓库）；prepublishOnly 挂三套 smoke 护航；发布后验证链：npm view → 干净目录 npm i → bin 链接 ls → require + MOCK e2e。
-  - hwj-agent 包结构：index.js → lib/sdk.js（chat/run/create 三入口，run 复用 hwj/core runTask + 静默 UI Proxy）；files 白名单 48 文件（排除 .data/workspaces/test/docs）；bin 双命令 hwj + hwj-agent；bin 脚本需 chmod +x 并 git update-index --add --chmod=+x。
+  - hwj-agent 包结构：index.js → lib/sdk.js（chat/run/create 三入口，run 复用 hwj/core runTask + 静默 UI Proxy）；files 白名单 48 文件（排除 .data/workspaces/test/docs）；bin 必须与包名同名单命令 `hwj-agent`（v1.1.1 起双 bin 会触发 npx 选择菜单）；bin 脚本需 chmod +x 并 git update-index --add --chmod=+x。
+
+[Project Knowledge Summary]
+- Date: 2026-08-23
+- Context: v1.1.2 默认入口流程重做（配置检测分流 + TUI 状态栏）开发与真实验证
+- Category: Project Knowledge (Architecture)
+- Instructions:
+  - 入口检测语义：GET {base_url}/models 实探——401/403=Key 无效、≥500=服务端错误、网络异常=不可达、其余（含 404/405）视为有效（部分兼容服务未实现该端点）；MOCK 下跳过检测直进界面选择。
+  - detached spawn 打开浏览器（xdg-open/open/start）必须链 .on('error', ()=>{})：无 xdg-open 的环境异步抛 ENOENT error 事件，try/catch 捕不到，曾致整进程崩溃（bin/hwj.js 两处 + hwj/hwj.js 一处同病）。
+  - spawn 子进程 TTY 类错误提示走 stderr：hwj-smoke 的 runDisp 分开收集 out/err，断言提示文案须查 r.out + r.err 合并。
+  - TUI 状态栏字段：version·mode·ws·model·任务时长（taskT0 走秒，结束转 lastTaskDur 定格）·运行时长（sessT0 每秒刷新，空闲也刷）·tokens·calls·queueN·busy；startClock 1s interval unref，close 时清理。空白行根因是框架偶发空 info 事件——三个 print 函数入口加 trim 守卫。
