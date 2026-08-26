@@ -1,0 +1,47 @@
+# 本地数据
+.data/
+.env
+
+# Node
+node_modules/
+package-lock.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 临时文件
+*.tmp
+*.log
+*.err
+*.tgz
+run.err
+run.log
+test_server.err
+test_server.log
+
+# 测试
+test/
+coverage/
+
+# 文档（不需要发布）
+docs/
+*.md
+!README.md
+
+# 其他原始项目文件
+bin/node.exe
+bin/node.exe.manifest
+start.bat
+start.sh
+start.command
+start-hidden.vbs
+stop.bat
+README.txt
+*.vbs

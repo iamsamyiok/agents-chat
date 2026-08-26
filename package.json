@@ -1,9 +1,39 @@
 {
   "name": "agents-chat-portable",
-  "version": "3.16.0",
-  "private": true,
-  "description": "Agents 群聊 - 便携版（OpenCode 内核，任务队列，微信风格聊天）",
+  "version": "3.17.0",
+  "description": "多智能体群聊工具 - 支持 OpenCode/Claude Code/Codex/pi 内核，微信风格聊天界面",
+  "main": "lib/start.js",
+  "bin": {
+    "agents-chat": "./bin/agents-chat.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "app"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "chat",
+    "multi-agent",
+    "opencode",
+    "claude",
+    "codex"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/iamsamyiok/agents-chat"
+  },
+  "bugs": {
+    "url": "https://github.com/iamsamyiok/agents-chat/issues"
+  },
+  "homepage": "https://github.com/iamsamyiok/agents-chat",
   "scripts": {
-    "start": "node app/server.js"
+    "start": "node app/server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
   }
 }

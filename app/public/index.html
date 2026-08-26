@@ -408,6 +408,7 @@
         <button class="cfg-btn" id="histBtn" onclick="openHistory()">🕘 历史</button>
         <button class="cfg-btn" id="flowEntryBtn" onclick="openFlow()">🔭 流转</button>
         <button class="cfg-btn" id="agentsCfgBtn" onclick="openAgents()">⚙ 智能体配置</button>
+        <button class="cfg-btn" id="cardsNavBtn" onclick="openCards()" title="多任务编排 · 卡牌：把任务写成卡牌，Agent 干完一件自动注入下一件">🗂️ 多任务编排</button>
         <span class="runner-tag" id="runnerTag" style="display:none"></span>
         <button class="cfg-btn" id="helpBtn" onclick="openHelp()" title="使用帮助">❓ 帮助</button>
       </div>
@@ -3104,6 +3105,11 @@ function kernelBanner() {
     return `<div class="help-kernel missing">❌ <b>未检测到可用内核</b>，任务将无法真实执行。本机检测：${avail}。任选其一安装后重启本程序：<br><code>${lines.join('<br>')}</code></div>`;
   }
   return `<div class="help-kernel ok">✅ 运行内核：<b>${esc(runnerState.label)}</b> 真实执行${runnerState.cmd ? `（${esc(runnerState.cmd)}）` : ''}，智能体具备读写文件、执行命令、联网检索等真实能力。本机可用：${esc(avail || '仅当前内核')}，可在「⚙ 智能体配置」中切换</div>`;
+}
+
+function openCards() {
+  // 多任务编排（卡牌）控制台：独立页面，新标签打开以免丢失当前聊天上下文
+  window.open('/cards', '_blank');
 }
 
 function openHelp() {

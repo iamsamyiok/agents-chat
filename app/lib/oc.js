@@ -190,14 +190,17 @@ function chatSolo(runnerKind, runner, opts, onEvent) {
   const prompt = String(opts.prompt || '');
   const model = String(opts.model || '');
   const ocSessionId = String(opts.ocSessionId || '');
+  // 工作区：指定后 Agent 在该目录读写文件（卡牌可选 workspace）
+  const cwd = opts.cwd && fs.existsSync(opts.cwd) && fs.statSync(opts.cwd).isDirectory() ? opts.cwd : '';
+  const cwdEnv = cwd ? { ...process.env, AGENTS_CHAT_CWD: cwd } : process.env;
 
   // ---- 演示模式：mock 子进程 + 快照模拟 ----
   if (runnerKind === 'demo') {
     return spawnSoloRunner(
-      { cmd: process.execPath, shell: false, json: false },
+      { cmd: process.execPath, shell: false, json: false, cwd: cwd || process.cwd() },
       [MOCK_SCRIPT, prompt],
       '',
-      { ...process.env, MOCK_BEHAVIOR: opts.behavior || 'solo-chat', MOCK_AGENT_ID: 'solo' },
+      cwdEnv,
       onEvent,
       (error) => {
         // 演示模式的会话 ID：续聊时复用传入 ID（打通链路），新任务本地生成（无真实续聊）
@@ -216,8 +219,8 @@ function chatSolo(runnerKind, runner, opts, onEvent) {
     // 默认加 --auto，.env 可用 AGENTS_CHAT_AUTO_APPROVE=0 关闭（与群聊一致）
     if (process.env.AGENTS_CHAT_AUTO_APPROVE !== '0') args.push('--auto');
     return spawnSoloRunner(
-      { cmd: runner.cmd, shell: runner.shell, json: true, cwd: resolveCwd() },
-      args, prompt, process.env,
+      { cmd: runner.cmd, shell: runner.shell, json: true, cwd: cwd || resolveCwd() },
+      args, prompt, cwdEnv,
       onEvent,
       (error) => onEvent({ type: 'done', error })
     );

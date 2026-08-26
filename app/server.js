@@ -38,6 +38,7 @@ const { runAgent, stopScope, stopAllChildren } = require('./lib/agent');
 const { runButler, runMentioned, runRoundtable, runTasks, prepareRerun } = require('./lib/orchestrator');
 const oc = require('./lib/oc');
 const memoryMod = require('./lib/memory');
+const { CardStore, runner: cardRunner, sseSubscribe, MAX_PARALLEL } = require('./lib/cards');
 
 // ---------- 人工审批关卡：orchestrator 暂停等待用户放行（方案/交付），SSE 断线后可经 /api/approvals 恢复 ----------
 const pendingApprovals = new Map(); // approvalId -> {kind,label,taskId,resolve,timer}
@@ -269,6 +270,11 @@ const server = http.createServer(async (req, res) => {
   // ---------- 静态 ----------
   if (req.method === 'GET' && (p === '/' || p === '/index.html')) {
     serveStatic(res, path.join(PUBLIC_DIR, 'index.html'));
+    return;
+  }
+
+  if (req.method === 'GET' && (p === '/cards' || p === '/cards.html')) {
+    serveStatic(res, path.join(PUBLIC_DIR, 'cards.html'));
     return;
   }
   if (req.method === 'GET' && p.startsWith('/static/')) {
@@ -934,6 +940,154 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ---------- 事项管控（卡牌）API ----------
+  if (p === '/api/cards' && req.method === 'GET') {
+    const cards = CardStore.list();
+    // 附带每个卡牌当前过程消息条数（供 UI 角标展示）
+    const counts = {};
+    try {
+      for (const m of store.getMessages()) if (m.taskId) counts[m.taskId] = (counts[m.taskId] || 0) + 1;
+    } catch { /* ignore */ }
+    json(res, 200, { success: true, cards, running: cardRunner.isRunning(), maxParallel: MAX_PARALLEL, msgCounts: counts, config: CardStore.getConfig() });
+    return;
+  }
+
+  // 拖拽重排：按给定 id 顺序重编 order
+  if (p === '/api/cards/reorder' && req.method === 'POST') {
+    const body = await readBody(req);
+    if (!Array.isArray(body.ids)) { json(res, 400, { success: false, error: 'ids 必须是数组' }); return; }
+    CardStore.reorder(body.ids.map(String));
+    json(res, 200, { success: true, cards: CardStore.list() });
+    return;
+  }
+
+  // 工作区等配置（可选；指定后 Agent 在其目录读写相关文件）
+  if (p === '/api/cards/config' && req.method === 'GET') {
+    json(res, 200, { success: true, config: CardStore.getConfig() });
+    return;
+  }
+  if (p === '/api/cards/config' && req.method === 'POST') {
+    const body = await readBody(req);
+    const cfg = CardStore.setConfig({ workspace: String(body.workspace || '').trim().slice(0, 500) });
+    json(res, 200, { success: true, config: cfg });
+    return;
+  }
+
+  if (p === '/api/cards' && req.method === 'POST') {
+    const body = await readBody(req);
+    if (!String(body.title || '').trim() && !String(body.content || '').trim()) {
+      json(res, 400, { success: false, error: '标题或内容至少填一项' });
+      return;
+    }
+    const card = CardStore.add({
+      title: String(body.title || '').trim() || String(body.content || '').slice(0, 40),
+      content: String(body.content || ''),
+      priority: Number(body.priority) || 999,
+      mode: body.mode,
+      chainId: body.chainId,
+      dependsOn: body.dependsOn,
+      model: body.model
+    });
+    json(res, 200, { success: true, card });
+    return;
+  }
+
+  if (p === '/api/cards/clear' && req.method === 'POST') {
+    const all = CardStore.list();
+    for (const c of all) CardStore.remove(c.id);
+    json(res, 200, { success: true });
+    return;
+  }
+
+  // 垃圾桶：已删除任务的快照（默认保留 30 天）
+  if (p === '/api/cards/trash' && req.method === 'GET') {
+    json(res, 200, { success: true, trash: CardStore.getTrash() });
+    return;
+  }
+  if (p === '/api/cards/trash/empty' && req.method === 'POST') {
+    const n = CardStore.emptyTrash();
+    json(res, 200, { success: true, cleared: n });
+    return;
+  }
+  // 从垃圾桶还原任务
+  const mTrashRestore = p.match(/^\/api\/cards\/trash\/restore\/([^/]+)$/);
+  if (mTrashRestore && req.method === 'POST') {
+    const card = CardStore.restoreFromTrash(decodeURIComponent(mTrashRestore[1]));
+    json(res, card ? 200 : 404, { success: !!card, card });
+    return;
+  }
+
+  // 当前运行的进程（PID + 是否工作中）
+  if (p === '/api/cards/processes' && req.method === 'GET') {
+    json(res, 200, { success: true, processes: cardRunner.getProcesses() });
+    return;
+  }
+
+  if (p === '/api/cards/run' && req.method === 'POST') {
+    cardRunner.start();
+    json(res, 200, { success: true, running: true });
+    return;
+  }
+
+  if (p === '/api/cards/stop' && req.method === 'POST') {
+    cardRunner.stop();
+    json(res, 200, { success: true, running: false });
+    return;
+  }
+
+  if (p.startsWith('/api/cards/') && req.method === 'GET' && p.endsWith('/log')) {
+    // 卡牌过程与结果：返回该卡牌的全部消息（含工具/产出）+ 当前卡牌状态
+    const id = p.slice('/api/cards/'.length, -'/log'.length);
+    const card = CardStore.get(id);
+    if (!card) { json(res, 404, { success: false, error: '卡牌不存在' }); return; }
+    const msgs = store.getMessages(id);
+    json(res, 200, { success: true, card, messages: msgs });
+    return;
+  }
+
+  if (p.startsWith('/api/cards/') && req.method === 'PUT') {
+    const id = p.slice('/api/cards/'.length);
+    const body = await readBody(req);
+    const patch = {};
+    if (body.title !== undefined) patch.title = String(body.title).slice(0, 500);
+    if (body.content !== undefined) patch.content = String(body.content).slice(0, 20000);
+    if (body.priority !== undefined) patch.priority = Number(body.priority) || 999;
+    if (body.mode !== undefined) patch.mode = body.mode;
+    if (body.chainId !== undefined) patch.chainId = body.chainId;
+    if (Array.isArray(body.dependsOn)) patch.dependsOn = body.dependsOn.map(String);
+    if (body.model !== undefined) patch.model = String(body.model).slice(0, 80);
+    // 状态手动复位：failed/pending -> pending 可重跑
+    if (body.status === 'pending') { patch.status = 'pending'; patch.result = ''; patch.error = ''; patch.ocSessionId = ''; }
+    const updated = CardStore.update(id, patch);
+    if (!updated) { json(res, 404, { success: false, error: '任务不存在' }); return; }
+    json(res, 200, { success: true, card: updated });
+    return;
+  }
+
+  if (p.startsWith('/api/cards/') && req.method === 'DELETE') {
+    const id = p.slice('/api/cards/'.length);
+    cardRunner.killCard(id);
+    CardStore.remove(id);
+    json(res, 200, { success: true });
+    return;
+  }
+
+  if (p.startsWith('/api/cards/') && req.method === 'POST' && p.endsWith('/run')) {
+    const id = p.slice('/api/cards/'.length, -'/run'.length);
+    const ok = await cardRunner.runOne(id);
+    json(res, ok ? 200 : 409, { success: ok, running: cardRunner.isRunning() });
+    return;
+  }
+
+  if (p === '/api/cards/stream' && req.method === 'GET') {
+    // SSE：实时推送卡牌生命周期事件（task_start/text/tool/task_done/all_done/runner_*）
+    const send = sse(req, res);
+    const unsub = sseSubscribe(send);
+    send({ type: 'init', running: cardRunner.isRunning(), maxParallel: MAX_PARALLEL });
+    req.on('close', unsub);
+    return;
+  }
+
   res.writeHead(404);
   res.end('Not Found');
 });
@@ -944,7 +1098,8 @@ function shutdown(code) {
     if (termProc) { try { termProc.kill(); } catch { /* ignore */ } termProc = null; }
     const n = stopAllChildren();
     const m = store.resetRunningTasks();
-    if (n || m) console.log(`退出清理：终止 ${n} 个子进程，复位 ${m} 个执行中任务`);
+    const mc = CardStore.resetRunning();
+    if (n || m || mc) console.log(`退出清理：终止 ${n} 个子进程，复位 ${m} 个执行中任务、${mc} 张卡牌`);
   } catch (err) {
     console.error('[shutdown] 清理失败:', err && (err.stack || err));
   }
@@ -1155,6 +1310,8 @@ server.listen(PORT, () => {
   // 启动即修复孤儿状态：上次异常退出时仍标记「执行中」的任务复位为待执行
   const orphan = store.resetRunningTasks();
   if (orphan > 0) console.log(`检测到 ${orphan} 个上次未正常结束的任务，已复位为待执行`);
+  const orphanCards = CardStore.resetRunning();
+  if (orphanCards > 0) console.log(`检测到 ${orphanCards} 张上次未正常结束的卡牌，已复位为待执行`);
   startScheduler();
   startAutoStop();
   startPruneTimer();
