@@ -1,11 +1,14 @@
-# agents-chat (npm 包版)
+# @iamsamyiok/agents-chat (npm 包版)
 
 多智能体群聊工具，通过 npm 全局安装后可使用 `agents-chat` 命令启动。
+
+> 包名说明：npm 相似名策略禁止发布裸名 `agents-chat`（已存在相似包 `agentschat`），
+> 因此使用官方建议的 scoped 包名 `@iamsamyiok/agents-chat`，安装后的命令仍是 `agents-chat`。
 
 ## 安装
 
 ```bash
-npm install -g agents-chat
+npm install -g @iamsamyiok/agents-chat
 ```
 
 ## 前置要求
