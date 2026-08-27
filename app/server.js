@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.15.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.18.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -1076,6 +1076,18 @@ const server = http.createServer(async (req, res) => {
     const id = p.slice('/api/cards/'.length, -'/run'.length);
     const ok = await cardRunner.runOne(id);
     json(res, ok ? 200 : 409, { success: ok, running: cardRunner.isRunning() });
+    return;
+  }
+
+  // 追加聊天：任务完成后复用其 opencode 会话续聊（同一进程的第二轮输入）
+  if (p.startsWith('/api/cards/') && req.method === 'POST' && p.endsWith('/chat')) {
+    const id = p.slice('/api/cards/'.length, -'/chat'.length);
+    const body = await readBody(req);
+    const prompt = String(body.prompt || '').trim();
+    if (!prompt) { json(res, 400, { success: false, error: '请输入追加内容' }); return; }
+    if (!CardStore.get(id)) { json(res, 404, { success: false, error: '任务不存在' }); return; }
+    const r = await cardRunner.chatFollowup(id, prompt);
+    json(res, r.ok ? 200 : 409, { success: r.ok, error: r.error || '' });
     return;
   }
 

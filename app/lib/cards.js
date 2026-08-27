@@ -381,6 +381,93 @@ class CardRunner {
     this.active.delete(cardId);
     return true;
   }
+
+  // ---------- 任务完成后追加聊天：复用该卡牌的 opencode 会话（-s 续聊，等效同一进程第二轮输入） ----------
+  // 过程事件经 broadcast 推送（followup_start / text / tool / followup_done），回复归档进消息与 result
+  async chatFollowup(cardId, prompt) {
+    const card = CardStore.get(cardId);
+    if (!card) return { ok: false, error: '任务不存在' };
+    if (card.status === 'running' || card.status === 'pending') return { ok: false, error: '任务尚未执行完成，先运行任务再追加聊天' };
+    if (this.followups && this.followups.has(cardId)) return { ok: false, error: '该任务已有追加聊天进行中' };
+    if (!this.followups) this.followups = new Set();
+    this.followups.add(cardId);
+
+    const runner = resolveRunner();
+    try {
+      if (runner.kind === 'missing') {
+        const hint = require('./agent').missingHint(runner);
+        return { ok: false, error: hint.slice(0, 500) };
+      }
+      const kind = runner.kind === 'opencode' ? 'opencode' : 'fallback';
+      if (!card.ocSessionId && kind === 'opencode') {
+        return { ok: false, error: '该任务没有可续的会话（可能未通过 opencode 内核执行），无法追加聊天' };
+      }
+      const cfg = CardStore.getConfig();
+      const workspace = (cfg.workspace || '').trim();
+      const cwd = workspace && isValidDir(workspace) ? workspace : undefined;
+
+      const userText = String(prompt || '').trim();
+      if (!userText) return { ok: false, error: '请输入追加内容' };
+      store.addMessage({ role: 'user', agentId: 'solo', agentName: '我', actor: 'user', phase: 'followup', taskId: cardId, content: userText.slice(0, 20000) });
+      broadcast({ type: 'followup_start', cardId: cardId });
+
+      const texts = new Map();
+      const order = [];
+      let doneError = '';
+      let sesId = card.ocSessionId || '';
+      let child = null;
+      try {
+        await new Promise((resolve) => {
+          child = oc.chatSolo(kind, runner, {
+            prompt: userText,
+            model: card.model || '',
+            ocSessionId: sesId,
+            behavior: 'card',
+            cwd
+          }, (ev) => {
+            const proc = this.procs.get(cardId);
+            if (proc) proc.lastActive = Date.now();
+            if (ev.type === 'session') {
+              sesId = ev.ocSessionId;
+              CardStore.update(cardId, { ocSessionId: sesId });
+            } else if (ev.type === 'text') {
+              if (!texts.has(ev.partId)) order.push(ev.partId);
+              texts.set(ev.partId, ev.text);
+              broadcast({ type: 'text', cardId, partId: ev.partId, text: ev.text, agentName: 'Agent', phase: 'followup' });
+            } else if (ev.type === 'tool') {
+              broadcast({ type: 'tool', cardId, name: ev.name, summary: ev.summary, phase: 'followup' });
+              store.addMessage({ role: 'assistant', agentId: 'solo', agentName: 'Agent', actor: 'assistant', phase: 'followup', taskId: cardId, content: `[工具] ${ev.name}${ev.summary ? '（' + ev.summary + '）' : ''} 执行完成` });
+            } else if (ev.type === 'done') {
+              doneError = ev.error || '';
+              resolve();
+            }
+          });
+        });
+      } catch (err) {
+        doneError = String((err && err.message) || err).slice(0, 2000);
+      }
+
+      const finalText = order.map(id => texts.get(id)).join('\n\n').trim();
+      if (finalText) {
+        store.addMessage({ role: 'assistant', agentId: 'solo', agentName: 'Agent', actor: 'assistant', phase: 'followup', taskId: cardId, content: finalText.slice(0, 20000) });
+      }
+      // 追加聊天完成后：结果滚动归档（保留此前结果，追加本轮回复），失败原因单独记录
+      const cur = CardStore.get(cardId) || {};
+      const merged = [cur.result, finalText].filter(Boolean).join('\n\n');
+      CardStore.update(cardId, {
+        ocSessionId: sesId,
+        result: merged.slice(-20000),
+        followupError: doneError || '',
+        finishedAt: Date.now()
+      });
+      broadcast({ type: 'followup_done', cardId, error: doneError || '' });
+      return { ok: !doneError, error: doneError || '' };
+    } finally {
+      this.followups.delete(cardId);
+    }
+  }
+
+  isFollowupRunning(cardId) { return !!this.followups && this.followups.has(cardId); }
 }
 
 function isValidDir(p) {

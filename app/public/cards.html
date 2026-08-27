@@ -12,8 +12,9 @@
     --shadow:0 0 18px rgba(0,0,0,.06);
   }
   *{box-sizing:border-box}
+  html,body{height:100%}
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
-    background:var(--bg);color:var(--txt);font-size:14px}
+    background:var(--bg);color:var(--txt);font-size:14px;display:flex;flex-direction:column;overflow:hidden}
   header{display:flex;align-items:center;gap:12px;padding:12px 18px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}
   header h1{font-size:16px;margin:0;font-weight:600}
   .backlink{font-size:13px;color:var(--acc);text-decoration:none;border:1px solid var(--acc);border-radius:6px;padding:5px 10px}
@@ -41,8 +42,19 @@
   .proc-chip .pid{font-family:monospace;color:#cfe; }
   .proc-chip .st{color:#9aa3b2}
   .proc-empty{color:#5a6472}
-  main{padding:16px 18px;display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
-  .col{flex:1;min-width:240px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;box-shadow:var(--shadow)}
+  main{padding:16px 18px;display:flex;gap:14px;align-items:stretch;flex:1;min-height:0}
+  /* 左侧依赖图面板（约 1/4 宽，可收起） */
+  #graphPanel{flex:0 0 25%;min-width:250px;max-width:340px;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden}
+  #graphPanel.collapsed{display:none}
+  .gp-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line2);flex:none}
+  .gp-head h2{font-size:12px;margin:0;color:var(--dim);letter-spacing:.5px;flex:1;display:flex;align-items:center;gap:6px}
+  .gp-body{flex:1;overflow:auto;background:#fbfcfe;padding:10px 6px}
+  .gp-legend{font-size:10.5px;color:var(--dim);padding:6px 12px 8px;border-bottom:1px solid var(--line2);flex:none;line-height:1.7;background:#fff}
+  .gp-legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin:0 3px 0 8px;vertical-align:middle}
+  #boardArea{flex:1;min-width:0;display:flex;gap:14px;align-items:flex-start;overflow-x:auto}
+  #boardArea .col{flex:1;min-width:190px;min-height:120px}
+  .col{flex:1;min-width:200px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;box-shadow:var(--shadow);display:flex;flex-direction:column;max-height:100%;overflow:hidden}
+  .col .drop-zone{flex:1;overflow-y:auto;min-height:0}
   .col h2{font-size:13px;margin:0 0 10px;color:var(--dim);display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:.5px}
   .dot{width:8px;height:8px;border-radius:50%}
   .card{background:#fafbfc;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px;cursor:grab;transition:.12s;position:relative}
@@ -79,27 +91,36 @@
   .detail-log .msg-err{color:#ff8a8a}
   .detail-result{background:#fafbfc;border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:12px;white-space:pre-wrap;word-break:break-word;max-height:22vh;overflow:auto;line-height:1.6}
   .dep-tag{font-size:11px;color:var(--acc2);margin-top:4px}
+  /* 失败原因摘要（看板卡） */
+  .card-err{margin-top:6px;font-size:11.5px;line-height:1.5;color:var(--err);background:#fdeceb;border:1px solid #f3c9c9;border-radius:6px;padding:4px 8px;word-break:break-word;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  /* 详情弹窗：完整错误块 */
+  .detail-err{background:#fdeceb;border:1px solid #f3c9c9;border-left:3px solid var(--err);border-radius:8px;padding:10px 12px;margin-bottom:10px;white-space:pre-wrap;word-break:break-word;max-height:18vh;overflow:auto;font-size:12.5px;line-height:1.6;color:#b03a31}
+  .detail-err b{color:var(--err)}
+  /* 追加聊天 */
+  .followup-box{border-top:1px dashed var(--line);margin-top:14px;padding-top:10px}
+  .followup-box .fu-head{font-size:12.5px;color:var(--acc2);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+  .followup-box .fu-head .fu-st{font-size:11px;color:var(--dim)}
+  .fu-row{display:flex;gap:8px}
+  .fu-row textarea{flex:1;min-height:52px;resize:vertical;font-size:13px}
+  .fu-send{background:var(--acc2);border-color:var(--acc2);color:#fff;align-self:flex-end;white-space:nowrap}
+  .fu-send:disabled{opacity:.45;cursor:not-allowed}
+  .fu-tip{font-size:11px;color:var(--dim);margin-top:6px}
+  /* 迷你依赖图（左侧面板） */
+  .mini-svg .g-node{cursor:pointer}
+  .mini-svg .g-node rect{fill:#fff;stroke:#c9cdd4;stroke-width:1.4}
+  .mini-svg .g-node:hover rect{stroke:var(--acc);stroke-width:2.2}
+  .mini-svg .g-node.running rect{fill:#eef7ff;stroke:var(--running);stroke-dasharray:5 3}
+  .mini-svg .g-node.done rect{fill:#eef7f0;stroke:var(--done)}
+  .mini-svg .g-node.failed rect{fill:#fdeceb;stroke:var(--failed)}
+  .mini-svg .g-node text{font-size:11px;fill:#222}
+  .mini-svg .g-node .gt-sub{font-size:9.5px;fill:#999}
+  .mini-svg .edge{fill:none;stroke:#9aa8c7;stroke-width:1.6}
+  .mini-svg .edge.continue{stroke:var(--acc2);stroke-dasharray:5 3}
+  .mini-svg marker{fill:#9aa8c7}
+  .mini-svg marker.cont{fill:var(--acc2)}
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.8);color:#fff;padding:10px 16px;border-radius:10px;z-index:99;opacity:0;transition:.25s;pointer-events:none}
   .toast.show{opacity:1}
-  /* 依赖图 */
-  #graphMask .modal{width:min(1000px,96vw);height:84vh;display:flex;flex-direction:column;padding:0;overflow:hidden}
-  .graph-bar{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);flex:none}
-  .graph-bar h3{margin:0;font-size:15px}
-  .graph-canvas{flex:1;overflow:auto;background:#fbfcfe;position:relative}
-  .flow-svg .g-node{cursor:pointer}
-  .flow-svg .g-node rect{fill:#fff;stroke:#d0d5dd;stroke-width:1.6;rx:8}
-  .flow-svg .g-node:hover rect{stroke:var(--acc);stroke-width:2.4}
-  .flow-svg .g-node.pending rect{stroke:#c9cdd4}
-  .flow-svg .g-node.running rect{fill:#eef7ff;stroke:var(--running);stroke-dasharray:5 3}
-  .flow-svg .g-node.done rect{fill:#eef7f0;stroke:var(--done)}
-  .flow-svg .g-node.failed rect{fill:#fdeceb;stroke:var(--failed)}
-  .flow-svg .g-node text{font-size:12px;fill:#222}
-  .flow-svg .g-node .gt-sub{font-size:10px;fill:#999}
-  .flow-svg .edge{fill:none;stroke:#9aa8c7;stroke-width:1.8}
-  .flow-svg .edge.continue{stroke:var(--acc2);stroke-width:1.8;stroke-dasharray:5 3}
-  .flow-svg .edge-label{font-size:10px;fill:#667}
-  .flow-svg marker{fill:#9aa8c7}
-  .flow-svg marker.cont{fill:var(--acc2)}
+  /* 依赖图（见左侧面板 mini-svg 样式） */
   /* 垃圾桶 */
   .trash-fab{position:fixed;right:22px;bottom:22px;width:56px;height:56px;border-radius:50%;background:var(--panel);border:1px solid var(--line);box-shadow:0 6px 18px rgba(0,0,0,.18);cursor:pointer;font-size:24px;display:flex;align-items:center;justify-content:center;z-index:40}
   .trash-fab:hover{border-color:var(--err);color:var(--err)}
@@ -122,7 +143,6 @@
     <span class="ws-pick" id="wsPick" title="弹窗选择文件夹">选择</span>
     <span class="ws-save" id="wsSave">保存</span>
   </div>
-  <button class="btn" id="btnGraph" title="任务依赖关系总览">🔗 依赖图</button>
   <button class="btn" id="btnNew">＋ 新建任务</button>
   <button class="btn primary" id="btnRun">▶ 开始编排</button>
   <button class="btn danger" id="btnStop" disabled>⏹ 停止</button>
@@ -132,11 +152,30 @@
 <div class="procbar" id="procBar"><span class="ptitle">进程：</span><span class="proc-empty">无运行中的 opencode 进程</span></div>
 
 <main>
-  <div class="col"><h2><span class="dot" style="background:var(--pending)"></span>待执行 <span id="cntPending" class="badge"></span></h2><div id="colPending" class="drop-zone"></div></div>
-  <div class="col"><h2><span class="dot" style="background:var(--running)"></span>执行中 <span id="cntRunning" class="badge"></span></h2><div id="colRunning" class="drop-zone"></div></div>
-  <div class="col"><h2><span class="dot" style="background:var(--done)"></span>已完成 <span id="cntDone" class="badge"></span></h2><div id="colDone" class="drop-zone"></div></div>
-  <div class="col"><h2><span class="dot" style="background:var(--failed)"></span>失败 <span id="cntFailed" class="badge"></span></h2><div id="colFailed" class="drop-zone"></div></div>
+  <!-- 左侧：依赖图面板（约 1/4 宽，可收起） -->
+  <aside id="graphPanel">
+    <div class="gp-head">
+      <h2><span class="dot" style="background:var(--acc2)"></span>🔗 依赖图</h2>
+      <button class="icon-btn" id="gpCollapse" title="收起面板">◀</button>
+    </div>
+    <div class="gp-legend">
+      自上而下按依赖分层；实线=依赖，蓝色虚线=同会话续聊。
+      <i style="background:var(--pending)"></i>待执行
+      <i style="background:var(--running)"></i>执行中
+      <i style="background:var(--done)"></i>完成
+      <i style="background:var(--failed)"></i>失败
+    </div>
+    <div class="gp-body" id="graphBody"></div>
+  </aside>
+  <!-- 右侧：四列看板 -->
+  <div id="boardArea">
+    <div class="col"><h2><span class="dot" style="background:var(--pending)"></span>待执行 <span id="cntPending" class="badge"></span></h2><div id="colPending" class="drop-zone"></div></div>
+    <div class="col"><h2><span class="dot" style="background:var(--running)"></span>执行中 <span id="cntRunning" class="badge"></span></h2><div id="colRunning" class="drop-zone"></div></div>
+    <div class="col"><h2><span class="dot" style="background:var(--done)"></span>已完成 <span id="cntDone" class="badge"></span></h2><div id="colDone" class="drop-zone"></div></div>
+    <div class="col"><h2><span class="dot" style="background:var(--failed)"></span>失败 <span id="cntFailed" class="badge"></span></h2><div id="colFailed" class="drop-zone"></div></div>
+  </div>
 </main>
+<span id="gpExpand" style="display:none;position:fixed;left:14px;bottom:80px;z-index:41" title="展开依赖图"><button class="btn" id="gpExpandBtn">▶ 依赖图</button></span>
 
 <!-- 新建/编辑任务 -->
 <div class="mask" id="maskEdit">
@@ -168,33 +207,29 @@
   </div>
 </div>
 
-<!-- 任务详情：过程 + 结果 -->
+<!-- 任务详情：失败原因 + 过程 + 结果 + 追加聊天 -->
 <div class="mask" id="maskDetail">
   <div class="modal">
     <h3 id="dTitle">任务详情</h3>
     <div id="dMeta" class="meta" style="margin-bottom:10px"></div>
     <div class="dep-tag" id="dDeps"></div>
+    <div class="detail-err" id="dError" style="display:none"></div>
     <label>执行过程（实时）</label>
     <div class="detail-log" id="dLog"><span class="empty">暂无过程记录</span></div>
     <label>最终结果</label>
     <div class="detail-result" id="dResult"><span class="empty">尚未产生结果</span></div>
+    <div class="followup-box" id="fuBox">
+      <div class="fu-head">💬 追加聊天 <span class="fu-st" id="fuState"></span></div>
+      <div class="fu-row">
+        <textarea id="fuInput" placeholder="在本次会话中继续输入，Agent 将带着此前上下文回答或继续执行…（Enter 发送，Shift+Enter 换行）"></textarea>
+        <button class="btn fu-send" id="fuSend">发送</button>
+      </div>
+      <div class="fu-tip" id="fuTip">复用该任务的会话上下文，等效同一进程的第二轮输入</div>
+    </div>
     <div class="foot">
       <button class="btn" id="dClose">关闭</button>
       <button class="btn primary" id="dRun">▶ 立即执行</button>
     </div>
-  </div>
-</div>
-
-<!-- 依赖关系总览 -->
-<div class="mask" id="graphMask">
-  <div class="modal">
-    <div class="graph-bar">
-      <h3>🔗 任务依赖关系总览</h3>
-      <span style="font-size:12px;color:var(--dim)">实线=依赖，蓝色虚线=同会话续聊；箭头指向被依赖项，点击节点查看详情</span>
-      <span class="sp" style="flex:1"></span>
-      <button class="btn" id="graphClose">关闭</button>
-    </div>
-    <div class="graph-canvas" id="graphCanvas"></div>
   </div>
 </div>
 
@@ -233,6 +268,7 @@ async function loadCards(){
   $('#btnStop').disabled = !data.running;
   if(data.config) $('#wsInput').value = data.config.workspace || '';
   render();
+  renderGraph();
   loadTrashCount();
 }
 
@@ -244,14 +280,21 @@ function badge(card){
   if(card.dependsOn && card.dependsOn.length) html += `<span class="badge">依赖 ${card.dependsOn.length}</span>`;
   return html;
 }
+function errSummary(err){
+  if(!err) return '';
+  return String(err).split('\n').map(s=>s.trim()).filter(Boolean)[0] || '';
+}
 function cardEl(card){
   const el = document.createElement('div');
   el.className='card';
   el.draggable = true;
   el.dataset.id = card.id;
   el.dataset.status = card.status;
+  const errHtml = (card.status==='failed' && (card.error||card.followupError))
+    ? `<div class="card-err" title="${esc(card.error||card.followupError)}">⚠ ${esc(errSummary(card.error||card.followupError).slice(0,140))}</div>` : '';
   el.innerHTML = `<div class="title">${esc(card.title)}</div>
     <div class="meta">${badge(card)} ${card.status!=='pending'&&card.status!=='running'?`<span class="badge">${card.status}</span>`:''}</div>
+    ${errHtml}
     <div class="op">
       <button class="icon-btn" data-act="run" title="执行">▶</button>
       <button class="icon-btn" data-act="edit" title="编辑">✎</button>
@@ -345,13 +388,27 @@ $('#wsSave').onclick=async()=>{ const v=$('#wsInput').value.trim(); const r=awai
 function appendLog(el, line, cls){
   const span=document.createElement('div'); if(cls) span.className=cls; span.textContent=line; el.appendChild(span);
 }
+let FU_RUNNING = false;
+let FU_PARTS = new Map(); // 追加聊天正文：partId -> DOM 节点（快照覆盖式渲染）
+function fuSetState(running, tipText){
+  FU_RUNNING = running;
+  const btn=$('#fuSend');
+  btn.disabled = running || !OPEN_ID;
+  btn.textContent = running ? '回复中…' : '发送';
+  if(tipText!==undefined) $('#fuTip').textContent = tipText;
+}
 async function openDetail(id){
   OPEN_ID=id; const data=await api('/api/cards/'+id+'/log'); const card=data.card; const msgs=data.messages||[];
   $('#dTitle').textContent=card.title;
   $('#dMeta').innerHTML=badge(card)+`<span class="badge">${card.status}</span>`;
   const depTitles = (card.dependsOn||[]).map(d=>{const c=CARDS.find(x=>x.id===d);return c?c.title:d;});
   $('#dDeps').textContent = depTitles.length ? ('依赖：'+depTitles.join('、')) : '';
-  const log=$('#dLog'); log.innerHTML='';
+  // 失败原因块：任务执行错误优先，其次追加聊天的错误
+  const errBox=$('#dError');
+  const errText = card.error || card.followupError || '';
+  if(errText){ errBox.style.display='block'; errBox.innerHTML='<b>⚠ 失败原因</b>\n'+esc(errText); }
+  else errBox.style.display='none';
+  const log=$('#dLog'); log.innerHTML=''; FU_PARTS.clear();
   if(!msgs.length) log.innerHTML='<span class="empty">暂无过程记录</span>';
   for(const m of msgs){
     if(m.role==='user') appendLog(log,'👤 '+m.content,'msg-user');
@@ -360,74 +417,124 @@ async function openDetail(id){
     else appendLog(log,'🤖 '+(m.content||'').slice(0,4000),'msg-assistant');
     if(m.outputPath) appendLog(log,'📄 产出文件: '+m.outputPath);
   }
+  log.scrollTop=log.scrollHeight;
   const res=$('#dResult');
   if(card.result) res.textContent=card.result; else res.innerHTML='<span class="empty">尚未产生结果</span>';
   $('#dRun').style.display = (card.status==='running')?'none':'inline-block';
+  // 追加聊天：任务结束（非 pending/running）即可用；无会话时提示限制
+  const fuOk = card.status!=='pending' && card.status!=='running';
+  $('#fuBox').style.display = fuOk ? 'block' : 'none';
+  $('#fuState').textContent = FU_RUNNING ? '回复中…' : '';
+  if(fuOk && !card.ocSessionId) $('#fuTip').textContent='当前内核不支持会话续聊，追加输入将开启全新上下文';
+  else if(fuOk) $('#fuTip').textContent='复用该任务的会话上下文，等效同一进程的第二轮输入';
+  fuSetState(FU_RUNNING);
   $('#maskDetail').classList.add('show');
 }
 $('#dClose').onclick=()=>{ OPEN_ID=null; $('#maskDetail').classList.remove('show'); };
 $('#dRun').onclick=async()=>{ if(!OPEN_ID)return; await runOne(OPEN_ID); openDetail(OPEN_ID); };
 
-// ---- 依赖关系总览图（带箭头） ----
-function openGraph(){
-  const cards = CARDS;
-  const byId = Object.fromEntries(cards.map(c=>[c.id,c]));
-  const depth = {}; const visiting = {};
+// ---- 追加聊天：复用会话第二轮输入 ----
+async function sendFollowup(){
+  if(!OPEN_ID || FU_RUNNING) return;
+  const ta=$('#fuInput'); const text=ta.value.trim();
+  if(!text){ toast('请输入追加内容'); return; }
+  fuSetState(true,'已发送，等待 Agent 基于原会话上下文回复…');
+  appendLog($('#dLog'),'👤 '+text,'msg-user');
+  $('#dLog').scrollTop=$('#dLog').scrollHeight;
+  ta.value='';
+  try{
+    const r = await post('/api/cards/'+encodeURIComponent(OPEN_ID)+'/chat',{prompt:text});
+    if(!r.success && r.error){ toast('追加聊天失败：'+errSummary(r.error)); appendLog($('#dLog'),'⚠ '+r.error,'msg-err'); }
+  }catch(e){ toast('追加聊天请求失败'); }
+  finally{ fuSetState(false); }
+}
+$('#fuSend').onclick=sendFollowup;
+$('#fuInput').addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendFollowup(); }
+});
+
+// ---- 左侧依赖图面板：竖向分层（依赖在上、被依赖者在下），层内横排 ----
+let G_SIG=''; // 结构+状态指纹：无变化时跳过重绘（避免流式输出期间闪烁）
+function renderGraph(force){
+  const box=$('#graphBody');
+  const cards=CARDS;
+  const sig=cards.map(c=>c.id+':'+c.status+':'+(c.dependsOn||[]).join(',')).join('|');
+  if(!force && sig===G_SIG && box.querySelector('svg')) return;
+  G_SIG=sig;
+  if(!cards.length){ box.innerHTML='<div class="empty" style="padding:24px 8px">暂无任务<br/>新建任务后此处展示依赖关系</div>'; return; }
+  const byId=Object.fromEntries(cards.map(c=>[c.id,c]));
+  const depth={}; const visiting={};
   function calc(id){
     if(depth[id]!==undefined) return depth[id];
-    if(visiting[id]) return 0; visiting[id]=true;
+    if(visiting[id]){ depth[id]=0; return 0; } // 环兜底
+    visiting[id]=true;
     const c=byId[id]; const deps=(c.dependsOn||[]).filter(d=>byId[d]);
-    let d = deps.length ? Math.max(...deps.map(calc))+1 : 0;
+    const d=deps.length?Math.max(...deps.map(calc))+1:0;
     visiting[id]=false; depth[id]=d; return d;
   }
   cards.forEach(c=>calc(c.id));
-  const layers = {};
-  cards.forEach(c=>{ const d=depth[c.id]||0; (layers[d]=layers[d]||[]).push(c); });
-  const maxLayer = Math.max(0,...Object.keys(layers).map(Number));
-  const W=124,H=64,xGap=200,yGap=96,padX=46,padY=46;
-  const maxRows=Math.max(1,...Object.values(layers).map(a=>a.length));
-  const svgW = padX*2 + (maxLayer+1)*xGap;
-  const svgH = padY*2 + maxRows*yGap;
+  const layers={};
+  cards.forEach(c=>{const d=depth[c.id]||0;(layers[d]=layers[d]||[]).push(c);});
+  const layerIdx=Object.keys(layers).map(Number).sort((a,b)=>a-b);
+  // 节点尺寸与间距（窄面板适配）
+  const W=132,H=46,xGap=14,yGap=74,pad=8;
+  let maxW=pad*2;
   const pos={};
-  for(const d of Object.keys(layers)){
-    const arr=layers[d]; arr.forEach((c,i)=>{ pos[c.id]={x:padX+d*xGap, y:padY+i*yGap}; });
+  const layerWidth={};
+  for(const d of layerIdx){
+    const arr=layers[d]; layerWidth[d]=pad*2+arr.length*W+(arr.length-1)*xGap;
+    maxW=Math.max(maxW,layerWidth[d]);
   }
+  for(const d of layerIdx){
+    const arr=layers[d];
+    const lw=layerWidth[d];
+    arr.forEach((c,i)=>{
+      pos[c.id]={x:(maxW-lw)/2+pad+i*(W+xGap), y:pad+d*yGap};
+    });
+  }
+  const svgH=pad*2+(layerIdx.length-1)*yGap+H;
+  // 连线：竖向贝塞尔（从依赖底部 → 被依赖顶部）
   let edges='';
   for(const c of cards){
     for(const dep of (c.dependsOn||[])){
       if(!pos[dep]||!pos[c.id]) continue;
       const a=pos[dep], b=pos[c.id];
-      const x1=a.x+W, y1=a.y+H/2, x2=b.x, y2=b.y+H/2;
-      const mx=(x1+x2)/2;
-      const isContinue = (byId[c.id].mode==='continue' && byId[c.id].chainId===dep);
-      const marker = isContinue ? 'url(#arCont)' : 'url(#ar)';
-      edges += `<path class="edge ${isContinue?'continue':''}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2-4},${y2}" marker-end="${marker}"/>`;
+      const x1=a.x+W/2, y1=a.y+H, x2=b.x+W/2, y2=b.y;
+      const my=(y1+y2)/2;
+      const isContinue=(c.mode==='continue'&&c.chainId===dep);
+      edges+=`<path class="edge ${isContinue?'continue':''}" d="M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2-3}" marker-end="${isContinue?'url(#marC)':'url(#mar)'}"/>`;
     }
   }
+  // 节点
   let nodes='';
   for(const c of cards){
     const p=pos[c.id];
-    const label = c.title.length>12? c.title.slice(0,12)+'…' : c.title;
-    nodes += `<g class="g-node ${c.status}" data-id="${c.id}">
-      <rect x="${p.x}" y="${p.y}" width="${W}" height="${H}" rx="8"/>
-      <text x="${p.x+10}" y="${p.y+24}">${esc(label)}</text>
-      <text class="gt-sub" x="${p.x+10}" y="${p.y+44}">P${c.priority} · ${c.mode}</text>
+    const label=c.title.length>9?c.title.slice(0,9)+'…':c.title;
+    const sub=`P${c.priority} · ${c.mode}`;
+    nodes+=`<g class="g-node ${c.status}" data-id="${c.id}">
+      <rect x="${p.x}" y="${p.y}" width="${W}" height="${H}" rx="7"/>
+      <text x="${p.x+W/2}" y="${p.y+19}" text-anchor="middle">${esc(label)}</text>
+      <text class="gt-sub" x="${p.x+W/2}" y="${p.y+36}" text-anchor="middle">${esc(sub)}</text>
     </g>`;
   }
-  const svg = `<svg class="flow-svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
+  const svg=`<svg class="mini-svg" width="${maxW}" height="${svgH}" viewBox="0 0 ${maxW} ${svgH}" style="display:block;margin:0 auto">
     <defs>
-      <marker id="ar" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3 L0,6 Z"/></marker>
-      <marker id="arCont" class="cont" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3 L0,6 Z"/></marker>
+      <marker id="mar" markerWidth="8" markerHeight="8" refX="5" refY="2.6" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L5,2.6 L0,5.2 Z"/></marker>
+      <marker id="marC" class="cont" markerWidth="8" markerHeight="8" refX="5" refY="2.6" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L5,2.6 L0,5.2 Z"/></marker>
     </defs>
     ${edges}${nodes}</svg>`;
-  $('#graphCanvas').innerHTML = svg;
-  $('#graphCanvas').querySelectorAll('.g-node').forEach(g=>{
-    g.onclick=()=>{ const id=g.dataset.id; $('#graphMask').classList.remove('show'); openDetail(id); };
+  box.innerHTML=svg;
+  box.querySelectorAll('.g-node').forEach(g=>{
+    g.onclick=()=>openDetail(g.dataset.id);
   });
-  $('#graphMask').classList.add('show');
 }
-$('#btnGraph').onclick=openGraph;
-$('#graphClose').onclick=()=>$('#graphMask').classList.remove('show');
+// 面板收起/展开
+function setGraphCollapsed(collapsed){
+  $('#graphPanel').classList.toggle('collapsed',collapsed);
+  $('#gpExpand').style.display=collapsed?'block':'none';
+}
+$('#gpCollapse').onclick=()=>setGraphCollapsed(true);
+$('#gpExpandBtn').onclick=()=>setGraphCollapsed(false);
 
 // ---- 垃圾桶 ----
 async function loadTrashCount(){
@@ -478,21 +585,39 @@ async function refreshProcs(){
 setInterval(refreshProcs, 2000);
 
 // ---- SSE 实时 ----
+function fuRenderText(ev){
+  const log=$('#dLog');
+  if(log.querySelector('.empty')) log.innerHTML='';
+  let el=FU_PARTS.get(ev.partId);
+  if(!el){ el=document.createElement('div'); el.className='msg-assistant'; FU_PARTS.set(ev.partId,el); log.appendChild(el); }
+  el.textContent='🤖 '+(ev.text||'').slice(0,6000);
+  log.scrollTop=log.scrollHeight;
+}
 const es = new EventSource('/api/cards/stream');
 es.onmessage = (e)=>{
   let ev; try{ ev=JSON.parse(e.data); }catch{ return; }
   if(ev.type==='runner_started'){ $('#statusPill').textContent='编排中…'; $('#btnRun').disabled=true; $('#btnStop').disabled=false; }
   if(ev.type==='runner_stopped'||ev.type==='all_done'){ $('#statusPill').textContent='空闲'; $('#btnRun').disabled=false; $('#btnStop').disabled=true; }
+  if(ev.type==='followup_start'||ev.type==='followup_done'){ loadCards(); }
   if(['task_start','text','tool','task_done','proc'].includes(ev.type)){
     loadCards();
     refreshProcs();
     if(OPEN_ID && ev.cardId===OPEN_ID){
       const log=$('#dLog'); if(log.querySelector('.empty')) log.innerHTML='';
-      if(ev.type==='text') appendLog(log,(ev.text||'').slice(0,4000),'msg-assistant');
+      if(ev.phase==='followup'){
+        // 追加聊天：正文覆盖式渲染（快照），工具逐行记录
+        if(ev.type==='text') fuRenderText(ev);
+        else if(ev.type==='tool'){ appendLog(log,'🔧 ['+ev.name+'] '+(ev.summary||''),'msg-tool'); log.scrollTop=log.scrollHeight; }
+      } else if(ev.type==='text') appendLog(log,(ev.text||'').slice(0,4000),'msg-assistant');
       else if(ev.type==='tool') appendLog(log,'🔧 ['+ev.name+'] '+(ev.summary||''),'msg-tool');
       else if(ev.type==='task_done'){ loadCards().then(()=>openDetail(OPEN_ID)); }
       log.scrollTop=log.scrollHeight;
     }
+  }
+  if(ev.type==='followup_done' && OPEN_ID===ev.cardId){
+    fuSetState(false);
+    if(ev.error){ appendLog($('#dLog'),'⚠ '+ev.error,'msg-err'); toast('追加聊天失败：'+errSummary(ev.error)); }
+    loadCards().then(()=>openDetail(OPEN_ID));
   }
 };
 es.onerror=()=>{};
