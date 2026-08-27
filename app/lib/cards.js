@@ -356,6 +356,9 @@ class CardRunner {
     let sesId = ocSessionId;
 
     let child = null;
+    // 进程登记：spawn 前占位（执行中即可见于进程条），spawn 后回填真实 PID
+    this.procs.set(card.id, { pid: null, child: null, lastActive: Date.now() });
+    broadcast({ type: 'proc', cardId: card.id, pid: null });
     try {
       await new Promise((resolve) => {
         child = oc.chatSolo(kind, runner, {
@@ -385,14 +388,14 @@ class CardRunner {
             resolve();
           }
         });
+        // chatSolo 同步返回 child（spawn 已完成）：立即回填真实 PID，执行中即可见于进程条
+        const proc0 = this.procs.get(card.id);
+        if (proc0 && child) { proc0.pid = child.pid; proc0.child = child; }
+        broadcast({ type: 'proc', cardId: card.id, pid: child ? child.pid : null });
       });
     } catch (err) {
       doneError = String((err && err.message) || err).slice(0, 2000);
     }
-
-    // 登记进程信息（PID + 是否工作中），并广播给前端
-    this.procs.set(card.id, { pid: child ? child.pid : null, child, lastActive: Date.now() });
-    broadcast({ type: 'proc', cardId: card.id, pid: child ? child.pid : null });
 
     const finalText = order.map(id => texts.get(id)).join('\n\n').trim();
     const stopped = myToken !== this.token;
@@ -403,8 +406,9 @@ class CardRunner {
     CardStore.update(card.id, {
       status,
       ocSessionId: sesId,
-      result: (doneError ? `执行出错：${doneError}` : finalText).slice(0, 20000),
-      error: doneError || '',
+      // 手动停止回到待执行：清掉残留，避免 pending 卡带着脏结果/错误
+      result: stopped ? '' : (doneError ? `执行出错：${doneError}` : finalText).slice(0, 20000),
+      error: stopped ? '' : (doneError || ''),
       finishedAt: Date.now()
     });
     broadcast({ type: 'task_done', cardId: card.id, status, title: card.title });
@@ -415,6 +419,8 @@ class CardRunner {
   async runOne(cardId) {
     const card = CardStore.get(cardId);
     if (!card || card.status === 'running') return false;
+    // 并发防护：追加聊天进行中的卡不可同时执行（避免同一会话被两条链路并发续写）
+    if (this.followups.has(cardId)) return false;
     this.active.add(cardId);
     const myToken = this.token;
     await this.runCard(card, myToken).catch(() => {});
@@ -428,6 +434,7 @@ class CardRunner {
     const card = CardStore.get(cardId);
     if (!card) return { ok: false, error: '任务不存在' };
     if (card.status === 'running' || card.status === 'pending') return { ok: false, error: '任务尚未执行完成，先运行任务再追加聊天' };
+    if (this.active.has(cardId)) return { ok: false, error: '任务正在执行中，稍后再追加聊天' };
     if (this.followups.has(cardId)) return { ok: false, error: '该任务已有追加聊天进行中' };
     this.followups.add(cardId);
 
@@ -449,6 +456,8 @@ class CardRunner {
       if (!userText) return { ok: false, error: '请输入追加内容' };
       store.addMessage({ role: 'user', agentId: 'solo', agentName: '我', actor: 'user', phase: 'followup', taskId: cardId, content: userText.slice(0, 20000) });
       broadcast({ type: 'followup_start', cardId: cardId });
+      // 进程登记：spawn 前占位，spawn 后回填 PID（追加聊天执行中亦可见于进程条）
+      this.procs.set(cardId, { pid: null, child: null, lastActive: Date.now() });
 
       const texts = new Map();
       const order = [];
@@ -481,9 +490,14 @@ class CardRunner {
               resolve();
             }
           });
+          const proc0 = this.procs.get(cardId);
+          if (proc0 && child) { proc0.pid = child.pid; proc0.child = child; }
+          broadcast({ type: 'proc', cardId, pid: child ? child.pid : null });
         });
       } catch (err) {
         doneError = String((err && err.message) || err).slice(0, 2000);
+      } finally {
+        this.procs.delete(cardId);
       }
 
       const finalText = order.map(id => texts.get(id)).join('\n\n').trim();

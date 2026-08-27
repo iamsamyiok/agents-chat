@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.19.1'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.19.2'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -1111,9 +1111,9 @@ const server = http.createServer(async (req, res) => {
     if (body.title !== undefined) patch.title = String(body.title).slice(0, 500);
     if (body.content !== undefined) patch.content = String(body.content).slice(0, 20000);
     if (body.priority !== undefined) patch.priority = Number(body.priority) || 999;
-    if (body.mode !== undefined) patch.mode = body.mode;
-    if (body.chainId !== undefined) patch.chainId = body.chainId;
-    if (Array.isArray(body.dependsOn)) patch.dependsOn = body.dependsOn.map(String);
+    if (body.mode !== undefined) patch.mode = ['new', 'continue', 'parallel'].includes(body.mode) ? body.mode : 'new';
+    if (body.chainId !== undefined) patch.chainId = String(body.chainId).slice(0, 100);
+    if (Array.isArray(body.dependsOn)) patch.dependsOn = body.dependsOn.map(String).slice(0, 50);
     if (body.model !== undefined) patch.model = String(body.model).slice(0, 80);
     // 状态手动复位：failed/pending -> pending 可重跑
     if (body.status === 'pending') { patch.status = 'pending'; patch.result = ''; patch.error = ''; patch.ocSessionId = ''; }

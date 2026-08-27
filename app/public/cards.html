@@ -525,8 +525,15 @@ function fuSetState(running, tipText){
   btn.textContent = running ? '回复中…' : '发送';
   if(tipText!==undefined) $('#fuTip').textContent = tipText;
 }
+let DETAIL_SEQ = 0; // 详情加载序号：快速切换任务时只认最新请求（响应乱序防护）
 async function openDetail(id){
-  OPEN_ID=id; const data=await api('/api/cards/'+id+'/log'); const card=data.card; const msgs=data.messages||[];
+  if(!id) return;
+  const seq = ++DETAIL_SEQ;
+  OPEN_ID = id;
+  const data = await api('/api/cards/'+encodeURIComponent(id)+'/log');
+  if (seq !== DETAIL_SEQ || OPEN_ID !== id) return; // 已切换到其他任务或关闭弹窗：丢弃过期响应
+  if(!data || !data.success || !data.card){ toast('任务不存在或已被删除'); return; }
+  const card=data.card; const msgs=data.messages||[];
   $('#dTitle').textContent=card.title;
   $('#dMeta').innerHTML=badge(card)+`<span class="badge">${card.status}</span>`;
   const depTitles = (card.dependsOn||[]).map(d=>{const c=CARDS.find(x=>x.id===d);return c?c.title:d;});
@@ -560,7 +567,7 @@ async function openDetail(id){
   fuSetState(FU_RUNNING);
   $('#maskDetail').classList.add('show');
 }
-$('#dClose').onclick=()=>{ OPEN_ID=null; $('#maskDetail').classList.remove('show'); };
+$('#dClose').onclick=()=>{ OPEN_ID=null; DETAIL_SEQ++; $('#maskDetail').classList.remove('show'); };
 $('#dRun').onclick=async()=>{ if(!OPEN_ID)return; await runOne(OPEN_ID); openDetail(OPEN_ID); };
 
 // ---- 追加聊天：复用会话第二轮输入 ----
@@ -774,7 +781,7 @@ es.onmessage = (e)=>{
       const log=$('#dLog'); if(log.querySelector('.empty')) log.innerHTML='';
       if(ev.type==='task_start') TEXT_PARTS.clear();
       else if(ev.type==='tool'){ appendLog(log,'🔧 ['+ev.name+'] '+(ev.summary||''),'msg-tool'); log.scrollTop=log.scrollHeight; }
-      else if(ev.type==='task_done'){ loadCards().then(()=>openDetail(OPEN_ID)); }
+      else if(ev.type==='task_done'){ loadCards().then(()=>{ if(OPEN_ID===ev.cardId) openDetail(ev.cardId); }); }
     }
   }
   // 正文快照独立渲染（不依赖上面的状态事件）
@@ -783,7 +790,7 @@ es.onmessage = (e)=>{
   if(ev.type==='followup_done' && OPEN_ID===ev.cardId){
     fuSetState(false);
     if(ev.error){ appendLog($('#dLog'),'⚠ '+ev.error,'msg-err'); toast('追加聊天失败：'+errSummary(ev.error)); }
-    loadCards().then(()=>openDetail(OPEN_ID));
+    loadCards().then(()=>{ if(OPEN_ID===ev.cardId) openDetail(ev.cardId); });
   }
 };
 es.onerror=()=>{};
