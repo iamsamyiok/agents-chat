@@ -61,7 +61,7 @@
   .card:hover{border-color:var(--acc);box-shadow:0 2px 8px rgba(0,0,0,.08)}
   .card.dragging{opacity:.4}
   .card.drag-over{border-color:var(--acc);border-style:dashed}
-  .card .title{font-weight:600;margin-bottom:6px;line-height:1.4;word-break:break-word;padding-right:60px}
+  .card .title{font-weight:600;margin-bottom:6px;line-height:1.4;word-break:break-word;padding-right:150px}
   .card .meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px}
   .badge{font-size:11px;padding:2px 7px;border-radius:6px;background:#eef0f3;color:var(--dim);border:1px solid var(--line)}
   .badge.prio-high{background:#fdeaea;color:var(--err);border-color:#f3c9c9}
@@ -93,6 +93,24 @@
   .dep-tag{font-size:11px;color:var(--acc2);margin-top:4px}
   /* 失败原因摘要（看板卡） */
   .card-err{margin-top:6px;font-size:11.5px;line-height:1.5;color:var(--err);background:#fdeceb;border:1px solid #f3c9c9;border-radius:6px;padding:4px 8px;word-break:break-word;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  /* 阻塞/等待提示（待执行卡） */
+  .card-blocked{margin-top:6px;font-size:11.5px;line-height:1.5;color:#8a5a00;background:#fdf6ec;border:1px solid #f0dcb8;border-radius:6px;padding:4px 8px;word-break:break-word}
+  .card-blocked.wait{color:#4a6cf7;background:#f0f4ff;border-color:#c9d8ff}
+  /* 服务重启复位提示（灰字） */
+  .card-reset{margin-top:4px;font-size:11px;color:var(--dim);line-height:1.4}
+  /* 列头小按钮（批量重跑等） */
+  .col-h2{display:flex;align-items:center;gap:8px}
+  .col-h2 .mini-act{font-size:11px;color:var(--err);background:#fff;border:1px solid #f3c9c9;border-radius:6px;padding:2px 7px;cursor:pointer;white-space:nowrap}
+  .col-h2 .mini-act:hover{background:#fdeceb}
+  /* 编排完成通知卡（右下角） */
+  .done-card{position:fixed;right:18px;bottom:84px;z-index:60;width:280px;background:#fff;border:1px solid #d9f2e3;border-left:3px solid var(--acc);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.16);padding:10px 12px;animation:dt-in .25s ease;cursor:pointer}
+  .done-card.has-fail{border-color:#f3c9c9;border-left-color:var(--err)}
+  .done-card .dc-t{font-size:13px;font-weight:600;color:var(--acc);margin-bottom:2px}
+  .done-card.has-fail .dc-t{color:var(--err)}
+  .done-card .dc-b{font-size:12px;color:#555}
+  /* 依赖图阻塞节点 */
+  .mini-svg .g-node.blocked rect{stroke:var(--warn);stroke-dasharray:3 2}
+  .gp-body{touch-action:none}
   /* 详情弹窗：完整错误块 */
   .detail-err{background:#fdeceb;border:1px solid #f3c9c9;border-left:3px solid var(--err);border-radius:8px;padding:10px 12px;margin-bottom:10px;white-space:pre-wrap;word-break:break-word;max-height:18vh;overflow:auto;font-size:12.5px;line-height:1.6;color:#b03a31}
   .detail-err b{color:var(--err)}
@@ -143,6 +161,11 @@
     <span class="ws-pick" id="wsPick" title="弹窗选择文件夹">选择</span>
     <span class="ws-save" id="wsSave">保存</span>
   </div>
+  <div class="ws-box" title="并行执行的最多任务数（1-8，热更新）">
+    ⚡ 并行 <select id="parallelSel" style="border:none;outline:none;font-size:12px;background:transparent;width:42px">
+      <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option>
+    </select>
+  </div>
   <button class="btn" id="btnNew">＋ 新建任务</button>
   <button class="btn primary" id="btnRun">▶ 开始编排</button>
   <button class="btn danger" id="btnStop" disabled>⏹ 停止</button>
@@ -159,7 +182,7 @@
       <button class="icon-btn" id="gpCollapse" title="收起面板">◀</button>
     </div>
     <div class="gp-legend">
-      自上而下按依赖分层；实线=依赖，蓝色虚线=同会话续聊。
+      自上而下按依赖分层；实线=依赖，蓝色虚线=同会话续聊；橙色虚线框=被阻塞；滚轮缩放。
       <i style="background:var(--pending)"></i>待执行
       <i style="background:var(--running)"></i>执行中
       <i style="background:var(--done)"></i>完成
@@ -172,7 +195,7 @@
     <div class="col"><h2><span class="dot" style="background:var(--pending)"></span>待执行 <span id="cntPending" class="badge"></span></h2><div id="colPending" class="drop-zone"></div></div>
     <div class="col"><h2><span class="dot" style="background:var(--running)"></span>执行中 <span id="cntRunning" class="badge"></span></h2><div id="colRunning" class="drop-zone"></div></div>
     <div class="col"><h2><span class="dot" style="background:var(--done)"></span>已完成 <span id="cntDone" class="badge"></span></h2><div id="colDone" class="drop-zone"></div></div>
-    <div class="col"><h2><span class="dot" style="background:var(--failed)"></span>失败 <span id="cntFailed" class="badge"></span></h2><div id="colFailed" class="drop-zone"></div></div>
+    <div class="col"><h2 class="col-h2"><span class="dot" style="background:var(--failed)"></span>失败 <span id="cntFailed" class="badge"></span><span style="flex:1"></span><button class="mini-act" id="btnRetryFailed" title="把全部失败任务重置为待执行并开始编排">↻ 全部重跑</button></h2><div id="colFailed" class="drop-zone"></div></div>
   </div>
 </main>
 <span id="gpExpand" style="display:none;position:fixed;left:14px;bottom:80px;z-index:41" title="展开依赖图"><button class="btn" id="gpExpandBtn">▶ 依赖图</button></span>
@@ -199,7 +222,8 @@
       <div><label>续聊链首（仅 continue 模式）</label><select id="fChain"></select></div>
       <div><label>依赖任务（完成后才可执行）</label><select id="fDeps" multiple size="3"></select></div>
     </div>
-    <label>模型（留空用默认）</label><input id="fModel" placeholder="provider/model" />
+    <label>模型（留空用默认）</label><input id="fModel" placeholder="provider/model" list="modelList" />
+    <datalist id="modelList"></datalist>
     <div class="foot">
       <button class="btn" id="btnEditCancel">取消</button>
       <button class="btn primary" id="btnEditSave">保存</button>
@@ -228,6 +252,7 @@
     </div>
     <div class="foot">
       <button class="btn" id="dClose">关闭</button>
+      <button class="btn" id="dExport" title="导出为 Markdown（元信息+过程+结果）">⬇ 导出</button>
       <button class="btn primary" id="dRun">▶ 立即执行</button>
     </div>
   </div>
@@ -267,6 +292,7 @@ async function loadCards(){
   $('#btnRun').disabled = data.running;
   $('#btnStop').disabled = !data.running;
   if(data.config) $('#wsInput').value = data.config.workspace || '';
+  if(data.maxParallel) $('#parallelSel').value = String(data.maxParallel);
   render();
   renderGraph();
   loadTrashCount();
@@ -284,6 +310,20 @@ function errSummary(err){
   if(!err) return '';
   return String(err).split('\n').map(s=>s.trim()).filter(Boolean)[0] || '';
 }
+// 依赖阻塞判定：pending 卡的依赖存在未完成（等待）或已失败（阻塞）
+function blockedInfo(card){
+  if(card.status!=='pending' || !(card.dependsOn&&card.dependsOn.length)) return null;
+  const byId=Object.fromEntries(CARDS.map(c=>[c.id,c]));
+  const failedDeps=[], waitDeps=[];
+  for(const d of card.dependsOn){
+    const dc=byId[d];
+    if(!dc||dc.status==='failed') failedDeps.push(dc?dc.title:'(已删除)');
+    else if(dc.status!=='done') waitDeps.push(dc.title);
+  }
+  if(failedDeps.length) return {kind:'fail',text:`阻塞：依赖失败（${failedDeps.slice(0,2).join('、')}${failedDeps.length>2?' 等':''}）`};
+  if(waitDeps.length) return {kind:'wait',text:`等待依赖完成（${waitDeps.slice(0,2).join('、')}${waitDeps.length>2?' 等':''}）`};
+  return null;
+}
 function cardEl(card){
   const el = document.createElement('div');
   el.className='card';
@@ -292,16 +332,27 @@ function cardEl(card){
   el.dataset.status = card.status;
   const errHtml = (card.status==='failed' && (card.error||card.followupError))
     ? `<div class="card-err" title="${esc(card.error||card.followupError)}">⚠ ${esc(errSummary(card.error||card.followupError).slice(0,140))}</div>` : '';
+  const blk = blockedInfo(card);
+  const blkHtml = blk ? `<div class="card-blocked${blk.kind==='wait'?' wait':''}">${blk.kind==='fail'?'⛔':'⏳'} ${esc(blk.text)}</div>` : '';
+  const resetHtml = (card.status==='pending' && /服务重启/.test(card.error||''))
+    ? `<div class="card-reset">↻ ${esc(errSummary(card.error))}</div>` : '';
   el.innerHTML = `<div class="title">${esc(card.title)}</div>
     <div class="meta">${badge(card)} ${card.status!=='pending'&&card.status!=='running'?`<span class="badge">${card.status}</span>`:''}</div>
-    ${errHtml}
+    ${errHtml}${blkHtml}${resetHtml}
     <div class="op">
       <button class="icon-btn" data-act="run" title="执行">▶</button>
+      <button class="icon-btn" data-act="reset" title="重置（清除结果回到待执行）">⟲</button>
+      <button class="icon-btn" data-act="copy" title="复制为新任务">⧉</button>
       <button class="icon-btn" data-act="edit" title="编辑">✎</button>
       <button class="icon-btn" data-act="del" title="删除">✕</button>
     </div>`;
   el.onclick = (e)=>{ const b=e.target.closest('[data-act]'); if(b){e.stopPropagation(); const a=b.dataset.act;
-    if(a==='del') delCard(card.id); else if(a==='edit') openEdit(card); else if(a==='run') runOne(card.id); return; }
+    if(a==='del') delCard(card.id);
+    else if(a==='edit') openEdit(card);
+    else if(a==='run') runOne(card.id);
+    else if(a==='reset') resetCard(card.id);
+    else if(a==='copy') copyCard(card);
+    return; }
     openDetail(card.id); };
   el.addEventListener('dragstart', e=>{ dragId=card.id; el.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; });
   el.addEventListener('dragend', ()=>{ el.classList.remove('dragging'); document.querySelectorAll('.card').forEach(c=>c.classList.remove('drag-over')); });
@@ -322,7 +373,7 @@ function onDrop(targetId, targetEl){
   else targetEl.parentNode.insertBefore(dragged, targetEl);
   dragId=null;
   const ids = [...document.querySelectorAll('.card')].map(c=>c.dataset.id);
-  post('/api/cards/reorder',{ids}).then(()=>loadCards());
+  post('/api/cards/reorder',{ids}).then(()=>{ loadCards(); toast('已按新顺序调整调度顺序'); });
 }
 document.addEventListener('dragover', e=>{ window.__dropY = e.clientY; }, true);
 
@@ -337,29 +388,64 @@ function render(){
 }
 
 // ---- 编辑/新建 ----
+// 候选列表排除自身：禁止把自己选为依赖/链首（防自环）
 function fillSelectors(){
-  const ch=$('#fChain'); ch.innerHTML='<option value="">（无）</option>'+CARDS.map(c=>`<option value="${c.id}">${esc(c.title)}</option>`).join('');
-  const dp=$('#fDeps'); dp.innerHTML=CARDS.map(c=>`<option value="${c.id}">${esc(c.title)}</option>`).join('');
+  const others=CARDS.filter(c=>c.id!==EDIT_ID);
+  const ch=$('#fChain'); ch.innerHTML='<option value="">（无）</option>'+others.map(c=>`<option value="${c.id}">${esc(c.title)}</option>`).join('');
+  const dp=$('#fDeps'); dp.innerHTML=others.map(c=>`<option value="${c.id}">${esc(c.title)} · ${c.status==='done'?'✓':c.status}</option>`).join('');
 }
 let EDIT_ID=null;
-function openEdit(card){
+function openEdit(card, prefill){
   EDIT_ID = card?card.id:null;
-  $('#editTitle').textContent = card?'编辑任务':'新建任务';
-  $('#fTitle').value = card?card.title:'';
-  $('#fContent').value = card?card.content:'';
-  $('#fPriority').value = card?card.priority:999;
-  $('#fMode').value = card?card.mode:'new';
-  $('#fModel').value = card?card.model:'';
+  const src = card || prefill || {};
+  $('#editTitle').textContent = card?'编辑任务':(prefill?'复制任务':'新建任务');
+  $('#fTitle').value = src.title||'';
+  $('#fContent').value = src.content||'';
+  $('#fPriority').value = src.priority!==undefined?src.priority:999;
+  $('#fMode').value = src.mode||'new';
+  $('#fModel').value = src.model||'';
   fillSelectors();
-  if(card){ $('#fChain').value=card.chainId||''; for(const o of $('#fDeps').options) o.selected=card.dependsOn.includes(o.value); }
+  $('#fChain').value=src.chainId||'';
+  for(const o of $('#fDeps').options) o.selected=(src.dependsOn||[]).includes(o.value);
   $('#maskEdit').classList.add('show');
+  loadModelList();
+}
+// 模型候选：复用单聊的内核模型列表（datalist，仍可手输）
+async function loadModelList(){
+  try{
+    const d=await api('/api/oc/models');
+    const list=(d.models||[]).map(m=>`<option value="${esc(m.id)}">`).join('');
+    $('#modelList').innerHTML=list;
+  }catch{ /* ignore */ }
+}
+// 依赖环检测：新增 deps/chain 后，从候选依赖出发能否走回自身
+function depCycle(id, deps){
+  const byId=Object.fromEntries(CARDS.map(c=>[c.id,c]));
+  const seen=new Set();
+  const stack=[...deps];
+  while(stack.length){
+    const cur=stack.pop();
+    if(cur===id) return true;
+    if(seen.has(cur)) continue;
+    seen.add(cur);
+    const c=byId[cur];
+    if(c) stack.push(...(c.dependsOn||[]), c.chainId||'');
+  }
+  return false;
 }
 $('#btnNew').onclick=()=>openEdit(null);
 $('#btnEditCancel').onclick=()=>$('#maskEdit').classList.remove('show');
 $('#btnEditSave').onclick=async()=>{
+  const mode=$('#fMode').value, chainId=$('#fChain').value;
+  const deps=[...$('#fDeps').selectedOptions].map(o=>o.value);
+  // continue 必须有链首：避免"名义续聊、实际新进程"的语义错位
+  if(mode==='continue' && !chainId){ toast('同会话续聊（continue）必须选择续聊链首'); return; }
+  // 环检测（chainId 会成为隐式依赖，一并纳入）
+  const effDeps=[...deps]; if(mode==='continue'&&chainId&&!effDeps.includes(chainId)) effDeps.push(chainId);
+  if(EDIT_ID && depCycle(EDIT_ID, effDeps)){ toast('依赖设置成环：所选依赖（直接或间接）依赖于本任务，请调整'); return; }
   const body={ title:$('#fTitle').value, content:$('#fContent').value, priority:Number($('#fPriority').value)||999,
-    mode:$('#fMode').value, chainId:$('#fChain').value, model:$('#fModel').value,
-    dependsOn:[...$('#fDeps').selectedOptions].map(o=>o.value) };
+    mode, chainId, model:$('#fModel').value,
+    dependsOn:deps };
   if(EDIT_ID) await api('/api/cards/'+EDIT_ID,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   else await post('/api/cards',body);
   $('#maskEdit').classList.remove('show'); await loadCards(); toast('已保存');
@@ -368,9 +454,47 @@ async function delCard(id){ if(!confirm('确认删除该任务？将移入垃圾
 $('#btnClear').onclick=async()=>{ if(!confirm('清空全部任务？将移入垃圾桶（30 天内可还原）。'))return; await post('/api/cards/clear'); await loadCards(); };
 
 // ---- 执行控制 ----
-$('#btnRun').onclick=async()=>{ await post('/api/cards/run'); await loadCards(); toast('已开始编排，完成即自动注入下一个任务'); };
+$('#btnRun').onclick=async()=>{
+  // 顺手请求系统通知权限（无侵入，拒绝也不影响）
+  try{ if('Notification' in window && Notification.permission==='default') Notification.requestPermission(); }catch{ /* ignore */ }
+  await post('/api/cards/run'); await loadCards(); toast('已开始编排，完成即自动注入下一个任务');
+};
 $('#btnStop').onclick=async()=>{ await post('/api/cards/stop'); await loadCards(); };
-async function runOne(id){ await post('/api/cards/'+id+'/run'); await loadCards(); }
+$('#btnRetryFailed').onclick=retryAllFailed;
+// 并行度热更新（1-8）
+$('#parallelSel').onchange=async()=>{
+  const n=Number($('#parallelSel').value);
+  const r=await post('/api/cards/config',{maxParallel:n});
+  if(r.success) toast('并行数已设为 '+n);
+};
+// 导出当前任务为 Markdown
+$('#dExport').onclick=()=>{ if(!OPEN_ID)return; window.open('/api/cards/'+encodeURIComponent(OPEN_ID)+'/export.md','_blank'); };
+async function runOne(id){
+  const c=CARDS.find(x=>x.id===id);
+  // 重跑保护：已有结果时先确认（旧结果会归档进过程日志）
+  if(c && (c.status==='done'||c.status==='failed') && c.result){
+    if(!confirm('重新执行将把上次结果归档到过程日志，然后开始新一轮执行。确认？')) return;
+  }
+  await post('/api/cards/'+id+'/run'); await loadCards();
+}
+// 重置：清除结果/错误/会话，回到待执行
+async function resetCard(id){
+  if(!confirm('重置该任务？将清除结果与失败原因，回到待执行。'))return;
+  await api('/api/cards/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'pending'})});
+  await loadCards(); toast('已重置');
+}
+// 复制为新任务：预填全部字段（状态清零）
+function copyCard(card){
+  openEdit(null,{ title:(card.title||'')+' (副本)', content:card.content||'', priority:card.priority, mode:card.mode, model:card.model||'', chainId:card.chainId||'', dependsOn:[...(card.dependsOn||[])] });
+}
+// 批量重跑失败：failed -> pending 后由调度器接管
+async function retryAllFailed(){
+  const n=CARDS.filter(c=>c.status==='failed').length;
+  if(!n){ toast('没有失败的任务'); return; }
+  if(!confirm(`重跑全部 ${n} 个失败任务？`)) return;
+  const r=await post('/api/cards/retry-failed');
+  await loadCards(); toast(r.retried?('已重跑 '+r.retried+' 个失败任务'):'重跑失败');
+}
 
 // ---- 工作区（弹窗选择文件夹） ----
 $('#wsPick').onclick=()=>{ $('#dirPicker').value=''; $('#dirPicker').click(); };
@@ -382,14 +506,18 @@ $('#dirPicker').addEventListener('change', ()=>{
   $('#wsInput').value = p;
   if(p) post('/api/cards/config',{workspace:p}).then(()=>toast('工作区已设为：'+p));
 });
-$('#wsSave').onclick=async()=>{ const v=$('#wsInput').value.trim(); const r=await post('/api/cards/config',{workspace:v}); if(r.success){ toast(v?'工作区已设为：'+v:'工作区已清除'); } };
+$('#wsSave').onclick=async()=>{
+  const v=$('#wsInput').value.trim();
+  const r=await post('/api/cards/config',{workspace:v});
+  if(r.success){ toast(v?'工作区已设为：'+v:'工作区已清除'); if(r.warning) toast(r.warning); }
+};
 
 // ---- 详情 ----
 function appendLog(el, line, cls){
   const span=document.createElement('div'); if(cls) span.className=cls; span.textContent=line; el.appendChild(span);
 }
-let FU_RUNNING = false;
-let FU_PARTS = new Map(); // 追加聊天正文：partId -> DOM 节点（快照覆盖式渲染）
+  let FU_RUNNING = false;
+  let TEXT_PARTS = new Map(); // 正文快照：partId -> DOM 节点（覆盖式渲染）
 function fuSetState(running, tipText){
   FU_RUNNING = running;
   const btn=$('#fuSend');
@@ -408,7 +536,7 @@ async function openDetail(id){
   const errText = card.error || card.followupError || '';
   if(errText){ errBox.style.display='block'; errBox.innerHTML='<b>⚠ 失败原因</b>\n'+esc(errText); }
   else errBox.style.display='none';
-  const log=$('#dLog'); log.innerHTML=''; FU_PARTS.clear();
+  const log=$('#dLog'); log.innerHTML=''; TEXT_PARTS.clear();
   if(!msgs.length) log.innerHTML='<span class="empty">暂无过程记录</span>';
   for(const m of msgs){
     if(m.role==='user') appendLog(log,'👤 '+m.content,'msg-user');
@@ -505,13 +633,14 @@ function renderGraph(force){
       edges+=`<path class="edge ${isContinue?'continue':''}" d="M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2-3}" marker-end="${isContinue?'url(#marC)':'url(#mar)'}"/>`;
     }
   }
-  // 节点
+  // 节点（pending 且被阻塞的用橙色虚线标识）
   let nodes='';
   for(const c of cards){
     const p=pos[c.id];
     const label=c.title.length>9?c.title.slice(0,9)+'…':c.title;
     const sub=`P${c.priority} · ${c.mode}`;
-    nodes+=`<g class="g-node ${c.status}" data-id="${c.id}">
+    const blk=(c.status==='pending' && (c.dependsOn||[]).some(d=>{const dc=byId[d];return !dc||dc.status!=='done';}));
+    nodes+=`<g class="g-node ${c.status}${blk?' blocked':''}" data-id="${c.id}">
       <rect x="${p.x}" y="${p.y}" width="${W}" height="${H}" rx="7"/>
       <text x="${p.x+W/2}" y="${p.y+19}" text-anchor="middle">${esc(label)}</text>
       <text class="gt-sub" x="${p.x+W/2}" y="${p.y+36}" text-anchor="middle">${esc(sub)}</text>
@@ -524,6 +653,9 @@ function renderGraph(force){
     </defs>
     ${edges}${nodes}</svg>`;
   box.innerHTML=svg;
+  // 保持缩放状态（重绘后恢复）
+  const svgEl=box.querySelector('svg');
+  if(svgEl && G_SCALE!==1){ svgEl.style.transformOrigin='0 0'; svgEl.style.transform=`scale(${G_SCALE})`; }
   box.querySelectorAll('.g-node').forEach(g=>{
     g.onclick=()=>openDetail(g.dataset.id);
   });
@@ -535,6 +667,18 @@ function setGraphCollapsed(collapsed){
 }
 $('#gpCollapse').onclick=()=>setGraphCollapsed(true);
 $('#gpExpandBtn').onclick=()=>setGraphCollapsed(false);
+// 依赖图滚轮缩放（0.4x - 2.5x，以面板中心为基准）
+let G_SCALE=1;
+$('#graphBody').addEventListener('wheel',(e)=>{
+  const svg=$('#graphBody').querySelector('svg');
+  if(!svg) return;
+  e.preventDefault();
+  const factor=(e.deltaY<0?1.12:1/1.12);
+  G_SCALE=Math.min(2.5,Math.max(0.4,G_SCALE*factor));
+  svg.style.transformOrigin='0 0';
+  svg.style.transform=`scale(${G_SCALE})`;
+  svg.style.transition='transform .08s linear';
+},{passive:false});
 
 // ---- 垃圾桶 ----
 async function loadTrashCount(){
@@ -585,35 +729,53 @@ async function refreshProcs(){
 setInterval(refreshProcs, 2000);
 
 // ---- SSE 实时 ----
-function fuRenderText(ev){
+// 正文快照统一覆盖式渲染（opencode text 事件为全量快照，追加渲染会重复刷屏）
+// TEXT_PARTS 声明于详情区（openDetail / renderSnapText 共用）
+function renderSnapText(ev){
   const log=$('#dLog');
   if(log.querySelector('.empty')) log.innerHTML='';
-  let el=FU_PARTS.get(ev.partId);
-  if(!el){ el=document.createElement('div'); el.className='msg-assistant'; FU_PARTS.set(ev.partId,el); log.appendChild(el); }
+  let el=TEXT_PARTS.get(ev.partId);
+  if(!el){ el=document.createElement('div'); el.className='msg-assistant'; TEXT_PARTS.set(ev.partId,el); log.appendChild(el); }
   el.textContent='🤖 '+(ev.text||'').slice(0,6000);
   log.scrollTop=log.scrollHeight;
+}
+// 编排完成通知：页内卡片 + 系统通知（已授权时）
+function notifyDone(done,failed){
+  const el=document.createElement('div');
+  el.className='done-card'+(failed?' has-fail':'');
+  el.innerHTML=`<div class="dc-t">${failed?'编排结束（有失败）':'编排全部完成'}</div><div class="dc-b">成功 ${done} · 失败 ${failed}，点击关闭</div>`;
+  el.onclick=()=>el.remove();
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(), 12000);
+  try{
+    if('Notification' in window && Notification.permission==='granted'){
+      new Notification(failed?'编排结束（有失败）':'编排全部完成',{body:`成功 ${done} · 失败 ${failed}`});
+    }
+  }catch{ /* ignore */ }
 }
 const es = new EventSource('/api/cards/stream');
 es.onmessage = (e)=>{
   let ev; try{ ev=JSON.parse(e.data); }catch{ return; }
   if(ev.type==='runner_started'){ $('#statusPill').textContent='编排中…'; $('#btnRun').disabled=true; $('#btnStop').disabled=false; }
-  if(ev.type==='runner_stopped'||ev.type==='all_done'){ $('#statusPill').textContent='空闲'; $('#btnRun').disabled=false; $('#btnStop').disabled=true; }
+  if(ev.type==='runner_stopped'){ $('#statusPill').textContent='空闲'; $('#btnRun').disabled=false; $('#btnStop').disabled=true; }
+  if(ev.type==='all_done'){
+    $('#statusPill').textContent='空闲'; $('#btnRun').disabled=false; $('#btnStop').disabled=true;
+    notifyDone(Number(ev.done)||0, Number(ev.failed)||0);
+  }
+  if(ev.type==='ws_warning'){ toast('⚠ 工作区路径无效：'+ev.path+'，任务将在默认目录执行'); }
   if(ev.type==='followup_start'||ev.type==='followup_done'){ loadCards(); }
   if(['task_start','text','tool','task_done','proc'].includes(ev.type)){
     loadCards();
     refreshProcs();
     if(OPEN_ID && ev.cardId===OPEN_ID){
       const log=$('#dLog'); if(log.querySelector('.empty')) log.innerHTML='';
-      if(ev.phase==='followup'){
-        // 追加聊天：正文覆盖式渲染（快照），工具逐行记录
-        if(ev.type==='text') fuRenderText(ev);
-        else if(ev.type==='tool'){ appendLog(log,'🔧 ['+ev.name+'] '+(ev.summary||''),'msg-tool'); log.scrollTop=log.scrollHeight; }
-      } else if(ev.type==='text') appendLog(log,(ev.text||'').slice(0,4000),'msg-assistant');
-      else if(ev.type==='tool') appendLog(log,'🔧 ['+ev.name+'] '+(ev.summary||''),'msg-tool');
+      if(ev.type==='task_start') TEXT_PARTS.clear();
+      if(ev.type==='text') renderSnapText(ev);
+      else if(ev.type==='tool'){ appendLog(log,'🔧 ['+ev.name+'] '+(ev.summary||''),'msg-tool'); log.scrollTop=log.scrollHeight; }
       else if(ev.type==='task_done'){ loadCards().then(()=>openDetail(OPEN_ID)); }
-      log.scrollTop=log.scrollHeight;
     }
   }
+  if(ev.type==='followup_start' && OPEN_ID===ev.cardId) TEXT_PARTS.clear();
   if(ev.type==='followup_done' && OPEN_ID===ev.cardId){
     fuSetState(false);
     if(ev.error){ appendLog($('#dLog'),'⚠ '+ev.error,'msg-err'); toast('追加聊天失败：'+errSummary(ev.error)); }

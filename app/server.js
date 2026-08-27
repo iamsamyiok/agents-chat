@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.18.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.19.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -948,7 +948,7 @@ const server = http.createServer(async (req, res) => {
     try {
       for (const m of store.getMessages()) if (m.taskId) counts[m.taskId] = (counts[m.taskId] || 0) + 1;
     } catch { /* ignore */ }
-    json(res, 200, { success: true, cards, running: cardRunner.isRunning(), maxParallel: MAX_PARALLEL, msgCounts: counts, config: CardStore.getConfig() });
+    json(res, 200, { success: true, cards, running: cardRunner.isRunning(), maxParallel: cardRunner.maxP(), msgCounts: counts, config: CardStore.getConfig() });
     return;
   }
 
@@ -969,7 +969,21 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/cards/config' && req.method === 'POST') {
     const body = await readBody(req);
     const cfg = CardStore.setConfig({ workspace: String(body.workspace || '').trim().slice(0, 500) });
-    json(res, 200, { success: true, config: cfg });
+    // 工作区校验：保存允许（可能是尚未创建的目录），但路径不存在时显式警告
+    let warning = '';
+    const ws = (cfg.workspace || '').trim();
+    if (body.workspace !== undefined && ws) {
+      try { if (!fs.existsSync(ws) || !fs.statSync(ws).isDirectory()) warning = `工作区路径当前不存在或不是目录：${ws}，任务执行时将回退到默认目录`; } catch { warning = `工作区路径无法访问：${ws}`; }
+    }
+    // 并行度（1-8）：热更新，调度器每轮 tick 动态读取
+    let parallelBad = false;
+    if (body.maxParallel !== undefined) {
+      const n = Number(body.maxParallel);
+      if (n >= 1 && n <= 8) CardStore.setConfig({ maxParallel: Math.floor(n) });
+      else parallelBad = true;
+    }
+    if (parallelBad) { json(res, 400, { success: false, error: 'maxParallel 需在 1-8 之间' }); return; }
+    json(res, 200, { success: true, config: CardStore.getConfig(), warning });
     return;
   }
 
@@ -1032,6 +1046,49 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/cards/stop' && req.method === 'POST') {
     cardRunner.stop();
     json(res, 200, { success: true, running: false });
+    return;
+  }
+
+  // 批量重跑失败任务：failed -> pending 后交给调度器（天然遵守并行度）
+  if (p === '/api/cards/retry-failed' && req.method === 'POST') {
+    let n = 0;
+    for (const c of CardStore.list()) {
+      if (c.status === 'failed') {
+        CardStore.update(c.id, { status: 'pending', result: '', error: '' });
+        n++;
+      }
+    }
+    if (n) cardRunner.start();
+    json(res, 200, { success: true, retried: n, running: cardRunner.isRunning() });
+    return;
+  }
+
+  // 单任务导出 Markdown（元信息 + 过程 + 结果）
+  if (p.startsWith('/api/cards/') && req.method === 'GET' && p.endsWith('/export.md')) {
+    const id = p.slice('/api/cards/'.length, -'/export.md'.length);
+    const card = CardStore.get(id);
+    if (!card) { json(res, 404, { success: false, error: '卡牌不存在' }); return; }
+    const msgs = store.getMessages(id);
+    const roleOf = (m) => (m.role === 'user' ? '用户' : (m.phase === 'archive' ? '归档' : (m.phase === 'system' ? '系统' : 'Agent')));
+    const lines = [
+      `# ${card.title}`, '',
+      `- 状态：${card.status}｜模式：${card.mode}｜优先级：P${card.priority}`,
+      `- 创建：${new Date(card.createdAt).toLocaleString()}${card.finishedAt ? `｜完成：${new Date(card.finishedAt).toLocaleString()}` : ''}`,
+      card.error ? `- 失败原因：${card.error.replace(/\n/g, ' ')}` : '',
+      '', '## 任务内容', '', String(card.content || '').trim(), '', '## 执行过程', ''
+    ];
+    for (const m of msgs) {
+      lines.push(`### ${new Date(m.timestamp || Date.now()).toLocaleString()} · ${roleOf(m)}`, '');
+      lines.push(String(m.content || '').trim() || '（无内容）');
+      lines.push('');
+    }
+    lines.push('## 最终结果', '', String(card.result || '').trim() || '（无）');
+    const fname = `task-${String(card.title || 'task').replace(/[\\/:*?"<>|\s]+/g, '-').slice(0, 40)}.md`;
+    res.writeHead(200, {
+      'Content-Type': 'text/markdown; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(fname)}"`
+    });
+    res.end(lines.filter(l => l !== undefined).join('\n'));
     return;
   }
 

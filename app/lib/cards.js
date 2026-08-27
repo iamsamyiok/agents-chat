@@ -106,11 +106,14 @@ const CardStore = {
     writeCards(list);
     return c;
   },
-  // 拖拽重排：按给定 id 顺序重编 order（ids 为看板当前顺序的全量 id）
+  // 拖拽重排：order 重编 + priority 按新顺序重映射（保值域、变归属），
+  // 使调度顺序恒等于看板顺序（priority 仍是排序主键，但层内次序由拖拽决定）
   reorder(ids) {
     const list = readCards();
     const map = new Map(list.map(c => [c.id, c]));
-    ids.forEach((id, i) => { const c = map.get(id); if (c) c.order = i + 1; });
+    const ordered = ids.map(id => map.get(id)).filter(Boolean);
+    const prios = ordered.map(c => (c.priority === undefined ? 999 : c.priority)).sort((a, b) => a - b);
+    ordered.forEach((c, i) => { c.order = i + 1; c.priority = prios[i]; });
     writeCards(list);
     return true;
   },
@@ -227,6 +230,15 @@ class CardRunner {
   }
   isRunning() { return this.running; }
 
+  // 并行度：cards_config.maxParallel 可热更新（1-8），未配置时用 env 默认
+  maxP() {
+    try {
+      const n = Number(readConfig().maxParallel);
+      if (n >= 1 && n <= 8) return Math.floor(n);
+    } catch { /* ignore */ }
+    return MAX_PARALLEL;
+  }
+
   // 终止单个任务对应的子进程
   killCard(cardId) {
     this.active.delete(cardId);
@@ -269,10 +281,17 @@ class CardRunner {
     const all = CardStore.list();
     const eligible = pickEligible(all, this.active);
     if (!eligible.length) {
-      if (this.active.size === 0) { this.running = false; broadcast({ type: 'all_done' }); }
+      if (this.active.size === 0) {
+        this.running = false;
+        // 完成通知附统计（成功/失败数），前端据此提醒
+        const done = all.filter(c => c.status === 'done').length;
+        const failed = all.filter(c => c.status === 'failed').length;
+        broadcast({ type: 'all_done', done, failed });
+      }
       return;
     }
-    while (this.active.size < MAX_PARALLEL && eligible.length > 0) {
+    const limit = this.maxP();
+    while (this.active.size < limit && eligible.length > 0) {
       const card = eligible.shift();
       this.active.add(card.id);
       const p = this.runCard(card, myToken);
@@ -284,15 +303,19 @@ class CardRunner {
   }
 
   async runCard(card, myToken) {
+    // 重跑保护（最先执行）：上次结果先归档进过程日志，可追溯，再清空
+    if (card.result) {
+      store.addMessage({ role: 'assistant', agentId: 'solo', agentName: 'Agent', actor: 'assistant', phase: 'archive', taskId: card.id, content: `[上次结果归档]\n${String(card.result).slice(0, 20000)}` });
+    }
     const runner = resolveRunner();
     if (runner.kind === 'missing') {
       const hint = require('./agent').missingHint(runner);
-      CardStore.update(card.id, { status: 'failed', error: hint.slice(0, 2000), finishedAt: Date.now() });
+      CardStore.update(card.id, { status: 'failed', error: hint.slice(0, 2000), result: '', finishedAt: Date.now() });
       broadcast({ type: 'task_done', cardId: card.id, status: 'failed', title: card.title });
       return;
     }
     if (runner.kind === 'demo') {
-      CardStore.update(card.id, { status: 'failed', error: '演示模式下任务执行不可用，请安装 opencode/claude/codex/pi 内核', finishedAt: Date.now() });
+      CardStore.update(card.id, { status: 'failed', error: '演示模式下任务执行不可用，请安装 opencode/claude/codex/pi 内核', result: '', finishedAt: Date.now() });
       broadcast({ type: 'task_done', cardId: card.id, status: 'failed', title: card.title });
       return;
     }
@@ -309,7 +332,17 @@ class CardRunner {
     const kind = runner.kind === 'opencode' ? 'opencode' : 'fallback';
     const cfg = CardStore.getConfig();
     const workspace = (cfg.workspace || '').trim();
-    const prompt = buildCardPrompt(card, workspace && isValidDir(workspace) ? workspace : '');
+    // 工作区校验：路径无效时显式警告（禁止静默降级到默认目录）
+    let ws = '';
+    if (workspace) {
+      if (isValidDir(workspace)) ws = workspace;
+      else {
+        const warn = `[系统提示] 工作区路径无效：${workspace}，本任务将在默认目录执行`;
+        store.addMessage({ role: 'assistant', agentId: 'solo', agentName: 'Agent', actor: 'assistant', phase: 'system', taskId: card.id, content: warn });
+        broadcast({ type: 'ws_warning', cardId: card.id, path: workspace });
+      }
+    }
+    const prompt = buildCardPrompt(card, ws);
     const texts = new Map();
     const order = [];
     let doneError = '';
@@ -323,7 +356,7 @@ class CardRunner {
           model: card.model || '',
           ocSessionId: sesId,
           behavior: 'card',
-          cwd: workspace && isValidDir(workspace) ? workspace : undefined
+          cwd: ws || undefined
         }, (ev) => {
           const proc = this.procs.get(card.id);
           if (proc) { proc.lastActive = Date.now(); }
