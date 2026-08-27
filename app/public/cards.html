@@ -540,6 +540,8 @@ async function openDetail(id){
   if(!msgs.length) log.innerHTML='<span class="empty">暂无过程记录</span>';
   for(const m of msgs){
     if(m.role==='user') appendLog(log,'👤 '+m.content,'msg-user');
+    else if(m.phase==='archive') appendLog(log,'📦 '+m.content,'msg-tool');
+    else if(m.phase==='system') appendLog(log,'⚠ '+m.content,'msg-err');
     else if(/工具|执行完成/.test(m.content||'')) appendLog(log,'🔧 '+m.content,'msg-tool');
     else if(/出错|失败/.test(m.content||'')) appendLog(log,'⚠ '+m.content,'msg-err');
     else appendLog(log,'🤖 '+(m.content||'').slice(0,4000),'msg-assistant');
@@ -586,7 +588,7 @@ let G_SIG=''; // 结构+状态指纹：无变化时跳过重绘（避免流式�
 function renderGraph(force){
   const box=$('#graphBody');
   const cards=CARDS;
-  const sig=cards.map(c=>c.id+':'+c.status+':'+(c.dependsOn||[]).join(',')).join('|');
+  const sig=cards.map(c=>c.id+':'+c.status+':'+(c.dependsOn||[]).join(',')+':'+c.title+':'+c.mode).join('|');
   if(!force && sig===G_SIG && box.querySelector('svg')) return;
   G_SIG=sig;
   if(!cards.length){ box.innerHTML='<div class="empty" style="padding:24px 8px">暂无任务<br/>新建任务后此处展示依赖关系</div>'; return; }
@@ -764,17 +766,19 @@ es.onmessage = (e)=>{
   }
   if(ev.type==='ws_warning'){ toast('⚠ 工作区路径无效：'+ev.path+'，任务将在默认目录执行'); }
   if(ev.type==='followup_start'||ev.type==='followup_done'){ loadCards(); }
-  if(['task_start','text','tool','task_done','proc'].includes(ev.type)){
+  // text 为正文快照（不改变卡片状态）：仅实时渲染，不触发全量刷新，避免流式期间频繁重建 DOM
+  if(['task_start','tool','task_done','proc'].includes(ev.type)){
     loadCards();
     refreshProcs();
     if(OPEN_ID && ev.cardId===OPEN_ID){
       const log=$('#dLog'); if(log.querySelector('.empty')) log.innerHTML='';
       if(ev.type==='task_start') TEXT_PARTS.clear();
-      if(ev.type==='text') renderSnapText(ev);
       else if(ev.type==='tool'){ appendLog(log,'🔧 ['+ev.name+'] '+(ev.summary||''),'msg-tool'); log.scrollTop=log.scrollHeight; }
       else if(ev.type==='task_done'){ loadCards().then(()=>openDetail(OPEN_ID)); }
     }
   }
+  // 正文快照独立渲染（不依赖上面的状态事件）
+  if(ev.type==='text' && OPEN_ID===ev.cardId) renderSnapText(ev);
   if(ev.type==='followup_start' && OPEN_ID===ev.cardId) TEXT_PARTS.clear();
   if(ev.type==='followup_done' && OPEN_ID===ev.cardId){
     fuSetState(false);

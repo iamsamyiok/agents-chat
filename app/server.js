@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.19.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.19.1'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -968,22 +968,24 @@ const server = http.createServer(async (req, res) => {
   }
   if (p === '/api/cards/config' && req.method === 'POST') {
     const body = await readBody(req);
-    const cfg = CardStore.setConfig({ workspace: String(body.workspace || '').trim().slice(0, 500) });
-    // 工作区校验：保存允许（可能是尚未创建的目录），但路径不存在时显式警告
-    let warning = '';
-    const ws = (cfg.workspace || '').trim();
-    if (body.workspace !== undefined && ws) {
-      try { if (!fs.existsSync(ws) || !fs.statSync(ws).isDirectory()) warning = `工作区路径当前不存在或不是目录：${ws}，任务执行时将回退到默认目录`; } catch { warning = `工作区路径无法访问：${ws}`; }
-    }
-    // 并行度（1-8）：热更新，调度器每轮 tick 动态读取
+    // 按 patch 语义合并：仅写入请求中显式出现的字段（避免单项更新时清空另一项）
+    const patch = {};
+    if (body.workspace !== undefined) patch.workspace = String(body.workspace || '').trim().slice(0, 500);
     let parallelBad = false;
     if (body.maxParallel !== undefined) {
       const n = Number(body.maxParallel);
-      if (n >= 1 && n <= 8) CardStore.setConfig({ maxParallel: Math.floor(n) });
+      if (n >= 1 && n <= 8) patch.maxParallel = Math.floor(n);
       else parallelBad = true;
     }
     if (parallelBad) { json(res, 400, { success: false, error: 'maxParallel 需在 1-8 之间' }); return; }
-    json(res, 200, { success: true, config: CardStore.getConfig(), warning });
+    const cfg = Object.keys(patch).length ? CardStore.setConfig(patch) : CardStore.getConfig();
+    // 工作区校验：保存允许（可能是尚未创建的目录），但路径不存在时显式警告
+    let warning = '';
+    const ws = (cfg.workspace || '').trim();
+    if (patch.workspace !== undefined && ws) {
+      try { if (!fs.existsSync(ws) || !fs.statSync(ws).isDirectory()) warning = `工作区路径当前不存在或不是目录：${ws}，任务执行时将回退到默认目录`; } catch { warning = `工作区路径无法访问：${ws}`; }
+    }
+    json(res, 200, { success: true, config: cfg, warning });
     return;
   }
 
@@ -1152,7 +1154,7 @@ const server = http.createServer(async (req, res) => {
     // SSE：实时推送卡牌生命周期事件（task_start/text/tool/task_done/all_done/runner_*）
     const send = sse(req, res);
     const unsub = sseSubscribe(send);
-    send({ type: 'init', running: cardRunner.isRunning(), maxParallel: MAX_PARALLEL });
+    send({ type: 'init', running: cardRunner.isRunning(), maxParallel: cardRunner.maxP() });
     req.on('close', unsub);
     return;
   }

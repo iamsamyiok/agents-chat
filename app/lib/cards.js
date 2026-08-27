@@ -227,6 +227,8 @@ class CardRunner {
     this.running = false;
     this.timer = null;
     this.procs = new Map(); // cardId -> { pid, child, lastActive, status }
+    this.followups = new Set(); // 追加聊天中的卡牌（并发防护）
+    this.baseline = null; // 本轮编排开始时的 done/failed 基线（all_done 报增量）
   }
   isRunning() { return this.running; }
 
@@ -271,6 +273,9 @@ class CardRunner {
     if (this.running) return;
     this.running = true;
     this.token++;
+    // 记录基线：all_done 时报告本轮增量（成功/失败数），避免混入历史任务
+    const all0 = CardStore.list();
+    this.baseline = { done: all0.filter(c => c.status === 'done').length, failed: all0.filter(c => c.status === 'failed').length };
     broadcast({ type: 'runner_started' });
     this.tick();
   }
@@ -283,9 +288,11 @@ class CardRunner {
     if (!eligible.length) {
       if (this.active.size === 0) {
         this.running = false;
-        // 完成通知附统计（成功/失败数），前端据此提醒
-        const done = all.filter(c => c.status === 'done').length;
-        const failed = all.filter(c => c.status === 'failed').length;
+        // 完成通知附本轮增量统计（成功/失败数），前端据此提醒
+        const all = CardStore.list();
+        const done = Math.max(0, all.filter(c => c.status === 'done').length - (this.baseline ? this.baseline.done : 0));
+        const failed = Math.max(0, all.filter(c => c.status === 'failed').length - (this.baseline ? this.baseline.failed : 0));
+        this.baseline = null;
         broadcast({ type: 'all_done', done, failed });
       }
       return;
@@ -421,8 +428,7 @@ class CardRunner {
     const card = CardStore.get(cardId);
     if (!card) return { ok: false, error: '任务不存在' };
     if (card.status === 'running' || card.status === 'pending') return { ok: false, error: '任务尚未执行完成，先运行任务再追加聊天' };
-    if (this.followups && this.followups.has(cardId)) return { ok: false, error: '该任务已有追加聊天进行中' };
-    if (!this.followups) this.followups = new Set();
+    if (this.followups.has(cardId)) return { ok: false, error: '该任务已有追加聊天进行中' };
     this.followups.add(cardId);
 
     const runner = resolveRunner();
