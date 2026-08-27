@@ -1,6 +1,6 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.19.2'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = '3.20.0'; // 页面与服务端版本互检，不一致提示强刷
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -38,7 +38,7 @@ const { runAgent, stopScope, stopAllChildren } = require('./lib/agent');
 const { runButler, runMentioned, runRoundtable, runTasks, prepareRerun } = require('./lib/orchestrator');
 const oc = require('./lib/oc');
 const memoryMod = require('./lib/memory');
-const { CardStore, runner: cardRunner, sseSubscribe, MAX_PARALLEL } = require('./lib/cards');
+const { CardStore, runner: cardRunner, sseSubscribe, MAX_PARALLEL, wouldCycle } = require('./lib/cards');
 
 // ---------- 人工审批关卡：orchestrator 暂停等待用户放行（方案/交付），SSE 断线后可经 /api/approvals 恢复 ----------
 const pendingApprovals = new Map(); // approvalId -> {kind,label,taskId,resolve,timer}
@@ -1071,16 +1071,22 @@ const server = http.createServer(async (req, res) => {
     const card = CardStore.get(id);
     if (!card) { json(res, 404, { success: false, error: '卡牌不存在' }); return; }
     const msgs = store.getMessages(id);
+    // 中文友好的日期时间（YYYY-MM-DD HH:mm，避免随系统 locale 变成英文格式）
+    const fmtDateTime = (t) => {
+      const d = new Date(t || Date.now());
+      const p2 = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+    };
     const roleOf = (m) => (m.role === 'user' ? '用户' : (m.phase === 'archive' ? '归档' : (m.phase === 'system' ? '系统' : 'Agent')));
     const lines = [
       `# ${card.title}`, '',
       `- 状态：${card.status}｜模式：${card.mode}｜优先级：P${card.priority}`,
-      `- 创建：${new Date(card.createdAt).toLocaleString()}${card.finishedAt ? `｜完成：${new Date(card.finishedAt).toLocaleString()}` : ''}`,
+      `- 创建：${fmtDateTime(card.createdAt)}${card.finishedAt ? `｜完成：${fmtDateTime(card.finishedAt)}` : ''}`,
       card.error ? `- 失败原因：${card.error.replace(/\n/g, ' ')}` : '',
       '', '## 任务内容', '', String(card.content || '').trim(), '', '## 执行过程', ''
     ];
     for (const m of msgs) {
-      lines.push(`### ${new Date(m.timestamp || Date.now()).toLocaleString()} · ${roleOf(m)}`, '');
+      lines.push(`### ${fmtDateTime(m.timestamp || Date.now())} · ${roleOf(m)}`, '');
       lines.push(String(m.content || '').trim() || '（无内容）');
       lines.push('');
     }
@@ -1113,7 +1119,12 @@ const server = http.createServer(async (req, res) => {
     if (body.priority !== undefined) patch.priority = Number(body.priority) || 999;
     if (body.mode !== undefined) patch.mode = ['new', 'continue', 'parallel'].includes(body.mode) ? body.mode : 'new';
     if (body.chainId !== undefined) patch.chainId = String(body.chainId).slice(0, 100);
-    if (Array.isArray(body.dependsOn)) patch.dependsOn = body.dependsOn.map(String).slice(0, 50);
+    if (Array.isArray(body.dependsOn)) {
+      const deps = body.dependsOn.map(String).slice(0, 50);
+      // 环检测：修改依赖后若形成（直接或间接）循环依赖则拒绝写入
+      if (wouldCycle(id, deps)) { json(res, 409, { success: false, error: '循环依赖：该任务的依赖链最终会依赖它自己，请调整依赖关系' }); return; }
+      patch.dependsOn = deps;
+    }
     if (body.model !== undefined) patch.model = String(body.model).slice(0, 80);
     // 状态手动复位：failed/pending -> pending 可重跑
     if (body.status === 'pending') { patch.status = 'pending'; patch.result = ''; patch.error = ''; patch.ocSessionId = ''; }
@@ -1125,6 +1136,7 @@ const server = http.createServer(async (req, res) => {
 
   if (p.startsWith('/api/cards/') && req.method === 'DELETE') {
     const id = p.slice('/api/cards/'.length);
+    if (!CardStore.get(id)) { json(res, 404, { success: false, error: '卡牌不存在' }); return; }
     cardRunner.killCard(id);
     CardStore.remove(id);
     json(res, 200, { success: true });

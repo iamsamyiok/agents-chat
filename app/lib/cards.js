@@ -209,6 +209,24 @@ function isEligible(card, all) {
   return true;
 }
 
+// 环检测：把 cardId 的依赖改为 newDeps 后，沿依赖边 DFS 是否能回到 cardId 自身
+// 用于 PUT 写入拦截（间接环也拦截，如 A→B→C→A）
+function wouldCycle(cardId, newDeps) {
+  const all = CardStore.list();
+  const byId = new Map(all.filter(c => c.id !== cardId).map(c => [c.id, c]));
+  const seen = new Set();
+  const stack = [...(newDeps || [])];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (cur === cardId) return true;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    const c = byId.get(cur);
+    if (c) stack.push(...(c.dependsOn || []));
+  }
+  return false;
+}
+
 function pickEligible(all, activeIds) {
   const eligible = all.filter(c => isEligible(c, all) && !activeIds.has(c.id));
   eligible.sort((a, b) => {
@@ -529,4 +547,4 @@ function isValidDir(p) {
 
 const runner = new CardRunner();
 
-module.exports = { CardStore, CardRunner, runner, sseSubscribe, buildCardPrompt, isEligible, pickEligible, MAX_PARALLEL, CARDS_PATH, CARDS_CFG_PATH };
+module.exports = { CardStore, CardRunner, runner, sseSubscribe, buildCardPrompt, isEligible, pickEligible, wouldCycle, MAX_PARALLEL, CARDS_PATH, CARDS_CFG_PATH };

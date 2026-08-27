@@ -634,7 +634,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.19.2'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.20.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -2319,7 +2319,6 @@ async function doImport() {
     (data.warnings || []).forEach(w => chatMode === 'solo' ? addSoloSys('⚠ ' + w) : addSys('⚠ ' + w));
     closeImport();
     importText.value = '';
-    if (importMode === 'scheduled' && schedOpen) renderSchedList();
   } else toast(data.error || '导入失败');
 }
 

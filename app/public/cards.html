@@ -310,10 +310,20 @@ function errSummary(err){
   if(!err) return '';
   return String(err).split('\n').map(s=>s.trim()).filter(Boolean)[0] || '';
 }
-// 依赖阻塞判定：pending 卡的依赖存在未完成（等待）或已失败（阻塞）
+// 依赖阻塞判定：pending 卡的依赖存在未完成（等待）或已失败（阻塞）；依赖链成环时明确提示
 function blockedInfo(card){
   if(card.status!=='pending' || !(card.dependsOn&&card.dependsOn.length)) return null;
   const byId=Object.fromEntries(CARDS.map(c=>[c.id,c]));
+  // 环检测：沿依赖边 DFS，回到自身即成环（历史数据兜底，正常写入已被服务端拦截）
+  const seen=new Set(), stack=[...card.dependsOn];
+  while(stack.length){
+    const cur=stack.pop();
+    if(cur===card.id) return {kind:'fail',text:'循环依赖：依赖链最终依赖本任务，全量执行时将被跳过'};
+    if(seen.has(cur)) continue;
+    seen.add(cur);
+    const c=byId[cur];
+    if(c) stack.push(...(c.dependsOn||[]));
+  }
   const failedDeps=[], waitDeps=[];
   for(const d of card.dependsOn){
     const dc=byId[d];
