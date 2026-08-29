@@ -4,6 +4,7 @@
 // - 首个 sessionID 事件回填 store，实现同一网页会话跨轮次续聊
 // - 非 opencode 内核（claude/codex/pi）无 -s 续聊能力：单聊退化为一次性对话，每轮全新上下文
 // - 演示模式（AGENTS_CHAT_MOCK=1）走 mock 子进程，输出模拟为快照事件
+const fs = require('fs');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const { registerChild, describeTool, resolveCwd } = require('./agent');
@@ -98,7 +99,7 @@ function parseSoloEventLine(line, onEvent, state) {
 
 // ---------- 通用子进程运行器 ----------
 // runnerSpec: { cmd, shell, json, cwd }；json=false 时把输出行累积为快照（演示模式用）
-function spawnSoloRunner(runnerSpec, args, prompt, env, onEvent, finish) {
+function spawnSoloRunner(runnerSpec, args, prompt, env, onEvent, finish, scope) {
   let child;
   try {
     child = spawn(runnerSpec.cmd, args, {
@@ -112,7 +113,7 @@ function spawnSoloRunner(runnerSpec, args, prompt, env, onEvent, finish) {
     finish(`启动失败：${error.message}`);
     return null;
   }
-  registerChild(child, 'solo'); // 停止/退出清理复用 agent.js 的登记表（scope='solo'）
+  registerChild(child, scope || 'solo'); // 停止/退出清理复用 agent.js 的登记表（scope 可区分编排与追加聊天）
 
   child.stdin.on('error', () => { /* stdin 已关闭则忽略 */ });
   if (prompt) child.stdin.write(prompt);
@@ -190,6 +191,8 @@ function chatSolo(runnerKind, runner, opts, onEvent) {
   const prompt = String(opts.prompt || '');
   const model = String(opts.model || '');
   const ocSessionId = String(opts.ocSessionId || '');
+  // 进程归属 scope：停止编排（stopScope('solo')）只杀编排任务，追加聊天用独立 scope 免受牵连
+  const scope = String(opts.scope || 'solo');
   // 工作区：指定后 Agent 在该目录读写文件（卡牌可选 workspace）
   const cwd = opts.cwd && fs.existsSync(opts.cwd) && fs.statSync(opts.cwd).isDirectory() ? opts.cwd : '';
   const cwdEnv = cwd ? { ...process.env, AGENTS_CHAT_CWD: cwd } : process.env;
@@ -206,7 +209,8 @@ function chatSolo(runnerKind, runner, opts, onEvent) {
         // 演示模式的会话 ID：续聊时复用传入 ID（打通链路），新任务本地生成（无真实续聊）
         onEvent({ type: 'session', ocSessionId: ocSessionId || 'ses_demo-' + Date.now().toString(36) });
         onEvent({ type: 'done', error });
-      }
+      },
+      scope
     );
   }
 
@@ -222,7 +226,8 @@ function chatSolo(runnerKind, runner, opts, onEvent) {
       { cmd: runner.cmd, shell: runner.shell, json: true, cwd: cwd || resolveCwd() },
       args, prompt, cwdEnv,
       onEvent,
-      (error) => onEvent({ type: 'done', error })
+      (error) => onEvent({ type: 'done', error }),
+      scope
     );
   }
 

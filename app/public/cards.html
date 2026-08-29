@@ -148,6 +148,25 @@
   .trash-item .ti-info{flex:1;min-width:0}
   .trash-item .ti-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .trash-item .ti-sub{font-size:11px;color:var(--dim)}
+  /* 内核状态横幅（缺失/演示模式/数据保护时显示） */
+  .kernel-banner{display:none;gap:8px;align-items:center;padding:8px 18px;font-size:12.5px;line-height:1.6;border-bottom:1px solid var(--line)}
+  .kernel-banner.show{display:flex}
+  .kernel-banner.kb-missing{background:#fdeceb;color:#b03a31}
+  .kernel-banner.kb-demo{background:#fdf6ec;color:#8a5a00}
+  .kernel-banner.kb-corrupt{background:#fdeceb;color:#b03a31}
+  /* 内核徽标（正常时显示在状态胶囊旁） */
+  .kernel-chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--dim);background:#eef0f3;border:1px solid var(--line);border-radius:6px;padding:2px 7px}
+  /* 执行中卡的运行时长徽标 */
+  .badge.run-elapsed{background:#eef7ff;color:var(--acc2);border-color:#c4e2ff;font-variant-numeric:tabular-nums}
+  /* 追加聊天进行中徽标 */
+  .badge.fu-live{background:#f1e9ff;color:#8a6fe8;border-color:#ddd0ff}
+  /* 单卡停止按钮 */
+  .icon-btn.danger:hover{color:var(--err);border-color:var(--err)}
+  /* 详情弹窗：任务内容块 */
+  .detail-content{background:#fafbfc;border:1px solid var(--line);border-radius:10px;padding:12px;margin:2px 0 10px;white-space:pre-wrap;word-break:break-word;max-height:18vh;overflow:auto;line-height:1.6;font-size:13px}
+  /* 空看板引导 */
+  .board-guide{grid-column:1/-1;text-align:center;padding:40px 10px;color:var(--dim)}
+  .board-guide .bg-actions{display:flex;gap:10px;justify-content:center;margin-top:14px}
 </style>
 </head>
 <body>
@@ -155,6 +174,7 @@
   <a class="backlink" href="/" title="返回 Agents Chat 群聊">← 群聊</a>
   <h1>🗂️ 多任务编排</h1>
   <span class="status-pill" id="statusPill">空闲</span>
+  <span class="kernel-chip" id="kernelChip" style="display:none"></span>
   <span class="sp"></span>
   <div class="ws-box" title="工作区：选定后 Agent 在该目录读写相关文件（可选）">
     📁 <input id="wsInput" placeholder="工作文件夹（点右侧选择）" />
@@ -167,10 +187,12 @@
     </select>
   </div>
   <button class="btn" id="btnNew">＋ 新建任务</button>
-  <button class="btn primary" id="btnRun">▶ 开始编排</button>
-  <button class="btn danger" id="btnStop" disabled>⏹ 停止</button>
+  <button class="btn primary" id="btnRun" title="按依赖与优先级调度全部待执行任务">▶ 开始编排</button>
+  <button class="btn danger" id="btnStop" disabled title="停止编排：进行中的任务复位为待执行（不影响追加聊天），未开始的任务保留">⏹ 停止</button>
   <button class="btn" id="btnClear">清空</button>
 </header>
+
+<div class="kernel-banner" id="kernelBanner"></div>
 
 <div class="procbar" id="procBar"><span class="ptitle">进程：</span><span class="proc-empty">无运行中的 opencode 进程</span></div>
 
@@ -209,7 +231,7 @@
     <label>任务内容（描述，支持 Markdown）</label>
     <textarea id="fContent" placeholder="把要做的事详细写在这里，Agent 会据此执行"></textarea>
     <div class="row">
-      <div><label>优先级（数字越小越优先）</label><input id="fPriority" type="number" value="999" /></div>
+      <div><label>优先级（数字越小越优先；拖拽看板卡会按新顺序重写优先级）</label><input id="fPriority" type="number" value="999" /></div>
       <div><label>执行模式</label>
         <select id="fMode">
           <option value="new">新进程（new）</option>
@@ -237,6 +259,8 @@
     <h3 id="dTitle">任务详情</h3>
     <div id="dMeta" class="meta" style="margin-bottom:10px"></div>
     <div class="dep-tag" id="dDeps"></div>
+    <label>任务内容</label>
+    <div class="detail-content" id="dContent"><span class="empty">（无任务内容）</span></div>
     <div class="detail-err" id="dError" style="display:none"></div>
     <label>执行过程（实时）</label>
     <div class="detail-log" id="dLog"><span class="empty">暂无过程记录</span></div>
@@ -280,22 +304,62 @@ const $ = s => document.querySelector(s);
 const api = async (url, opt) => { const r = await fetch(url, opt); return r.json(); };
 const post = (url, body) => api(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})});
 function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
-function esc(s){const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
+function esc(s){const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML.replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 
 let CARDS = [];
 let OPEN_ID = null;
+let FOLLOWUP_IDS = [];   // 追加聊天进行中的卡 id
+let RUNNER_INFO = null;  // { kind, label }
+let CORRUPTED = [];      // 已进入损坏保护的数据文件
+let LOAD_SEQ = 0;        // loadCards 响应乱序守卫：快速触发多次时只认最新请求
 
 async function loadCards(){
+  const seq = ++LOAD_SEQ;
   const data = await api('/api/cards');
+  if (seq !== LOAD_SEQ) return; // 已有更新的请求发出：丢弃本次过期响应
   CARDS = data.cards || [];
+  FOLLOWUP_IDS = data.followupIds || [];
+  RUNNER_INFO = data.runner || null;
+  CORRUPTED = data.corrupted || [];
   $('#statusPill').textContent = data.running ? '编排中…' : '空闲';
   $('#btnRun').disabled = data.running;
   $('#btnStop').disabled = !data.running;
   if(data.config) $('#wsInput').value = data.config.workspace || '';
   if(data.maxParallel) $('#parallelSel').value = String(data.maxParallel);
+  renderKernelBanner();
   render();
   renderGraph();
   loadTrashCount();
+}
+
+// 内核状态展示：正常=头部小徽标；缺失/演示模式/数据保护=醒目横幅
+function renderKernelBanner(){
+  const chip=$('#kernelChip'), banner=$('#kernelBanner');
+  const k = RUNNER_INFO && RUNNER_INFO.kind;
+  if (CORRUPTED.length){
+    chip.style.display='none';
+    banner.className='kernel-banner show kb-corrupt';
+    banner.innerHTML='⚠ <b>数据保护已触发</b>：'+CORRUPTED.map(f=>'<code>'+esc(f.split(/[\\/]/).pop())+'</code>').join('、')+' 解析失败（原文件已备份为 .corrupt-*），为防数据丢失写入已暂停。请检查数据目录后恢复备份文件。';
+    return;
+  }
+  if (k === 'missing'){
+    chip.style.display='none';
+    banner.className='kernel-banner show kb-missing';
+    banner.innerHTML='❌ <b>未检测到执行内核</b>：任务无法真实执行。请安装 opencode（推荐）：终端运行 <code>npm install -g opencode-ai</code>，安装并登录后刷新本页。';
+    return;
+  }
+  if (k === 'demo'){
+    chip.style.display='none';
+    banner.className='kernel-banner show kb-demo';
+    banner.innerHTML='⚠ <b>演示模式</b>（AGENTS_CHAT_MOCK=1）：输出均为模拟结果，任务执行不可用。删除 .env 中该配置并安装内核后即为真实执行。';
+    return;
+  }
+  banner.className='kernel-banner';
+  if (RUNNER_INFO && RUNNER_INFO.label){
+    chip.style.display='inline-flex';
+    chip.textContent='⚡ '+RUNNER_INFO.label;
+    chip.title='当前执行内核：'+RUNNER_INFO.label;
+  }
 }
 
 function badge(card){
@@ -346,11 +410,16 @@ function cardEl(card){
   const blkHtml = blk ? `<div class="card-blocked${blk.kind==='wait'?' wait':''}">${blk.kind==='fail'?'⛔':'⏳'} ${esc(blk.text)}</div>` : '';
   const resetHtml = (card.status==='pending' && /服务重启/.test(card.error||''))
     ? `<div class="card-reset">↻ ${esc(errSummary(card.error))}</div>` : '';
+  // 执行中：实时运行时长徽标（每秒刷新）；追加聊天中：紫色徽标
+  const elapsedHtml = (card.status==='running' && card.startedAt)
+    ? `<span class="badge run-elapsed" data-start="${card.startedAt}">⏱ ${fmtElapsed(Date.now()-card.startedAt)}</span>` : '';
+  const fuHtml = FOLLOWUP_IDS.includes(card.id) ? '<span class="badge fu-live">💬 回复中</span>' : '';
   el.innerHTML = `<div class="title">${esc(card.title)}</div>
-    <div class="meta">${badge(card)} ${card.status!=='pending'&&card.status!=='running'?`<span class="badge">${card.status}</span>`:''}</div>
+    <div class="meta">${badge(card)} ${elapsedHtml} ${fuHtml} ${card.status!=='pending'&&card.status!=='running'?`<span class="badge">${card.status}</span>`:''}</div>
     ${errHtml}${blkHtml}${resetHtml}
     <div class="op">
-      <button class="icon-btn" data-act="run" title="执行">▶</button>
+      ${card.status==='running'?'<button class="icon-btn danger" data-act="stop" title="停止该任务（复位为待执行，本轮编排不再自动调度）">⏹</button>':''}
+      <button class="icon-btn" data-act="run" title="执行${card.status==='pending'?'（若依赖未完成将先确认）':'（旧结果先归档）'}">▶</button>
       <button class="icon-btn" data-act="reset" title="重置（清除结果回到待执行）">⟲</button>
       <button class="icon-btn" data-act="copy" title="复制为新任务">⧉</button>
       <button class="icon-btn" data-act="edit" title="编辑">✎</button>
@@ -360,6 +429,7 @@ function cardEl(card){
     if(a==='del') delCard(card.id);
     else if(a==='edit') openEdit(card);
     else if(a==='run') runOne(card.id);
+    else if(a==='stop') stopOne(card.id);
     else if(a==='reset') resetCard(card.id);
     else if(a==='copy') copyCard(card);
     return; }
@@ -371,6 +441,20 @@ function cardEl(card){
   el.addEventListener('drop', e=>{ e.preventDefault(); el.classList.remove('drag-over'); onDrop(card.id, el); });
   return el;
 }
+// 运行时长格式化：ms -> "1:05" / "12:03:44"
+function fmtElapsed(ms){
+  const s = Math.max(0, Math.floor(ms/1000));
+  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+  const p2 = n => String(n).padStart(2,'0');
+  return h ? `${h}:${p2(m)}:${p2(sec)}` : `${m}:${p2(sec)}`;
+}
+// 每秒刷新执行中卡片的运行时长（不重建 DOM，只更新徽标文本）
+setInterval(()=>{
+  document.querySelectorAll('.badge.run-elapsed').forEach(b=>{
+    const st = Number(b.dataset.start);
+    if (st) b.textContent = '⏱ ' + fmtElapsed(Date.now()-st);
+  });
+}, 1000);
 let dragId=null;
 function onDrop(targetId, targetEl){
   if(!dragId || dragId===targetId) return;
@@ -394,7 +478,39 @@ function render(){
   for(const c of CARDS){ counts[c.status]=(counts[c.status]||0)+1; (cols[c.status]||cols.pending).appendChild(cardEl(c)); }
   $('#cntPending').textContent=counts.pending||''; $('#cntRunning').textContent=counts.running||'';
   $('#cntDone').textContent=counts.done||''; $('#cntFailed').textContent=counts.failed||'';
+  // 空看板引导：一个任务都没有时给出上手入口（含示例）
+  if(!CARDS.length){
+    cols.pending.innerHTML=`<div class="board-guide">
+      还没有任何任务<br/>把要做的事写成一张张卡牌，Agent 会按依赖与优先级自动调度执行
+      <div class="bg-actions">
+        <button class="btn primary" onclick="openEdit(null)">＋ 新建第一个任务</button>
+        <button class="btn" id="btnExamples">📦 载入示例任务</button>
+      </div></div>`;
+    const be=$('#btnExamples'); if(be) be.onclick=loadExamples;
+    for(const k of ['running','done','failed']) cols[k].innerHTML='<div class="empty">—</div>';
+    return;
+  }
   for(const k in cols){ if(!cols[k].children.length) cols[k].innerHTML='<div class="empty">—</div>'; }
+}
+
+// 载入示例：三张卡展示三种执行模式与依赖关系（可编辑/删除，当作模板随意改造）
+async function loadExamples(){
+  const mk = (title, content, extra) => post('/api/cards', Object.assign({ title, content }, extra||{})).then(r=>r.card);
+  const a = await mk('示例A · 独立任务', '列出当前工作目录下的全部文件，并统计各类型文件的数量。', { priority: 1 });
+  await mk('示例B · 续聊任务', '接续上一个任务的结论：把统计结果整理成一份 markdown 表格。', { priority: 2, mode: 'continue', chainId: a.id, dependsOn: [a.id] });
+  await mk('示例C · 并行任务', '查询今日天气概况并给出一句话总结（与示例A/B 互不依赖，可同时执行）。', { priority: 3, mode: 'parallel' });
+  await loadCards();
+  toast('已载入 3 个示例任务，点击「开始编排」体验');
+}
+
+// 单卡停止：执行中的任务杀进程并复位为待执行（本轮编排不再自动调度）
+async function stopOne(id){
+  const c=CARDS.find(x=>x.id===id);
+  if(!c || c.status!=='running') return;
+  if(!confirm(`停止任务「${c.title}」？该任务将复位为待执行，本轮编排不再自动调度它。`)) return;
+  const r=await post('/api/cards/'+id+'/stop');
+  if(!r.success) toast(r.error||'停止失败');
+  await loadCards();
 }
 
 // ---- 编辑/新建 ----
@@ -458,7 +574,11 @@ $('#btnEditSave').onclick=async()=>{
     dependsOn:deps };
   if(EDIT_ID) await api('/api/cards/'+EDIT_ID,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   else await post('/api/cards',body);
-  $('#maskEdit').classList.remove('show'); await loadCards(); toast('已保存');
+  $('#maskEdit').classList.remove('show');
+  await loadCards();
+  // 编排状态联动提示：编排进行中=新卡自动加入调度；空闲=明确告知需手动开始
+  if(!EDIT_ID) toast($('#btnRun').disabled ? '已保存，新任务将自动加入本轮调度' : '已保存。当前编排空闲，点「▶ 开始编排」执行');
+  else toast('已保存');
 };
 async function delCard(id){ if(!confirm('确认删除该任务？将移入垃圾桶（30 天内可还原）。'))return; await api('/api/cards/'+id,{method:'DELETE'}); await loadCards(); toast('已移入垃圾桶'); }
 $('#btnClear').onclick=async()=>{ if(!confirm('清空全部任务？将移入垃圾桶（30 天内可还原）。'))return; await post('/api/cards/clear'); await loadCards(); };
@@ -481,6 +601,13 @@ $('#parallelSel').onchange=async()=>{
 $('#dExport').onclick=()=>{ if(!OPEN_ID)return; window.open('/api/cards/'+encodeURIComponent(OPEN_ID)+'/export.md','_blank'); };
 async function runOne(id){
   const c=CARDS.find(x=>x.id===id);
+  // 依赖未完成时显式确认：让「立即执行会绕过依赖」这件事说清楚
+  if(c && c.status==='pending' && c.dependsOn && c.dependsOn.length){
+    const undone = c.dependsOn.filter(d=>{ const dc=CARDS.find(x=>x.id===d); return !dc || dc.status!=='done'; });
+    if(undone.length){
+      if(!confirm(`该任务还有 ${undone.length} 个依赖未完成（调度器会等它们完成后才自动执行）。\n立即执行将忽略依赖直接运行，确认？`)) return;
+    }
+  }
   // 重跑保护：已有结果时先确认（旧结果会归档进过程日志）
   if(c && (c.status==='done'||c.status==='failed') && c.result){
     if(!confirm('重新执行将把上次结果归档到过程日志，然后开始新一轮执行。确认？')) return;
@@ -548,6 +675,10 @@ async function openDetail(id){
   $('#dMeta').innerHTML=badge(card)+`<span class="badge">${card.status}</span>`;
   const depTitles = (card.dependsOn||[]).map(d=>{const c=CARDS.find(x=>x.id===d);return c?c.title:d;});
   $('#dDeps').textContent = depTitles.length ? ('依赖：'+depTitles.join('、')) : '';
+  // 任务内容：详情首先呈现「这个任务要求做什么」，不必再点编辑查看
+  const cbox=$('#dContent');
+  if(card.content) cbox.textContent=card.content;
+  else cbox.innerHTML='<span class="empty">（无任务内容）</span>';
   // 失败原因块：任务执行错误优先，其次追加聊天的错误
   const errBox=$('#dError');
   const errText = card.error || card.followupError || '';
@@ -738,7 +869,8 @@ async function refreshProcs(){
     const d = await api('/api/cards/processes');
     const procs = d.processes||[];
     const bar=$('#procBar');
-    if(!procs.length){ bar.innerHTML='<span class="ptitle">进程：</span><span class="proc-empty">无运行中的 opencode 进程</span>'; return; }
+    const kname = (RUNNER_INFO && RUNNER_INFO.label) || 'opencode';
+    if(!procs.length){ bar.innerHTML='<span class="ptitle">进程：</span><span class="proc-empty">无运行中的 '+esc(kname)+' 进程</span>'; return; }
     bar.innerHTML='<span class="ptitle">进程：</span>'+procs.map(p=>{
       const working=p.working;
       return `<span class="proc-chip ${working?'':'idle'}"><span class="dot"></span><span class="pid">PID ${p.pid}</span><span class="st">${working?'工作中':'空闲'}</span></span>`;
@@ -773,8 +905,17 @@ function notifyDone(done,failed){
   }catch{ /* ignore */ }
 }
 const es = new EventSource('/api/cards/stream');
+// 断线重连后补拉：错过的状态迁移事件靠全量刷新弥补（init 只恢复按钮态）
+es.onopen = ()=>{ loadCards(); refreshProcs(); };
 es.onmessage = (e)=>{
   let ev; try{ ev=JSON.parse(e.data); }catch{ return; }
+  if(ev.type==='init'){ // 连接建立时的初始状态（含断线重连场景）
+    $('#statusPill').textContent = ev.running ? '编排中…' : '空闲';
+    $('#btnRun').disabled = !!ev.running; $('#btnStop').disabled = !ev.running;
+    if(ev.maxParallel) $('#parallelSel').value = String(ev.maxParallel);
+    return;
+  }
+  if(ev.type==='notice'){ toast(ev.content); }
   if(ev.type==='runner_started'){ $('#statusPill').textContent='编排中…'; $('#btnRun').disabled=true; $('#btnStop').disabled=false; }
   if(ev.type==='runner_stopped'){ $('#statusPill').textContent='空闲'; $('#btnRun').disabled=false; $('#btnStop').disabled=true; }
   if(ev.type==='all_done'){
@@ -783,16 +924,24 @@ es.onmessage = (e)=>{
   }
   if(ev.type==='ws_warning'){ toast('⚠ 工作区路径无效：'+ev.path+'，任务将在默认目录执行'); }
   if(ev.type==='followup_start'||ev.type==='followup_done'){ loadCards(); }
-  // text 为正文快照（不改变卡片状态）：仅实时渲染，不触发全量刷新，避免流式期间频繁重建 DOM
-  if(['task_start','tool','task_done','proc'].includes(ev.type)){
+  // 状态迁移事件：才触发全量刷新（text/tool 快照不改变卡片状态）
+  if(['task_start','task_done'].includes(ev.type)){
     loadCards();
     refreshProcs();
+    // 失败即时提醒（完成静默：看板移动可见 + all_done 汇总通知）
+    if(ev.type==='task_done' && ev.status==='failed') toast('✗「'+(ev.title||'任务')+'」执行失败，点击卡片查看原因');
     if(OPEN_ID && ev.cardId===OPEN_ID){
       const log=$('#dLog'); if(log.querySelector('.empty')) log.innerHTML='';
       if(ev.type==='task_start') TEXT_PARTS.clear();
-      else if(ev.type==='tool'){ appendLog(log,'🔧 ['+ev.name+'] '+(ev.summary||''),'msg-tool'); log.scrollTop=log.scrollHeight; }
       else if(ev.type==='task_done'){ loadCards().then(()=>{ if(OPEN_ID===ev.cardId) openDetail(ev.cardId); }); }
     }
+  }
+  // proc 仅刷新进程条（另有 2s 轮询兜底），不重建看板 DOM
+  if(ev.type==='proc'){ refreshProcs(); }
+  // tool 事件仅在打开对应详情时追加过程日志，避免工具密集时高频全量刷新
+  if(ev.type==='tool' && OPEN_ID===ev.cardId){
+    const log=$('#dLog'); if(log.querySelector('.empty')) log.innerHTML='';
+    appendLog(log,'🔧 ['+ev.name+'] '+(ev.summary||''),'msg-tool'); log.scrollTop=log.scrollHeight;
   }
   // 正文快照独立渲染（不依赖上面的状态事件）
   if(ev.type==='text' && OPEN_ID===ev.cardId) renderSnapText(ev);

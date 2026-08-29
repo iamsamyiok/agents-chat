@@ -948,7 +948,18 @@ const server = http.createServer(async (req, res) => {
     try {
       for (const m of store.getMessages()) if (m.taskId) counts[m.taskId] = (counts[m.taskId] || 0) + 1;
     } catch { /* ignore */ }
-    json(res, 200, { success: true, cards, running: cardRunner.isRunning(), maxParallel: cardRunner.maxP(), msgCounts: counts, config: CardStore.getConfig() });
+    // 执行内核状态（前端据此显示内核徽标/缺失警告）与追加聊天进行中的卡
+    let runnerInfo = { kind: 'unknown', label: '' };
+    try {
+      const { resolveRunner } = require('./lib/agent');
+      const r = resolveRunner();
+      runnerInfo = { kind: r.kind, label: r.kernel ? r.kernel.label : '' };
+    } catch { /* ignore */ }
+    const { getCorruptedFiles } = require('./lib/cards');
+    json(res, 200, {
+      success: true, cards, running: cardRunner.isRunning(), maxParallel: cardRunner.maxP(), msgCounts: counts, config: CardStore.getConfig(),
+      followupIds: cardRunner.getFollowupIds(), runner: runnerInfo, corrupted: getCorruptedFiles()
+    });
     return;
   }
 
@@ -979,6 +990,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (parallelBad) { json(res, 400, { success: false, error: 'maxParallel 需在 1-8 之间' }); return; }
     const cfg = Object.keys(patch).length ? CardStore.setConfig(patch) : CardStore.getConfig();
+    if (patch.maxParallel !== undefined) cardRunner.onConfigChanged(); // 并行度调大时立即补齐
     // 工作区校验：保存允许（可能是尚未创建的目录），但路径不存在时显式警告
     let warning = '';
     const ws = (cfg.workspace || '').trim();
@@ -1113,6 +1125,12 @@ const server = http.createServer(async (req, res) => {
   if (p.startsWith('/api/cards/') && req.method === 'PUT') {
     const id = p.slice('/api/cards/'.length);
     const body = await readBody(req);
+    // 运行中/追加聊天中的卡禁止编辑与重置：子进程结束时会回写状态，中途改写会产生竞争
+    const target = CardStore.get(id);
+    if (target && (target.status === 'running' || cardRunner.isFollowupRunning(id))) {
+      json(res, 409, { success: false, error: target.status === 'running' ? '任务正在执行中，无法编辑或重置，请等待完成或先停止编排' : '该任务追加聊天进行中，稍后再修改' });
+      return;
+    }
     const patch = {};
     if (body.title !== undefined) patch.title = String(body.title).slice(0, 500);
     if (body.content !== undefined) patch.content = String(body.content).slice(0, 20000);
@@ -1147,6 +1165,14 @@ const server = http.createServer(async (req, res) => {
     const id = p.slice('/api/cards/'.length, -'/run'.length);
     const ok = await cardRunner.runOne(id);
     json(res, ok ? 200 : 409, { success: ok, running: cardRunner.isRunning() });
+    return;
+  }
+
+  // 单卡停止：杀掉该卡子进程，状态复位为待执行（本轮编排不再自动调度它）
+  if (p.startsWith('/api/cards/') && req.method === 'POST' && p.endsWith('/stop')) {
+    const id = p.slice('/api/cards/'.length, -'/stop'.length);
+    const ok = cardRunner.stopOne(id);
+    json(res, ok ? 200 : 409, { success: ok, error: ok ? '' : '任务不在执行中，无法停止' });
     return;
   }
 

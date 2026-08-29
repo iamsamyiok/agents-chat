@@ -22,27 +22,79 @@ const TRASH_PATH = path.join(DATA_DIR, 'cards_trash.json');
 const TRASH_TTL = 30 * 24 * 3600 * 1000; // 垃圾桶默认保留 30 天
 
 function ensureDir() { if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true }); }
+// 数据损坏保护：解析失败（文件存在但 JSON 损坏）时备份原文件并置损坏标记；
+// 后续写入直接拒绝，防止「读到空列表 → 新增一条 → 覆盖写」把用户全部卡牌冲掉
+const corrupted = new Set(); // 已损坏的文件路径
+function cachedReader(file, cacheBox) {
+  return function read() {
+    if (corrupted.has(file)) return [];
+    try {
+      const st = fs.statSync(file);
+      if (cacheBox.list && st.mtimeMs === cacheBox.mtime) return cacheBox.list;
+      const list = JSON.parse(fs.readFileSync(file, 'utf8'));
+      cacheBox.mtime = st.mtimeMs; cacheBox.list = list;
+      return list;
+    } catch (err) {
+      if (err && err.code === 'ENOENT') { // 文件不存在：正常的初始状态
+        cacheBox.mtime = 0; cacheBox.list = null;
+        return [];
+      }
+      // 文件存在但解析失败：备份损坏现场，进入只读保护
+      try { fs.copyFileSync(file, `${file}.corrupt-${Date.now()}`); } catch { /* ignore */ }
+      corrupted.add(file);
+      cacheBox.mtime = 0; cacheBox.list = null;
+      console.error(`[cards] 数据文件损坏已备份并进入保护：${file}`);
+      return [];
+    }
+  };
+}
+const _cardsCache = { mtime: 0, list: null };
+const _cfgCache = { mtime: 0, list: null };
+const _trashCache = { mtime: 0, list: null };
+const readCardsRaw = cachedReader(CARDS_PATH, _cardsCache);
+const readConfigRaw = cachedReader(CARDS_CFG_PATH, _cfgCache);
+const readTrashRaw = cachedReader(TRASH_PATH, _trashCache);
 function readCards() {
-  try { return JSON.parse(fs.readFileSync(CARDS_PATH, 'utf8')); } catch { return []; }
+  // 返回浅拷贝：调用方（list 的 sort 等）对数组的操作不影响缓存
+  const v = readCardsRaw();
+  return Array.isArray(v) ? v.slice() : [];
+}
+function invalidate(file) {
+  if (file === CARDS_PATH) { _cardsCache.mtime = 0; _cardsCache.list = null; }
+  else if (file === CARDS_CFG_PATH) { _cfgCache.mtime = 0; _cfgCache.list = null; }
+  else if (file === TRASH_PATH) { _trashCache.mtime = 0; _trashCache.list = null; }
+}
+// 损坏保护下的写入守卫：拒绝覆盖写（保留备份供人工恢复）
+function guardWrite(file) {
+  if (corrupted.has(file)) {
+    throw new Error(`数据文件 ${path.basename(file)} 已损坏（原文件已备份为 .corrupt-*），为防数据丢失已停止写入，请人工检查 ${DATA_DIR} 后删除损坏标记文件`);
+  }
 }
 function writeCards(list) {
   ensureDir();
+  guardWrite(CARDS_PATH);
+  invalidate(CARDS_PATH);
   const tmp = CARDS_PATH + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(list, null, 2), 'utf8');
   fs.renameSync(tmp, CARDS_PATH);
 }
 function readConfig() {
-  try { return JSON.parse(fs.readFileSync(CARDS_CFG_PATH, 'utf8')); } catch { return { workspace: '' }; }
+  const v = readConfigRaw();
+  return (v && typeof v === 'object' && !Array.isArray(v)) ? v : { workspace: '' };
 }
 function writeConfig(cfg) {
   ensureDir();
+  guardWrite(CARDS_CFG_PATH);
+  invalidate(CARDS_CFG_PATH);
   fs.writeFileSync(CARDS_CFG_PATH, JSON.stringify(cfg, null, 2), 'utf8');
 }
 function readTrash() {
-  try { return JSON.parse(fs.readFileSync(TRASH_PATH, 'utf8')); } catch { return []; }
+  const v = readTrashRaw();
+  return Array.isArray(v) ? v.slice() : [];
 }
 function writeTrash(list) {
-  ensureDir();
+  guardWrite(TRASH_PATH);
+  invalidate(TRASH_PATH);
   fs.writeFileSync(TRASH_PATH, JSON.stringify(list, null, 2), 'utf8');
 }
 // 启动时清理超过 30 天的垃圾桶快照，并连带清除其日志，避免占用磁盘
@@ -246,9 +298,15 @@ class CardRunner {
     this.timer = null;
     this.procs = new Map(); // cardId -> { pid, child, lastActive, status }
     this.followups = new Set(); // 追加聊天中的卡牌（并发防护）
+    this.killedCards = new Set(); // 本轮编排中被单卡停止的卡：跳过调度直到本轮结束
     this.baseline = null; // 本轮编排开始时的 done/failed 基线（all_done 报增量）
   }
   isRunning() { return this.running; }
+
+  // 并行度热更新：调大后立即补齐在跑任务（无需等下一个任务完成触发 tick）
+  onConfigChanged() {
+    if (this.running) this.tick();
+  }
 
   // 并行度：cards_config.maxParallel 可热更新（1-8），未配置时用 env 默认
   maxP() {
@@ -259,12 +317,27 @@ class CardRunner {
     return MAX_PARALLEL;
   }
 
-  // 终止单个任务对应的子进程
+  // 终止单个任务对应的子进程（删除卡等场景：不改变调度语义）
   killCard(cardId) {
     this.active.delete(cardId);
     const p = this.procs.get(cardId);
     if (p && p.child) { try { p.child.kill('SIGTERM'); } catch { /* ignore */ } }
     this.procs.delete(cardId);
+  }
+
+  // 单卡停止：杀进程 + 标记本轮不再自动调度（状态回待执行，与全局停止的复位语义一致）
+  stopOne(cardId) {
+    const card = CardStore.get(cardId);
+    if (!card || card.status !== 'running') return false;
+    if (this.followups.has(cardId)) return false; // 追加聊天进行中：走 chatFollowup 自己的错误路径
+    this.killedCards.add(cardId);
+    this.killCard(cardId);
+    // 主动复位状态：以这里为准（子进程 close 回调到达时 runCard 会再写一次 pending，幂等），
+    // 避免回调异常丢失时卡片永远停留在 running
+    CardStore.update(cardId, { status: 'pending', result: '', error: '', finishedAt: Date.now() });
+    broadcast({ type: 'notice', content: `⏹ 已停止任务「${card.title}」，该任务回到待执行（本轮编排不再自动调度它）` });
+    broadcast({ type: 'task_done', cardId, status: 'stopped', title: card.title });
+    return true;
   }
 
   // 供前端展示：当前存活进程 + opencode 是否在工作中（近 5s 有活动即视为工作中）
@@ -280,6 +353,7 @@ class CardRunner {
   stop() {
     this.token++;
     this.running = false;
+    this.killedCards.clear();
     if (this.timer) { try { this.timer.unref(); } catch { /* ignore */ } }
     try { stopScope('solo'); } catch { /* ignore */ }
     this.procs.clear();
@@ -291,6 +365,7 @@ class CardRunner {
     if (this.running) return;
     this.running = true;
     this.token++;
+    this.killedCards.clear();
     // 记录基线：all_done 时报告本轮增量（成功/失败数），避免混入历史任务
     const all0 = CardStore.list();
     this.baseline = { done: all0.filter(c => c.status === 'done').length, failed: all0.filter(c => c.status === 'failed').length };
@@ -302,7 +377,8 @@ class CardRunner {
     if (!this.running) return;
     const myToken = this.token;
     const all = CardStore.list();
-    const eligible = pickEligible(all, this.active);
+    // 单卡停止的任务本轮跳过（用户已明确表示停它，不让调度器立刻拉起）
+    const eligible = pickEligible(all, this.active).filter(c => !this.killedCards.has(c.id));
     if (!eligible.length) {
       if (this.active.size === 0) {
         this.running = false;
@@ -349,6 +425,12 @@ class CardRunner {
     if (card.mode === 'continue' && card.chainId) {
       const prev = CardStore.get(card.chainId);
       ocSessionId = prev && prev.ocSessionId ? prev.ocSessionId : '';
+      // 语义降级显式提示：避免「名义续聊、实际新会话」静默发生
+      if (!ocSessionId) {
+        const warn = '续聊链首无可用会话（可能已被重置，或由不支持会话续聊的内核执行），本任务将以全新会话执行';
+        store.addMessage({ role: 'assistant', agentId: 'solo', agentName: 'Agent', actor: 'assistant', phase: 'system', taskId: card.id, content: `[系统提示] ${warn}` });
+        broadcast({ type: 'notice', content: `⚠ ${card.title}：${warn}` });
+      }
     }
 
     CardStore.update(card.id, { status: 'running', startedAt: Date.now(), error: '', result: '' });
@@ -417,16 +499,18 @@ class CardRunner {
 
     const finalText = order.map(id => texts.get(id)).join('\n\n').trim();
     const stopped = myToken !== this.token;
+    const cardStopped = this.killedCards.has(card.id); // 单卡停止：与全局停止同样复位为待执行
     if (finalText) {
       store.addMessage({ role: 'assistant', agentId: 'solo', agentName: 'Agent', actor: 'assistant', phase: 'work', taskId: card.id, content: finalText.slice(0, 20000) });
     }
-    const status = stopped ? 'pending' : (doneError ? 'failed' : 'done');
+    const stoppedAny = stopped || cardStopped;
+    const status = stoppedAny ? 'pending' : (doneError ? 'failed' : 'done');
     CardStore.update(card.id, {
       status,
       ocSessionId: sesId,
       // 手动停止回到待执行：清掉残留，避免 pending 卡带着脏结果/错误
-      result: stopped ? '' : (doneError ? `执行出错：${doneError}` : finalText).slice(0, 20000),
-      error: stopped ? '' : (doneError || ''),
+      result: stoppedAny ? '' : (doneError ? `执行出错：${doneError}` : finalText).slice(0, 20000),
+      error: stoppedAny ? '' : (doneError || ''),
       finishedAt: Date.now()
     });
     broadcast({ type: 'task_done', cardId: card.id, status, title: card.title });
@@ -489,7 +573,8 @@ class CardRunner {
             model: card.model || '',
             ocSessionId: sesId,
             behavior: 'card',
-            cwd
+            cwd,
+            scope: 'card-fu' // 独立进程域：停止编排不牵连追加聊天
           }, (ev) => {
             const proc = this.procs.get(cardId);
             if (proc) proc.lastActive = Date.now();
@@ -539,7 +624,11 @@ class CardRunner {
   }
 
   isFollowupRunning(cardId) { return !!this.followups && this.followups.has(cardId); }
+  getFollowupIds() { return [...this.followups]; }
 }
+
+// 数据文件损坏状态（供 API 告警展示）
+function getCorruptedFiles() { return [...corrupted]; }
 
 function isValidDir(p) {
   try { return fs.existsSync(p) && fs.statSync(p).isDirectory(); } catch { return false; }
@@ -547,4 +636,4 @@ function isValidDir(p) {
 
 const runner = new CardRunner();
 
-module.exports = { CardStore, CardRunner, runner, sseSubscribe, buildCardPrompt, isEligible, pickEligible, wouldCycle, MAX_PARALLEL, CARDS_PATH, CARDS_CFG_PATH };
+module.exports = { CardStore, CardRunner, runner, sseSubscribe, buildCardPrompt, isEligible, pickEligible, wouldCycle, MAX_PARALLEL, CARDS_PATH, CARDS_CFG_PATH, getCorruptedFiles };
