@@ -10,7 +10,16 @@
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     background: #f2f2f2; color: #191919; overflow: hidden;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
   }
+  /* 细滚动条：与界面精致度一致（Chrome/Safari + Firefox） */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,0,0,.16); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,.3); }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+  html { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,.16) transparent; }
+  /* 键盘导航焦点环：统一品牌绿描边 */
+  button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid rgba(7,193,96,.55); outline-offset: 1px; }
   #app { display: flex; height: 100vh; max-width: 1240px; margin: 0 auto; background: #fff; box-shadow: 0 0 24px rgba(0,0,0,.08); }
 
   /* ---------- 左侧：会话列表（微信风格：主会话 + 任务会话） ---------- */
@@ -19,13 +28,13 @@
   .side-header h2 { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
   .badge { font-size: 11px; background: #fa5151; color: #fff; border-radius: 8px; padding: 0 6px; line-height: 16px; }
   .side-actions { display: flex; gap: 6px; }
-  .mini-btn { font-size: 12px; color: #07c160; border: 1px solid #07c160; background: #fff; border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+  .mini-btn { font-size: 12px; color: #07c160; border: 1px solid #07c160; background: #fff; border-radius: 6px; padding: 3px 8px; cursor: pointer; transition: background .15s, opacity .15s; }
   .mini-btn.gray { color: #888; border-color: #ddd; }
-  .mini-btn:hover { opacity: .8; }
+  .mini-btn:hover { opacity: .85; background: #f0faf4; }
 
   .task-empty { color: #b0b0b0; font-size: 13px; text-align: center; padding: 30px 20px; line-height: 1.8; }
   .list-sep { font-size: 11px; color: #b2b2b2; padding: 10px 14px 4px; background: #fff; position: sticky; top: 0; z-index: 1; }
-  .task-item { display: flex; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #f5f5f5; cursor: pointer; align-items: center; position: relative; }
+  .task-item { display: flex; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #f5f5f5; cursor: pointer; align-items: center; position: relative; transition: background .15s; }
   .task-item:hover { background: #f7f7f7; }
   .task-item.active { background: #eef7f0; }
   /* 未读绿点：会话有未查看的完成消息 */
@@ -61,7 +70,7 @@
   .runner-tag.opencode { color: #07c160; background: #eef7f0; }
   .runner-tag.demo { color: #c2821d; background: #faf3e3; }
   .runner-tag.missing { color: #d54941; background: #fbeceb; }
-  .cfg-btn { font-size: 12px; color: #07c160; border: 1px solid #07c160; background: #fff; border-radius: 4px; padding: 4px 10px; cursor: pointer; white-space: nowrap; }
+  .cfg-btn { font-size: 12px; color: #07c160; border: 1px solid #07c160; background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; white-space: nowrap; transition: background .15s; }
   .cfg-btn:hover { background: #f0faf4; }
   .hdr-right { display: flex; align-items: center; gap: 10px; }
 
@@ -72,7 +81,7 @@
   .copy-btn:hover { background: rgba(0,0,0,.1); color: #333; }
   .copy-btn.done { color: #07c160; opacity: 1; }
   /* 回到最新：阅读历史时新消息不再强制拽底，悬浮按钮一键回底 */
-  #jumpBtn { position: absolute; right: 18px; bottom: 100px; z-index: 5; display: none; border: 1px solid #dcdcdc; background: #fff; color: #333; border-radius: 16px; padding: 6px 14px; font-size: 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+  #jumpBtn { position: absolute; right: 18px; bottom: 100px; z-index: 5; display: none; border: 1px solid #dcdcdc; background: #fff; color: #333; border-radius: 16px; padding: 6px 14px; font-size: 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.15); animation: fade-in .2s ease; transition: color .15s, border-color .15s; }
   #jumpBtn:hover { color: #07c160; border-color: #07c160; }
   .sys-tip { text-align: center; margin: 10px 0; }
   .approval-card { max-width: 480px; margin: 10px auto; background: #fff8e6; border: 1px solid #e8a33d; border-radius: 10px; padding: 10px 14px; text-align: left; }
@@ -83,8 +92,12 @@
   .approval-card .ap-ok { background: #07c160; color: #fff; }
   .approval-card .ap-no { background: #fa5151; color: #fff; }
   .approval-card .ap-done { font-size: 12px; color: #888; text-align: center; padding: 2px 0; }
-  .sys-tip span { font-size: 12px; color: #9e9e9e; background: #e8e8e8; border-radius: 4px; padding: 3px 10px; display: inline-block; max-width: 80%; }
-  .msg-row { display: flex; gap: 10px; margin: 14px 0; align-items: flex-start; }
+  .sys-tip span { font-size: 12px; color: #9e9e9e; background: #e8e8e8; border-radius: 8px; padding: 3px 10px; display: inline-block; max-width: 80%; animation: msg-in .18s ease; }
+  #messages.bulk .sys-tip span { animation: none; }
+  .msg-row { display: flex; gap: 10px; margin: 14px 0; align-items: flex-start; animation: msg-in .18s ease; }
+  /* 批量重建（切换会话/打开历史）时抑制逐条动画，避免满屏闪烁 */
+  #messages.bulk .msg-row, #messages.bulk .sys-tip { animation: none; }
+  @keyframes msg-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
   .msg-row.self { flex-direction: row-reverse; }
   .avatar { width: 38px; height: 38px; border-radius: 6px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; }
   .avatar.me { background: #57be6a; }
@@ -116,8 +129,8 @@
 
   .composer { background: #fff; border-top: 1px solid #e7e7e7; padding: 12px 14px; position: relative; }
   .input-row { display: flex; gap: 10px; }
-  #input, #soloInput { flex: 1; border: 1px solid #e2e2e2; border-radius: 6px; padding: 10px 12px; font-size: 14px; outline: none; }
-  #input:focus, #soloInput:focus { border-color: #07c160; }
+  #input, #soloInput { flex: 1; border: 1px solid #e2e2e2; border-radius: 6px; padding: 10px 12px; font-size: 14px; outline: none; transition: border-color .15s, box-shadow .15s; background: #fff; }
+  #input:focus, #soloInput:focus { border-color: #07c160; box-shadow: 0 0 0 3px rgba(7,193,96,.12); }
   #sendBtn, #soloSendBtn { background: #07c160; color: #fff; border: none; border-radius: 6px; padding: 0 22px; font-size: 14px; cursor: pointer; }
   #rtBtn { background: #f2f3f5; color: #555; border: none; border-radius: 6px; padding: 0 14px; font-size: 13px; cursor: pointer; white-space: nowrap; }
   #rtBtn:hover { background: #e8eaee; }
@@ -190,6 +203,12 @@
 
   /* ---------- 弹窗 ---------- */
   #modalMask, #batchMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask, #memMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
+  /* 弹窗出现动画：遮罩淡入（含毛玻璃）+ 内容上浮，全站弹窗统一节奏 */
+  div[id$="Mask"] { backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+  div[id$="Mask"].show { animation: fade-in .18s ease; }
+  .modal, .preview-card { animation: modal-in .24s cubic-bezier(.2,.7,.3,1); }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes modal-in { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
   #modalMask.show, #batchMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show, #memMask.show { display: flex; }
   /* 团队仓库卡片 */
   .team-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
@@ -1778,6 +1797,7 @@ function msgNode(m) {
 // 全量重绘当前会话（切换会话 / 载入历史时）
 function renderMessages() {
   const box = document.getElementById('messages');
+  box.classList.add('bulk'); // 批量重建：抑制逐条入场动画
   box.innerHTML = '';
   for (const m of getSess(curKey())) {
     const node = msgNode(m);
@@ -1786,6 +1806,7 @@ function renderMessages() {
     finalizeMsgLinks(m); // 定稿消息中的 .md 路径变成可点击预览链接
   }
   scrollBottom();
+  requestAnimationFrame(() => requestAnimationFrame(() => box.classList.remove('bulk')));
   const jb = document.getElementById('jumpBtn'); if (jb) jb.style.display = 'none';
 }
 
