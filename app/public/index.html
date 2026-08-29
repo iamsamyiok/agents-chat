@@ -84,6 +84,9 @@
   #jumpBtn { position: absolute; right: 18px; bottom: 100px; z-index: 5; display: none; border: 1px solid #dcdcdc; background: #fff; color: #333; border-radius: 16px; padding: 6px 14px; font-size: 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.15); animation: fade-in .2s ease; transition: color .15s, border-color .15s; }
   #jumpBtn:hover { color: #07c160; border-color: #07c160; }
   .sys-tip { text-align: center; margin: 10px 0; }
+  /* 长会话增量渲染：加载更早入口 */
+  .load-earlier { display: block; margin: 4px auto 16px; border: 1px solid #dcdcdc; background: #fff; color: #888; border-radius: 14px; padding: 5px 14px; font-size: 12px; cursor: pointer; transition: color .15s, border-color .15s; }
+  .load-earlier:hover { color: #07c160; border-color: #07c160; }
   .approval-card { max-width: 480px; margin: 10px auto; background: #fff8e6; border: 1px solid #e8a33d; border-radius: 10px; padding: 10px 14px; text-align: left; }
   .approval-card .ap-title { font-weight: 600; font-size: 13px; color: #8a5a00; margin-bottom: 4px; }
   .approval-card .ap-label { font-size: 12px; color: #555; margin-bottom: 8px; word-break: break-all; }
@@ -960,8 +963,35 @@ function soloRenderMessages() {
     return;
   }
   box.innerHTML = '';
-  for (const m of getSess(curOcId)) box.appendChild(soloMsgNode(m));
+  const all = getSess(curOcId);
+  soloShownFrom = Math.max(0, all.length - RENDER_BATCH);
+  if (soloShownFrom > 0) box.appendChild(makeLoadEarlierBtn(loadEarlierSolo));
+  for (let i = soloShownFrom; i < all.length; i++) {
+    const n = soloMsgNode(all[i]);
+    all[i]._dom = n;
+    box.appendChild(n);
+  }
   soloScroll();
+}
+function loadEarlierSolo() {
+  const box = document.getElementById('soloMessages');
+  const all = getSess(curOcId);
+  // 单聊消息节点构造器不同，这里专用批次回填
+  const fromIdx = soloShownFrom;
+  if (fromIdx <= 0) return;
+  const prevHeight = box.scrollHeight, prevTop = box.scrollTop;
+  const from = Math.max(0, fromIdx - RENDER_BATCH);
+  const frag = document.createDocumentFragment();
+  const oldBtn = box.querySelector('.load-earlier'); if (oldBtn) oldBtn.remove();
+  if (from > 0) frag.appendChild(makeLoadEarlierBtn(loadEarlierSolo));
+  for (let i = from; i < fromIdx; i++) {
+    const n = soloMsgNode(all[i]);
+    all[i]._dom = n;
+    frag.appendChild(n);
+  }
+  box.insertBefore(frag, box.firstChild);
+  box.scrollTop = prevTop + (box.scrollHeight - prevHeight);
+  soloShownFrom = from;
 }
 
 function pushSoloMsg(key, m) {
@@ -1795,15 +1825,52 @@ function msgNode(m) {
 }
 
 // 全量重绘当前会话（切换会话 / 载入历史时）
+// ---------- 长会话增量渲染：初始只渲染最近 RENDER_BATCH 条，更早的按需加载 ----------
+// 超长会话（数千条）全量渲染会拖慢浏览器；批次化后 DOM 数量恒定，加载更早时保持视口不跳动
+const RENDER_BATCH = 100;
+function makeLoadEarlierBtn(onClick) {
+  const b = document.createElement('button');
+  b.className = 'load-earlier';
+  b.textContent = '加载更早的消息';
+  b.onclick = onClick;
+  return b;
+}
+function loadEarlierInto(box, all, fromIdx, onClick) {
+  if (fromIdx <= 0) return 0;
+  const prevHeight = box.scrollHeight, prevTop = box.scrollTop;
+  const from = Math.max(0, fromIdx - RENDER_BATCH);
+  const frag = document.createDocumentFragment();
+  const oldBtn = box.querySelector('.load-earlier'); if (oldBtn) oldBtn.remove();
+  if (from > 0) frag.appendChild(makeLoadEarlierBtn(onClick));
+  for (let i = from; i < fromIdx; i++) {
+    const node = msgNode(all[i]);
+    all[i]._dom = node;
+    frag.appendChild(node);
+    finalizeMsgLinks(all[i]);
+  }
+  box.insertBefore(frag, box.firstChild);
+  box.scrollTop = prevTop + (box.scrollHeight - prevHeight); // 视口停在原消息处
+  return from;
+}
+let mainShownFrom = 0; // 主聊天区已渲染起始下标
+let soloShownFrom = 0; // 单聊区已渲染起始下标
+function loadEarlierMain() {
+  const box = document.getElementById('messages');
+  mainShownFrom = loadEarlierInto(box, getSess(curKey()), mainShownFrom, loadEarlierMain);
+}
+
 function renderMessages() {
   const box = document.getElementById('messages');
   box.classList.add('bulk'); // 批量重建：抑制逐条入场动画
   box.innerHTML = '';
-  for (const m of getSess(curKey())) {
-    const node = msgNode(m);
-    m._dom = node;
+  const all = getSess(curKey());
+  mainShownFrom = Math.max(0, all.length - RENDER_BATCH);
+  if (mainShownFrom > 0) box.appendChild(makeLoadEarlierBtn(loadEarlierMain));
+  for (let i = mainShownFrom; i < all.length; i++) {
+    const node = msgNode(all[i]);
+    all[i]._dom = node;
     box.appendChild(node);
-    finalizeMsgLinks(m); // 定稿消息中的 .md 路径变成可点击预览链接
+    finalizeMsgLinks(all[i]); // 定稿消息中的 .md 路径变成可点击预览链接
   }
   scrollBottom();
   requestAnimationFrame(() => requestAnimationFrame(() => box.classList.remove('bulk')));

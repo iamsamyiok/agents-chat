@@ -16,7 +16,14 @@ loadEnv(path.join(ROOT_DIR, '.env'));
 const LOG_DIR = process.env.AGENTS_CHAT_DATA || path.join(ROOT_DIR, '.data');
 try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch { /* ignore */ }
 const LOG_PATH = path.join(LOG_DIR, 'server.log');
-try { fs.writeFileSync(LOG_PATH, `=== Agents Chat started ${new Date().toISOString()} ===\n`); } catch { /* ignore */ }
+const LOG_MAX_BYTES = 5 * 1024 * 1024; // 单文件 5MB 滚动：常驻/定时任务长跑不无限增长
+function logRotateIfNeeded() {
+  try {
+    const st = fs.statSync(LOG_PATH);
+    if (st.size > LOG_MAX_BYTES) fs.renameSync(LOG_PATH, LOG_PATH + '.1'); // 保留一代，旧的 .1 被覆盖
+  } catch { /* 无文件 */ }
+}
+try { logRotateIfNeeded(); fs.writeFileSync(LOG_PATH, `=== Agents Chat started ${new Date().toISOString()} ===\n`); } catch { /* ignore */ }
 function teeWrite(args) {
   try { fs.appendFileSync(LOG_PATH, args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ') + '\n'); } catch { /* ignore */ }
 }
@@ -123,12 +130,19 @@ function sse(req, res) {
     Connection: 'keep-alive'
   });
   sseConns++;
+  // 背压保护：慢客户端的写缓冲积压超 1MB 时主动断开（防内存无限堆积），客户端重连后经 init 补拉状态
   const send = (obj) => {
-    try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch { /* closed */ }
+    try {
+      if (res.writableLength > 1024 * 1024) { try { res.destroy(); } catch { /* ignore */ } return; }
+      res.write(`data: ${JSON.stringify(obj)}\n\n`);
+    } catch { /* closed */ }
   };
   // 心跳防止代理断开
   const hb = setInterval(() => {
-    try { res.write(': hb\n\n'); } catch { clearInterval(hb); }
+    try {
+      if (res.writableLength > 1024 * 1024) { res.destroy(); clearInterval(hb); return; }
+      res.write(': hb\n\n');
+    } catch { clearInterval(hb); }
   }, 15000);
   let closed = false;
   const onClose = () => {
@@ -871,7 +885,8 @@ const server = http.createServer(async (req, res) => {
 
   // ---------- 历史管理：一键清空全部会话 / 导出 sessions.md ----------
   if (p === '/api/history/clear' && req.method === 'POST') {
-    const msgCount = store.getMessages().length;
+    const msgStat = store.countMessagesByTask();
+    const msgCount = msgStat.main + Object.values(msgStat.counts).reduce((a, b) => a + b, 0);
     let outDirs = 0;
     store.clearMessages();
     // 单聊会话记录一并清空（消息已清，保留空会话列表无意义）
@@ -891,18 +906,20 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/history/export' && req.method === 'GET') {
-    const msgs = store.getMessages();
+    // 统计与头部：逐分片计数（低内存）；正文按会话逐段拼接（导出为显式用户动作）
+    const stat = store.countMessagesByTask();
     const tasksAll = store.getTasks();
     const ocAll = store.getOcSessions();
     const fmtTs = (t) => { const d = new Date(t); const p2 = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
     const roleOf = (m) => m.role === 'user' ? '👤 用户' : (m.agentName || '智能体') + (m.phase ? `（${m.phase}）` : '');
+    const total = stat.main + Object.values(stat.counts).reduce((a, b) => a + b, 0);
     const lines = [
       '# Agents Chat 会话导出', '',
       `- 导出时间：${fmtTs(Date.now())}`,
-      `- 会话数：${1 + tasksAll.filter(t => store.getMessages(t.id).length > 0).length + ocAll.filter(s => store.getMessages(s.id).length > 0).length}（主会话 + 任务会话 + 单聊会话）`,
-      `- 消息总数：${msgs.length}`, ''
+      `- 会话数：${1 + tasksAll.filter(t => (stat.counts[t.id] || 0) > 0).length + ocAll.filter(s => (stat.counts[s.id] || 0) > 0).length}（主会话 + 任务会话 + 单聊会话）`,
+      `- 消息总数：${total}`, ''
     ];
-    const main = msgs.filter(m => !m.taskId);
+    const main = store.getMessages('');
     lines.push('---', '', '## 主会话', '');
     for (const m of main) {
       lines.push(`### ${fmtTs(m.timestamp)} · ${roleOf(m)}`, '');
@@ -945,11 +962,9 @@ const server = http.createServer(async (req, res) => {
   // ---------- 事项管控（卡牌）API ----------
   if (p === '/api/cards' && req.method === 'GET') {
     const cards = CardStore.list();
-    // 附带每个卡牌当前过程消息条数（供 UI 角标展示）
-    const counts = {};
-    try {
-      for (const m of store.getMessages()) if (m.taskId) counts[m.taskId] = (counts[m.taskId] || 0) + 1;
-    } catch { /* ignore */ }
+    // 附带每个卡牌当前过程消息条数（供 UI 角标展示）：逐分片计数，不合并全量消息
+    let counts = {};
+    try { counts = store.countMessagesByTask().counts; } catch { /* ignore */ }
     // 执行内核状态（前端据此显示内核徽标/缺失警告）与追加聊天进行中的卡
     let runnerInfo = { kind: 'unknown', label: '' };
     try {
@@ -1204,20 +1219,35 @@ const server = http.createServer(async (req, res) => {
 });
 
 // 优雅退出：停掉全部子进程、把执行中任务复位为待执行，避免残留与假死状态
+// 幂等防重入：信号钩子与 exit 钩子可能先后触发，清理只执行一次
+let shutdownDone = false;
 function shutdown(code) {
-  try {
-    if (termProc) { try { termProc.kill(); } catch { /* ignore */ } termProc = null; }
-    const n = stopAllChildren();
-    const m = store.resetRunningTasks();
-    const mc = CardStore.resetRunning();
-    if (n || m || mc) console.log(`退出清理：终止 ${n} 个子进程，复位 ${m} 个执行中任务、${mc} 张卡牌`);
-  } catch (err) {
-    console.error('[shutdown] 清理失败:', err && (err.stack || err));
+  if (!shutdownDone) {
+    shutdownDone = true;
+    try {
+      if (termProc) { try { termProc.kill(); } catch { /* ignore */ } termProc = null; }
+      const n = stopAllChildren();
+      const m = store.resetRunningTasks();
+      const mc = CardStore.resetRunning();
+      if (n || m || mc) console.log(`退出清理：终止 ${n} 个子进程，复位 ${m} 个执行中任务、${mc} 张卡牌`);
+    } catch (err) {
+      console.error('[shutdown] 清理失败:', err && (err.stack || err));
+    }
   }
   process.exit(code);
 }
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
+// Windows 关闭控制台窗口（CTRL_CLOSE_EVENT）在 Node 上映射为 SIGHUP，系统给约 5 秒处理宽限：
+// 同步 killTree 足够完成，正在执行的 AI 子进程不再变孤儿
+process.on('SIGHUP', () => shutdown(0));
+// 兜底：显式 process.exit 路径（exit 钩子内仅允许同步操作，killTree 为同步调用）
+process.on('exit', () => {
+  if (!shutdownDone) {
+    shutdownDone = true;
+    try { stopAllChildren(); } catch { /* ignore */ }
+  }
+});
 
 // ---------- 任务批次执行（SSE 手动触发与定时调度共用） ----------
 // send: 事件推送（SSE 为真实推送，定时触发为 no-op，消息仍会持久化）
@@ -1428,6 +1458,7 @@ server.listen(PORT, () => {
   startPruneTimer();
   console.log(`Agents Chat 已启动: http://localhost:${PORT}`);
   console.log(`运行内核: ${kindText}`);
+  console.log('退出提示: 请用 Ctrl+C（或 agents-chat stop）退出，会自动清理执行中的 AI 子进程；直接关闭窗口可能残留正在执行的进程');
   console.log(`本机可用内核: ${avail}（配置页可切换）`);
   console.log(`数据目录: ${store.DATA_DIR}`);
 });

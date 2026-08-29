@@ -1,6 +1,6 @@
 {
   "name": "@iamsamyiok/agents-chat",
-  "version": "3.24.0",
+  "version": "3.25.0",
   "description": "多智能体群聊工具 - 支持 OpenCode/Claude Code/Codex/pi 内核，微信风格聊天界面",
   "main": "lib/start.js",
   "bin": {

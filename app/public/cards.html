@@ -753,7 +753,8 @@ async function openDetail(id){
   const log=$('#dLog'); log.innerHTML=''; TEXT_PARTS.clear();
   if(!msgs.length) log.innerHTML='<span class="empty">暂无过程记录</span>';
   for(const m of msgs){
-    if(m.role==='user') appendLog(log,'👤 '+m.content,'msg-user');
+    if(m.role==='sys') appendLog(log,'ℹ '+m.content,'msg-tool');
+    else if(m.role==='user') appendLog(log,'👤 '+m.content,'msg-user');
     else if(m.phase==='archive') appendLog(log,'📦 '+m.content,'msg-tool');
     else if(m.phase==='system') appendLog(log,'⚠ '+m.content,'msg-err');
     else if(/工具|执行完成/.test(m.content||'')) appendLog(log,'🔧 '+m.content,'msg-tool');

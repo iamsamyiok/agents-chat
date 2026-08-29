@@ -508,6 +508,13 @@ function getMessages(taskId) {
   return Array.isArray(list) ? list : [];
 }
 
+// 单会话消息上限：防止定时任务长跑数月将会话分片膨胀到读写不可承受
+// 默认 500 条，AGENTS_CHAT_MSG_LIMIT 可调（0 = 不限制）；主会话豁免（已有 epoch + 过期清理机制）
+const MSG_LIMIT = (() => {
+  const n = Number(process.env.AGENTS_CHAT_MSG_LIMIT);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 500;
+})();
+
 function addMessage(msg) {
   migrateLegacyMessages();
   fs.mkdirSync(MSG_DIR, { recursive: true });
@@ -529,7 +536,36 @@ function addMessage(msg) {
     timestamp: msg.timestamp || new Date().toISOString()
   };
   msgs.push(rec);
+  // 滚动清理：超上限裁掉最旧消息，开头留一条系统标记说明去向（标记本身也会随时间被裁）
+  if (key !== '' && MSG_LIMIT > 0 && msgs.length > MSG_LIMIT) {
+    const kept = msgs.slice(msgs.length - MSG_LIMIT);
+    const first = kept[0];
+    if (!(first && first.role === 'sys' && /已按上限自动清理/.test(String(first.content || '')))) {
+      kept.unshift({ role: 'sys', content: `（已达单会话消息上限 ${MSG_LIMIT} 条，更早的过程消息已自动滚动清理，任务结果以最终结果区为准）`, taskId: key, timestamp: new Date().toISOString() });
+    }
+    msgs.length = 0;
+    msgs.push(...kept);
+  }
   writeJson(msgShardPath(key), msgs);
+}
+
+// 按会话统计消息数（逐分片累加，不合并大数组：统计/导出场景低内存）
+function countMessagesByTask() {
+  migrateLegacyMessages();
+  const counts = {};
+  let main = 0;
+  let files = [];
+  try { files = fs.readdirSync(MSG_DIR); } catch { return { counts, main }; }
+  for (const name of files) {
+    if (!name.endsWith('.json') || name.startsWith('.')) continue;
+    let list;
+    try { list = JSON.parse(fs.readFileSync(path.join(MSG_DIR, name), 'utf8')); } catch { continue; }
+    if (!Array.isArray(list) || !list.length) continue;
+    const tid = list[0].taskId || '';
+    if (tid) counts[tid] = (counts[tid] || 0) + list.length;
+    else main += list.length;
+  }
+  return { counts, main };
 }
 
 function clearMessages() {
@@ -754,6 +790,7 @@ module.exports = {
   getMessages,
   addMessage,
   clearMessages,
+  countMessagesByTask,
   addFlowEvent,
   getFlow,
   listFlowRuns,
