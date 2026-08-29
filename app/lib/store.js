@@ -1,13 +1,16 @@
 // 数据存储：纯 JSON 文件，零依赖
 // 文件位于数据目录（默认 <root>/.data），任务与消息持久化
+// 损坏保护与原子写由 safejson 公共层提供：损坏文件备份 .corrupt-* 后只读，防覆盖丢数据
 const fs = require('fs');
 const path = require('path');
+const safejson = require('./safejson');
 
 const ROOT = path.join(__dirname, '..', '..');
 const DATA_DIR = process.env.AGENTS_CHAT_DATA || path.join(ROOT, '.data');
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 const TASKS_PATH = path.join(DATA_DIR, 'tasks.json');
-const MESSAGES_PATH = path.join(DATA_DIR, 'messages.json');
+const MESSAGES_PATH = path.join(DATA_DIR, 'messages.json'); // 旧版单文件（启动时一次性迁移到 messages/ 分片）
+const MSG_DIR = path.join(DATA_DIR, 'messages');
 const MEMORY_PATH = path.join(DATA_DIR, 'memory.json');
 const OC_SESSIONS_PATH = path.join(DATA_DIR, 'oc-sessions.json');
 
@@ -16,18 +19,12 @@ function ensureDir() {
 }
 
 function readJson(file, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return fallback;
-  }
+  return safejson.readJson(file, fallback);
 }
 
 function writeJson(file, data) {
   ensureDir();
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-  fs.renameSync(tmp, file);
+  safejson.writeJson(file, data);
 }
 
 // ---------- 内置管家智能体（不可修改、不可删除，始终置顶） ----------
@@ -87,7 +84,7 @@ function getConfig() {
   let cfg = readJson(CONFIG_PATH, null);
   if (!cfg || !Array.isArray(cfg.agents)) {
     cfg = defaultConfig();
-    writeJson(CONFIG_PATH, cfg);
+    try { writeJson(CONFIG_PATH, cfg); } catch { /* config 处于损坏保护：本次运行用默认配置，文件保留待人工恢复 */ }
   }
   // 管家始终置顶且使用内置定义（保证内置人设更新后自动生效）
   cfg.agents = [BUTLER, ...cfg.agents.filter(a => a && a.id !== 'butler')];
@@ -442,16 +439,80 @@ function getTask(id) {
   return getTasks().find(x => x.id === id) || null;
 }
 
-// ---------- 消息 ----------
-// taskId 为空 = 主会话；否则属于对应任务会话（每个任务一个独立会话）
+// ---------- 消息（分片存储：messages/<key>.json，每个会话一个文件） ----------
+// taskId 为空 = 主会话；否则属于对应任务/单聊会话
+// 旧版全部消息集中在单个 messages.json：每条消息都要全量读写整个文件，历史越长 IO 越大；
+// 分片后单会话读写只涉及自己的文件；旧文件在首次访问时一次性迁移（原件保留为 .migrated 备份）
+let msgMigrated = false;
+function migrateLegacyMessages() {
+  if (msgMigrated) return;
+  msgMigrated = true;
+  let raw = null;
+  try {
+    raw = fs.readFileSync(MESSAGES_PATH, 'utf8');
+  } catch { return; } // 无旧文件
+  let all;
+  try {
+    all = JSON.parse(raw);
+  } catch {
+    // 旧文件损坏：备份现场后放弃迁移（各会话从空开始，原件可供人工恢复）
+    try { fs.copyFileSync(MESSAGES_PATH, `${MESSAGES_PATH}.corrupt-${Date.now()}`); } catch { /* ignore */ }
+    console.error(`[store] 旧版 messages.json 损坏，已备份并跳过迁移：${MESSAGES_PATH}`);
+    return;
+  }
+  if (!Array.isArray(all)) {
+    try { fs.renameSync(MESSAGES_PATH, MESSAGES_PATH + '.migrated'); } catch { /* ignore */ }
+    return;
+  }
+  const groups = new Map();
+  for (const m of all) {
+    const k = (m && m.taskId) || '';
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(m);
+  }
+  try {
+    fs.mkdirSync(MSG_DIR, { recursive: true });
+    for (const [k, list] of groups) writeJson(msgShardPath(k), list);
+    fs.renameSync(MESSAGES_PATH, MESSAGES_PATH + '.migrated'); // 保留备份供人工核对
+  } catch (err) {
+    console.error('[store] messages 迁移失败（下次启动重试）:', err && err.message);
+    msgMigrated = false;
+  }
+}
+
+// 会话 key -> 分片文件名：常规 id 原样使用；其余（空/特殊字符）十六进制编码，避免文件名问题
+function msgShardName(key) {
+  const k = key == null ? '' : String(key);
+  if (k === '') return '_main.json';
+  if (/^[A-Za-z0-9_-]{1,80}$/.test(k)) return k + '.json';
+  return '~' + Buffer.from(k).toString('hex').slice(0, 160) + '.json';
+}
+function msgShardPath(key) { return path.join(MSG_DIR, msgShardName(key)); }
+
 function getMessages(taskId) {
-  const msgs = readJson(MESSAGES_PATH, []);
-  if (taskId === undefined) return msgs;
-  return msgs.filter(m => (m.taskId || '') === taskId);
+  migrateLegacyMessages();
+  if (taskId === undefined) {
+    // 全量视图：合并所有分片，按时间排序还原全局顺序
+    let files = [];
+    try { files = fs.readdirSync(MSG_DIR); } catch { return []; }
+    const all = [];
+    for (const name of files) {
+      if (!name.endsWith('.json') || name.startsWith('.')) continue;
+      const list = readJson(path.join(MSG_DIR, name), []);
+      if (Array.isArray(list)) all.push(...list);
+    }
+    all.sort((a, b) => ((a && a.timestamp) || '') < ((b && b.timestamp) || '') ? -1 : 1);
+    return all;
+  }
+  const list = readJson(msgShardPath(String(taskId)), []);
+  return Array.isArray(list) ? list : [];
 }
 
 function addMessage(msg) {
-  const msgs = readJson(MESSAGES_PATH, []);
+  migrateLegacyMessages();
+  fs.mkdirSync(MSG_DIR, { recursive: true });
+  const key = msg.taskId || '';
+  const msgs = readJson(msgShardPath(key), []);
   // 主会话消息记录所属 epoch：新会话开启后，旧 epoch 消息不再传入上下文
   const rec = {
     id: msg.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -468,11 +529,19 @@ function addMessage(msg) {
     timestamp: msg.timestamp || new Date().toISOString()
   };
   msgs.push(rec);
-  writeJson(MESSAGES_PATH, msgs);
+  writeJson(msgShardPath(key), msgs);
 }
 
 function clearMessages() {
-  writeJson(MESSAGES_PATH, []);
+  migrateLegacyMessages();
+  // 清空全部会话消息：删除所有分片，主会话分片重置为空数组
+  try {
+    for (const name of fs.readdirSync(MSG_DIR)) {
+      if (!name.endsWith('.json') || name.startsWith('.')) continue;
+      try { fs.unlinkSync(path.join(MSG_DIR, name)); } catch { /* ignore */ }
+    }
+  } catch { /* 目录不存在 */ }
+  writeJson(msgShardPath(''), []);
 }
 
 // ---------- 流转日志（智能体之间的派发/交接/返工/验收事件，append-only） ----------
@@ -566,7 +635,7 @@ function getOcSession(id) {
 
 function deleteOcSession(id) {
   saveOcSessions(getOcSessions().filter(s => s.id !== id));
-  writeJson(MESSAGES_PATH, readJson(MESSAGES_PATH, []).filter(m => (m.taskId || '') !== id));
+  try { fs.unlinkSync(msgShardPath(id)); } catch { /* 分片不存在 */ }
 }
 
 // ---------- 管家长期记忆（跨会话偏好与教训，读写由 memory.js 负责） ----------
@@ -614,16 +683,27 @@ function pruneOldData(days) {
     // 其消息由下方第 3 步统一按孤儿清理并计数（避免重复统计）
   }
 
-  // 3. 消息：孤儿任务消息（任务已删）+ 过期的主会话/单聊会话消息（timestamp 超 cutoff）
+  // 3. 消息（分片）：孤儿会话分片整文件删除；主会话分片按 timestamp 过滤
   const validIds = new Set([...keptTasks.map(t => t.id), ...keptSess.map(s => s.id)]);
-  const keptMsgs = readJson(MESSAGES_PATH, []).filter(m => {
-    const tid = m.taskId || '';
-    if (tid && !validIds.has(tid)) { stat.messages++; return false; } // 孤儿消息
-    if (!tid && tsOf(m) && tsOf(m) < cutoff) { stat.messages++; return false; } // 过期主会话
-    return true;
-  });
-  const allMsgs = readJson(MESSAGES_PATH, []);
-  if (keptMsgs.length !== allMsgs.length) writeJson(MESSAGES_PATH, keptMsgs);
+  try {
+    for (const name of fs.readdirSync(MSG_DIR)) {
+      if (!name.endsWith('.json') || name.startsWith('.')) continue;
+      const fp = path.join(MSG_DIR, name);
+      let list;
+      try { list = JSON.parse(fs.readFileSync(fp, 'utf8')); } catch { continue; } // 损坏分片留给损坏保护处理
+      if (!Array.isArray(list)) continue;
+      const tid = list.length ? (list[0].taskId || '') : '';
+      if (tid && !validIds.has(tid)) {
+        // 孤儿会话（任务/单聊已删或超期）：整分片删除
+        stat.messages += list.length;
+        try { fs.unlinkSync(fp); } catch { /* ignore */ }
+      } else if (!tid) {
+        // 主会话：按时间过滤
+        const kept = list.filter(m => !tsOf(m) || tsOf(m) >= cutoff);
+        if (kept.length !== list.length) { stat.messages += list.length - kept.length; writeJson(fp, kept); }
+      }
+    }
+  } catch { /* 无目录 */ }
 
   // 4. 流转日志：超期事件行过滤重写
   try {
@@ -682,5 +762,6 @@ module.exports = {
   upsertOcSession,
   getOcSession,
   deleteOcSession,
-  pruneOldData
+  pruneOldData,
+  getCorruptedFiles: () => safejson.corruptedFiles()
 };

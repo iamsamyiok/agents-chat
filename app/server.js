@@ -298,7 +298,9 @@ const server = http.createServer(async (req, res) => {
       configKernel: String(store.getConfig().kernel || 'auto'),
       model: process.env.AGENTS_CHAT_MODEL || '',
       autoApprove: process.env.AGENTS_CHAT_AUTO_APPROVE !== '0',
-      port: PORT
+      port: PORT,
+      // 数据损坏保护：损坏数据文件清单（已备份 .corrupt-*，写入已冻结，需人工处理）
+      corruptedDataFiles: store.getCorruptedFiles()
     });
     return;
   }

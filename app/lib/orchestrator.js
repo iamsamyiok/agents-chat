@@ -1173,5 +1173,7 @@ module.exports = {
   // 测试导出（单测用，业务代码请勿依赖）
   testBoardInit: boardInit, testBoardAppend: boardAppend, testBoardRead: boardRead,
   testExtractBoardNote: extractBoardNote, testParseHandoff: parseHandoff,
-  testApprovalGate: approvalGate
+  testApprovalGate: approvalGate,
+  testExtractPlanJSON: extractPlanJSON, testResolveAgentRef: resolveAgentRef,
+  testSplitByDependency: splitByDependency, testNormalizePhases: normalizePhases
 };

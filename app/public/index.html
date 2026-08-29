@@ -66,6 +66,14 @@
   .hdr-right { display: flex; align-items: center; gap: 10px; }
 
   #messages { flex: 1; overflow-y: auto; padding: 16px 18px; }
+  /* 消息复制按钮：hover 消息行时浮现 */
+  .copy-btn { border: none; background: rgba(0,0,0,.05); color: #888; font-size: 11px; border-radius: 4px; padding: 2px 7px; cursor: pointer; opacity: 0; transition: opacity .15s; vertical-align: middle; }
+  .msg-row:hover .copy-btn, .copy-btn:focus { opacity: 1; }
+  .copy-btn:hover { background: rgba(0,0,0,.1); color: #333; }
+  .copy-btn.done { color: #07c160; opacity: 1; }
+  /* 回到最新：阅读历史时新消息不再强制拽底，悬浮按钮一键回底 */
+  #jumpBtn { position: absolute; right: 18px; bottom: 100px; z-index: 5; display: none; border: 1px solid #dcdcdc; background: #fff; color: #333; border-radius: 16px; padding: 6px 14px; font-size: 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+  #jumpBtn:hover { color: #07c160; border-color: #07c160; }
   .sys-tip { text-align: center; margin: 10px 0; }
   .approval-card { max-width: 480px; margin: 10px auto; background: #fff8e6; border: 1px solid #e8a33d; border-radius: 10px; padding: 10px 14px; text-align: left; }
   .approval-card .ap-title { font-weight: 600; font-size: 13px; color: #8a5a00; margin-bottom: 4px; }
@@ -413,8 +421,9 @@
         <button class="cfg-btn" id="helpBtn" onclick="openHelp()" title="使用帮助">❓ 帮助</button>
       </div>
     </header>
-    <div id="groupView" style="flex:1;min-height:0;display:flex;flex-direction:column">
+    <div id="groupView" style="flex:1;min-height:0;display:flex;flex-direction:column;position:relative">
       <div id="messages"></div>
+      <button id="jumpBtn" onclick="jumpBottom()" title="有新消息了，点击回到最新">↓ 新消息</button>
       <footer class="composer" id="groupComposer">
         <div class="input-row">
           <button id="rtBtn" onclick="toggleRoundtable()" title="圆桌讨论模式：所有被 @ 的智能体（未 @ 则全体）围绕主题轮流发言、互相反驳，管家当主持人控制轮数并总结共识与分歧">💬 圆桌</button>
@@ -666,7 +675,7 @@ let curOcModel = '';           // 当前选中模型（localStorage 记忆）
 
 const input = document.getElementById('input');
 
-function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 function escAttr(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 function fmtTime(ts) { const d = new Date(ts); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
 function fmtSched(ts) { const d = new Date(ts); const p = (n) => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
@@ -731,6 +740,17 @@ async function init() {
 
   input.addEventListener('input', handleAtInput);
   input.addEventListener('blur', () => setTimeout(hideAt, 150));
+  // 消息区滚动：贴底时收起「新消息」悬浮按钮
+  document.getElementById('messages').addEventListener('scroll', () => {
+    if (atBottom()) { const j = document.getElementById('jumpBtn'); if (j) j.style.display = 'none'; }
+  });
+  // 输入历史回填：输入框为空时按 ↑ 调出最近发送的一条（再按 Enter 直接重发）
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp' && input.value === '' && lastSentInputs.length) {
+      e.preventDefault();
+      input.value = lastSentInputs[lastSentInputs.length - 1];
+    }
+  });
   input.addEventListener('keydown', (e) => {
     if (atState) {
       if (e.key === 'ArrowDown') { e.preventDefault(); atState.active = (atState.active + 1) % atState.items.length; renderAt(); return; }
@@ -897,7 +917,7 @@ function soloMsgNode(m) {
     row.className = 'msg-row self';
     row.innerHTML = `
       <div class="avatar me">我</div>
-      <div class="msg-body"><div class="bubble right">${esc(m.content)}</div></div>`;
+      <div class="msg-body"><div class="msg-name" style="text-align:right"><button class="copy-btn" onclick="copyText(decodeURIComponent('${encodeURIComponent(m.content || '')}'), this)">复制</button></div><div class="bubble right">${esc(m.content)}</div></div>`;
     return row;
   }
   // assistant：Markdown 渲染（opencode 输出天然是 Markdown）
@@ -906,7 +926,7 @@ function soloMsgNode(m) {
   row.innerHTML = `
     <div class="avatar solo-av">🤖</div>
     <div class="msg-body">
-      <div class="msg-name">${esc(m.agentName || 'OpenCode')}</div>
+      <div class="msg-name">${esc(m.agentName || 'OpenCode')} <button class="copy-btn" onclick="copyText(decodeURIComponent('${encodeURIComponent(m.content || '')}'), this)" title="复制原始文本（含 Markdown 源码）">复制</button></div>
       <div class="bubble left solo-bubble"><div class="solo-part-md">${renderMd(m.content || '')}</div></div>
     </div>`;
   return row;
@@ -1542,6 +1562,30 @@ function renderHeader() {
 
 // ---------- 消息渲染 ----------
 function scrollBottom() { const box = document.getElementById('messages'); box.scrollTop = box.scrollHeight; }
+// 贴底判定：滚离底部超过 80px 视为「正在阅读历史」，新消息不再强制拽底
+function atBottom() { const b = document.getElementById('messages'); return !b || (b.scrollHeight - b.scrollTop - b.clientHeight < 80); }
+// 跟随滚动：贴底时自动滚到最新；阅读历史时改亮「新消息」按钮
+function followScroll() {
+  if (atBottom()) scrollBottom();
+  else { const j = document.getElementById('jumpBtn'); if (j) j.style.display = 'block'; }
+}
+function jumpBottom() { scrollBottom(); const j = document.getElementById('jumpBtn'); if (j) j.style.display = 'none'; }
+
+// 文本复制（优先剪贴板 API，旧环境回退 execCommand），按钮成功后短暂反馈
+function copyText(text, btn) {
+  const done = () => { if (!btn) return; const old = btn.textContent; btn.textContent = '已复制'; btn.classList.add('done'); setTimeout(() => { btn.textContent = old; btn.classList.remove('done'); }, 1200); };
+  const s = String(text == null ? '' : text);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(s).then(done).catch(() => { fallbackCopy(s); done(); });
+  } else { fallbackCopy(s); done(); }
+}
+function fallbackCopy(s) {
+  const ta = document.createElement('textarea');
+  ta.value = s; ta.style.cssText = 'position:fixed;opacity:0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); } catch { /* ignore */ }
+  document.body.removeChild(ta);
+}
 
 function planNode(m) {
   const row = document.createElement('div');
@@ -1559,7 +1603,7 @@ function planNode(m) {
   row.innerHTML = `
     <div class="avatar butler">🎩</div>
     <div class="msg-body">
-      <div class="msg-name">管家 · 调度规划</div>
+      <div class="msg-name">管家 · 调度规划 <button class="copy-btn" onclick="copyText(decodeURIComponent('${encodeURIComponent((p && p.thought) || m.content || '')}'), this)" title="复制规划思路">复制</button></div>
       <div class="bubble left plan-card">${inner}</div>
     </div>`;
   return row;
@@ -1708,7 +1752,7 @@ function msgNode(m) {
     row.className = 'msg-row self';
     row.innerHTML = `
       <div class="avatar me">我</div>
-      <div class="msg-body"><div class="bubble right">${esc(m.content)}</div></div>`;
+      <div class="msg-body"><div class="msg-name" style="text-align:right"><button class="copy-btn" onclick="copyText(decodeURIComponent('${encodeURIComponent(m.content || '')}'), this)">复制</button></div><div class="bubble right">${esc(m.content)}</div></div>`;
     return row;
   }
   if (m.phase === 'plan') return planNode(m);
@@ -1722,7 +1766,7 @@ function msgNode(m) {
   row.innerHTML = `
     <div class="avatar ${m.agentId === butlerId ? 'butler' : ''}" style="${m.agentId === butlerId ? '' : `background:${colorOf(m.agentId || 'x')}`}">${avIcon}</div>
     <div class="msg-body">
-      <div class="msg-name">${esc(m.agentName || m.agentId || 'AI')}${m.agentId === butlerId ? ' · 管家' : ''}</div>
+      <div class="msg-name">${esc(m.agentName || m.agentId || 'AI')}${m.agentId === butlerId ? ' · 管家' : ''} <button class="copy-btn" onclick="copyText(decodeURIComponent('${encodeURIComponent(m.content || '')}'), this)" title="复制原始文本（含 Markdown 源码）">复制</button></div>
       ${bodyHtml}
       ${m.outputPath ? `<div class="msg-file" ${/\.md$/i.test(m.outputPath) ? `data-path="${escAttr(m.outputPath)}" title="点击预览该 Markdown 存档"` : `title="系统过程存档：该智能体本阶段完整输出（内部交接用）。用户最终要的成果文件在产出存档目录中，以管家交付清单里的完整路径为准"`}>📄 过程存档 ${fileNodeText(m.outputPath)}</div>` : ''}
     </div>`;
@@ -1742,17 +1786,18 @@ function renderMessages() {
     finalizeMsgLinks(m); // 定稿消息中的 .md 路径变成可点击预览链接
   }
   scrollBottom();
+  const jb = document.getElementById('jumpBtn'); if (jb) jb.style.display = 'none';
 }
 
 // 追加或更新一条流式消息（仅当前会话操作 DOM）
 function ensureMsgDom(m) {
   const key = sessKey(m.taskId || curTaskId);
   if (key !== curKey()) return;
-  if (m._dom && document.contains(m._dom)) { if (m._tx) m._tx.textContent = m.content; scrollBottom(); return; }
+  if (m._dom && document.contains(m._dom)) { if (m._tx) m._tx.textContent = m.content; followScroll(); return; }
   const node = msgNode(m);
   m._dom = node;
   document.getElementById('messages').appendChild(node);
-  scrollBottom();
+  followScroll();
 }
 
 function pushMsg(m) {
@@ -1851,7 +1896,7 @@ function onSaved(ev) {
         }
         file.innerHTML = '📄 过程存档 ' + fileNodeText(ev.path);
         m._dom.querySelector('.msg-body').appendChild(file);
-        scrollBottom();
+        followScroll();
       }
       finalizeMsgLinks(m); // 交付文本中的成果文件路径也变成可点击链接
       return;
@@ -1940,6 +1985,7 @@ async function stopRun(scope) {
   } catch { toast('停止请求失败，请重试'); }
 }
 
+let lastSentInputs = []; // 输入历史（空输入框按 ↑ 回填最近一条）
 async function send() {
   const text = input.value.trim();
   if (!text || chatBusy) return;
@@ -1950,6 +1996,10 @@ async function send() {
   try {
     input.value = '';
     hideAt();
+    if (lastSentInputs[lastSentInputs.length - 1] !== text) {
+      lastSentInputs.push(text);
+      if (lastSentInputs.length > 20) lastSentInputs.shift();
+    }
     pushUser(text);
     typing = addSys('智能体处理中…');
 
@@ -2131,7 +2181,7 @@ async function openHistory() {
       if (m.role === 'sys') {
         html += `<div class="sys-tip"><span>${esc(m.content)}</span></div>`;
       } else if (m.role === 'user') {
-        html += `<div class="msg-row self"><div class="avatar me">我</div><div class="msg-body"><div class="bubble right">${esc(m.content)}</div></div></div>`;
+        html += `<div class="msg-row self"><div class="avatar me">我</div><div class="msg-body"><div class="msg-name" style="text-align:right"><button class="copy-btn" onclick="copyText(decodeURIComponent('${encodeURIComponent(m.content || '')}'), this)">复制</button></div><div class="bubble right">${esc(m.content)}</div></div></div>`;
       } else if (m.phase === 'plan' && m.plan) {
         html += `<div class="msg-row"><div class="avatar butler">🎩</div><div class="msg-body"><div class="msg-name">${esc(m.agentName || '管家')} · 调度规划</div><div class="bubble left plan-card"><div class="plan-thought">${esc(m.plan.thought || '')}</div>${(m.plan.phases || []).map((g, gi) => `<div class="plan-phase"><b>阶段 ${gi + 1}</b>（${g.length > 1 ? g.length + ' 项并行' : '单执行'}）${g.map(s => `<div class="plan-step">▸ <b>${esc(s.agentName)}</b>：${esc(s.instruction)}</div>`).join('')}</div>`).join('')}</div></div></div>`;
       } else {
@@ -2140,7 +2190,7 @@ async function openHistory() {
         const contentHtml = isFoldPhase(m.phase)
           ? `<div class="bubble left"><div class="fold-wrap">${tag}${linkifyMd(esc(m.content))}</div><div class="fold-toggle" onclick="toggleFoldEl(this)">展开全文 ▾</div></div>`
           : `<div class="bubble left">${tag}${linkifyMd(esc(m.content))}</div>`;
-        html += `<div class="msg-row"><div class="avatar ${m.agentId === butlerId ? 'butler' : ''}" style="${m.agentId === butlerId ? '' : `background:${colorOf(m.agentId || 'x')}`}">${esc(agentIcon(m.agentId, m.agentName))}</div><div class="msg-body"><div class="msg-name">${esc(m.agentName || m.agentId || 'AI')}</div>${contentHtml}${fileTag}</div></div>`;
+        html += `<div class="msg-row"><div class="avatar ${m.agentId === butlerId ? 'butler' : ''}" style="${m.agentId === butlerId ? '' : `background:${colorOf(m.agentId || 'x')}`}">${esc(agentIcon(m.agentId, m.agentName))}</div><div class="msg-body"><div class="msg-name">${esc(m.agentName || m.agentId || 'AI')} <button class="copy-btn" onclick="copyText(decodeURIComponent('${encodeURIComponent(m.content || '')}'), this)" title="复制原始文本（含 Markdown 源码）">复制</button></div>${contentHtml}${fileTag}</div></div>`;
       }
     }
     el.innerHTML = html;

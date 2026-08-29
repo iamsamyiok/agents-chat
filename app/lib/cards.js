@@ -13,6 +13,7 @@ const path = require('path');
 const { resolveRunner, detectKernels, KERNEL_DEFS, stopScope } = require('./agent');
 const oc = require('./oc');
 const store = require('./store');
+const safejson = require('./safejson');
 
 const ROOT = path.join(__dirname, '..', '..');
 const DATA_DIR = process.env.AGENTS_CHAT_DATA || path.join(ROOT, '.data');
@@ -22,12 +23,11 @@ const TRASH_PATH = path.join(DATA_DIR, 'cards_trash.json');
 const TRASH_TTL = 30 * 24 * 3600 * 1000; // 垃圾桶默认保留 30 天
 
 function ensureDir() { if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true }); }
-// 数据损坏保护：解析失败（文件存在但 JSON 损坏）时备份原文件并置损坏标记；
-// 后续写入直接拒绝，防止「读到空列表 → 新增一条 → 覆盖写」把用户全部卡牌冲掉
-const corrupted = new Set(); // 已损坏的文件路径
+// 数据损坏保护（safejson 公共层）：解析失败 → 备份 .corrupt-* 并只读；写入一律原子替换
+const corrupted = new Set(); // 已损坏的文件路径（本模块文件）
 function cachedReader(file, cacheBox) {
   return function read() {
-    if (corrupted.has(file)) return [];
+    if (safejson.isCorrupted(file)) return [];
     try {
       const st = fs.statSync(file);
       if (cacheBox.list && st.mtimeMs === cacheBox.mtime) return cacheBox.list;
@@ -39,11 +39,10 @@ function cachedReader(file, cacheBox) {
         cacheBox.mtime = 0; cacheBox.list = null;
         return [];
       }
-      // 文件存在但解析失败：备份损坏现场，进入只读保护
-      try { fs.copyFileSync(file, `${file}.corrupt-${Date.now()}`); } catch { /* ignore */ }
+      // 文件存在但解析失败：经 safejson 备份损坏现场并登记，进入只读保护
+      safejson.readJson(file, []);
       corrupted.add(file);
       cacheBox.mtime = 0; cacheBox.list = null;
-      console.error(`[cards] 数据文件损坏已备份并进入保护：${file}`);
       return [];
     }
   };
@@ -66,7 +65,8 @@ function invalidate(file) {
 }
 // 损坏保护下的写入守卫：拒绝覆盖写（保留备份供人工恢复）
 function guardWrite(file) {
-  if (corrupted.has(file)) {
+  if (corrupted.has(file) || safejson.isCorrupted(file)) {
+    corrupted.add(file);
     throw new Error(`数据文件 ${path.basename(file)} 已损坏（原文件已备份为 .corrupt-*），为防数据丢失已停止写入，请人工检查 ${DATA_DIR} 后删除损坏标记文件`);
   }
 }
@@ -74,9 +74,7 @@ function writeCards(list) {
   ensureDir();
   guardWrite(CARDS_PATH);
   invalidate(CARDS_PATH);
-  const tmp = CARDS_PATH + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(list, null, 2), 'utf8');
-  fs.renameSync(tmp, CARDS_PATH);
+  safejson.writeJson(CARDS_PATH, list);
 }
 function readConfig() {
   const v = readConfigRaw();
@@ -86,16 +84,17 @@ function writeConfig(cfg) {
   ensureDir();
   guardWrite(CARDS_CFG_PATH);
   invalidate(CARDS_CFG_PATH);
-  fs.writeFileSync(CARDS_CFG_PATH, JSON.stringify(cfg, null, 2), 'utf8');
+  safejson.writeJson(CARDS_CFG_PATH, cfg);
 }
 function readTrash() {
   const v = readTrashRaw();
   return Array.isArray(v) ? v.slice() : [];
 }
 function writeTrash(list) {
+  ensureDir();
   guardWrite(TRASH_PATH);
   invalidate(TRASH_PATH);
-  fs.writeFileSync(TRASH_PATH, JSON.stringify(list, null, 2), 'utf8');
+  safejson.writeJson(TRASH_PATH, list);
 }
 // 启动时清理超过 30 天的垃圾桶快照，并连带清除其日志，避免占用磁盘
 (function purgeTrash() {
@@ -161,11 +160,15 @@ const CardStore = {
   // 拖拽重排：order 重编 + priority 按新顺序重映射（保值域、变归属），
   // 使调度顺序恒等于看板顺序（priority 仍是排序主键，但层内次序由拖拽决定）
   reorder(ids) {
+    // 全量重编：传入 ids 按新顺序排前，未涉及的卡保持原相对顺序排后，
+    // 保证全表 order/priority 唯一且连续（部分重排不再产生并列 order）
     const list = readCards();
-    const map = new Map(list.map(c => [c.id, c]));
-    const ordered = ids.map(id => map.get(id)).filter(Boolean);
-    const prios = ordered.map(c => (c.priority === undefined ? 999 : c.priority)).sort((a, b) => a - b);
-    ordered.forEach((c, i) => { c.order = i + 1; c.priority = prios[i]; });
+    const idSet = new Set(ids);
+    const ordered = ids.map(id => list.find(c => c.id === id)).filter(Boolean);
+    const rest = list.filter(c => !idSet.has(c.id));
+    const seq = [...ordered, ...rest];
+    const prios = seq.map(c => (c.priority === undefined ? 999 : c.priority)).sort((a, b) => a - b);
+    seq.forEach((c, i) => { c.order = i + 1; c.priority = prios[i]; });
     writeCards(list);
     return true;
   },
@@ -628,7 +631,7 @@ class CardRunner {
 }
 
 // 数据文件损坏状态（供 API 告警展示）
-function getCorruptedFiles() { return [...corrupted]; }
+function getCorruptedFiles() { return [...new Set([...corrupted, ...safejson.corruptedFiles()])]; }
 
 function isValidDir(p) {
   try { return fs.existsSync(p) && fs.statSync(p).isDirectory(); } catch { return false; }

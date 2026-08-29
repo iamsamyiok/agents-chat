@@ -29,6 +29,17 @@
   .btn.danger{border-color:var(--err);color:var(--err)}
   .btn:disabled{opacity:.45;cursor:not-allowed}
   .status-pill{font-size:12px;color:var(--dim)}
+  .filter-box{display:flex;align-items:center;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+  .filter-box input{border:none;outline:none;font-size:12px;width:130px;background:transparent;color:inherit}
+  /* 详情复制按钮 */
+  .copy-btn{border:1px solid var(--line);background:transparent;color:var(--dim);font-size:11px;border-radius:4px;padding:1px 8px;cursor:pointer;margin-left:6px}
+  .copy-btn:hover{color:var(--acc2);border-color:var(--acc2)}
+  .copy-btn.done{color:#2f9e44;border-color:#2f9e44}
+  /* 看板统计条：总览 + 完成率进度 */
+  #boardStats{display:flex;align-items:center;gap:10px;padding:8px 18px;font-size:12px;color:var(--dim);border-bottom:1px solid var(--line);background:var(--panel)}
+  #boardStats b{color:inherit}
+  .done-bar{flex:1;height:6px;border-radius:3px;background:var(--line);overflow:hidden;max-width:360px}
+  .done-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc2),#2f9e44);border-radius:3px;transition:width .4s}
   .ws-box{display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 8px}
   .ws-box input{border:none;outline:none;font-size:12px;width:200px;background:transparent}
   .ws-box .ws-save{font-size:12px;color:var(--acc);cursor:pointer;white-space:nowrap}
@@ -175,6 +186,9 @@
   <h1>🗂️ 多任务编排</h1>
   <span class="status-pill" id="statusPill">空闲</span>
   <span class="kernel-chip" id="kernelChip" style="display:none"></span>
+  <div class="filter-box" title="按标题或内容即时过滤看板">
+    🔍 <input id="cardFilter" placeholder="搜索任务…" autocomplete="off" />
+  </div>
   <span class="sp"></span>
   <div class="ws-box" title="工作区：选定后 Agent 在该目录读写相关文件（可选）">
     📁 <input id="wsInput" placeholder="工作文件夹（点右侧选择）" />
@@ -195,6 +209,13 @@
 <div class="kernel-banner" id="kernelBanner"></div>
 
 <div class="procbar" id="procBar"><span class="ptitle">进程：</span><span class="proc-empty">无运行中的 opencode 进程</span></div>
+
+<div id="boardStats">
+  <b id="stTotal">0</b> 项任务
+  <span id="stDoneRate">完成率 0%</span>
+  <div class="done-bar"><i id="stDoneBar" style="width:0%"></i></div>
+  <span id="stFailed" style="color:#c92a2a"></span>
+</div>
 
 <main>
   <!-- 左侧：依赖图面板（约 1/4 宽，可收起） -->
@@ -264,7 +285,7 @@
     <div class="detail-err" id="dError" style="display:none"></div>
     <label>执行过程（实时）</label>
     <div class="detail-log" id="dLog"><span class="empty">暂无过程记录</span></div>
-    <label>最终结果</label>
+    <label>最终结果 <button class="copy-btn" id="dResultCopy" title="复制完整结果文本">复制</button></label>
     <div class="detail-result" id="dResult"><span class="empty">尚未产生结果</span></div>
     <div class="followup-box" id="fuBox">
       <div class="fu-head">💬 追加聊天 <span class="fu-st" id="fuState"></span></div>
@@ -331,6 +352,23 @@ async function loadCards(){
   renderGraph();
   loadTrashCount();
 }
+
+// 文本复制（优先剪贴板 API，旧环境回退 execCommand）
+function copyText(text, btn){
+  const done=()=>{ if(!btn) return; const old=btn.textContent; btn.textContent='已复制'; btn.classList.add('done'); setTimeout(()=>{ btn.textContent=old; btn.classList.remove('done'); },1200); };
+  const s=String(text==null?'':text);
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(s).then(done).catch(()=>{ fallbackCopy(s); done(); }); }
+  else { fallbackCopy(s); done(); }
+}
+function fallbackCopy(s){
+  const ta=document.createElement('textarea');
+  ta.value=s; ta.style.cssText='position:fixed;opacity:0';
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); }catch(e){}
+  document.body.removeChild(ta);
+}
+// 搜索过滤：输入即时重渲染
+$('#cardFilter').addEventListener('input', render);
 
 // 内核状态展示：正常=头部小徽标；缺失/演示模式/数据保护=醒目横幅
 function renderKernelBanner(){
@@ -474,10 +512,20 @@ document.addEventListener('dragover', e=>{ window.__dropY = e.clientY; }, true);
 function render(){
   const cols = {pending:$('#colPending'),running:$('#colRunning'),done:$('#colDone'),failed:$('#colFailed')};
   for(const k in cols) cols[k].innerHTML='';
+  // 搜索过滤：按标题 + 内容即时匹配（空串 = 全部）
+  const q=(($('#cardFilter').value||'').trim().toLowerCase());
+  const shown = q ? CARDS.filter(c=>((c.title||'')+'\n'+(c.content||'')).toLowerCase().includes(q)) : CARDS;
   let counts={pending:0,running:0,done:0,failed:0};
-  for(const c of CARDS){ counts[c.status]=(counts[c.status]||0)+1; (cols[c.status]||cols.pending).appendChild(cardEl(c)); }
+  for(const c of shown){ counts[c.status]=(counts[c.status]||0)+1; (cols[c.status]||cols.pending).appendChild(cardEl(c)); }
   $('#cntPending').textContent=counts.pending||''; $('#cntRunning').textContent=counts.running||'';
   $('#cntDone').textContent=counts.done||''; $('#cntFailed').textContent=counts.failed||'';
+  // 统计条：全部卡的总览（不受过滤影响）+ 完成率
+  const total=CARDS.length, doneN=CARDS.filter(c=>c.status==='done').length, failedN=CARDS.filter(c=>c.status==='failed').length;
+  $('#stTotal').textContent=total;
+  const pct= total? Math.round(doneN/total*100):0;
+  $('#stDoneRate').textContent=`完成率 ${pct}%（${doneN}/${total}）`;
+  $('#stDoneBar').style.width=pct+'%';
+  $('#stFailed').textContent= failedN? `失败 ${failedN}` : '';
   // 空看板引导：一个任务都没有时给出上手入口（含示例）
   if(!CARDS.length){
     cols.pending.innerHTML=`<div class="board-guide">
@@ -487,6 +535,12 @@ function render(){
         <button class="btn" id="btnExamples">📦 载入示例任务</button>
       </div></div>`;
     const be=$('#btnExamples'); if(be) be.onclick=loadExamples;
+    for(const k of ['running','done','failed']) cols[k].innerHTML='<div class="empty">—</div>';
+    return;
+  }
+  // 搜索无匹配：给出明确反馈与一键清除
+  if(q && !shown.length){
+    cols.pending.innerHTML=`<div class="board-guide">没有匹配「${esc(q)}」的任务<div class="bg-actions"><button class="btn" onclick="document.getElementById('cardFilter').value='';render()">清除搜索</button></div></div>`;
     for(const k of ['running','done','failed']) cols[k].innerHTML='<div class="empty">—</div>';
     return;
   }
@@ -698,6 +752,8 @@ async function openDetail(id){
   log.scrollTop=log.scrollHeight;
   const res=$('#dResult');
   if(card.result) res.textContent=card.result; else res.innerHTML='<span class="empty">尚未产生结果</span>';
+  const rCopy=$('#dResultCopy');
+  if(rCopy){ rCopy.disabled=!card.result; rCopy.title=card.result?'复制完整结果文本':'尚无结果可复制'; rCopy.onclick=()=>copyText(card.result||'', rCopy); }
   $('#dRun').style.display = (card.status==='running')?'none':'inline-block';
   // 追加聊天：任务结束（非 pending/running）即可用；无会话时提示限制
   const fuOk = card.status!=='pending' && card.status!=='running';
