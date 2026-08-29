@@ -1,19 +1,24 @@
 #!/usr/bin/env node
 /**
  * agents-chat CLI 入口
- * 
+ *
  * 用法:
- *   agents-chat          # 启动服务（后台运行）
- *   agents-chat start    # 同上
- *   agents-chat stop     # 停止服务
- *   agents-chat status   # 查看服务状态
- *   agents-chat open     # 仅打开浏览器
+ *   agents-chat            # 启动服务（后台运行）
+ *   agents-chat start      # 同上
+ *   agents-chat stop       # 停止服务
+ *   agents-chat status     # 查看服务状态（含版本与更新检查）
+ *   agents-chat open       # 仅打开浏览器
+ *   agents-chat update     # 检查并一键升级到 npm 最新版
+ *   agents-chat version    # 查看当前版本
  */
 
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+
+const PKG = require('../package.json');
+const { checkLatest, UPDATE_COMMAND } = require('../app/lib/updatecheck');
 
 const PORT = parseInt(process.env.AGENTS_CHAT_PORT || '3456', 10);
 const PID_FILE = path.join(os.homedir(), '.agents-chat.pid');
@@ -216,6 +221,52 @@ function showStatus() {
       console.log('发现残留进程，已清理');
     }
   }
+  console.log(`当前版本: v${PKG.version}`);
+  checkLatest().then((upd) => {
+    if (!upd) { console.log('更新检查: 网络不可用，跳过'); return; }
+    if (upd.updateAvailable) {
+      console.log(`可用更新: v${upd.latest}（运行 agents-chat update 一键升级）`);
+    } else {
+      console.log(`版本状态: 已是最新（npm 最新 v${upd.latest}）`);
+    }
+  });
+}
+
+// 一键升级：检测新版 → 停服务（避免文件占用/旧进程残留）→ npm 全局安装最新版
+async function updateSelf() {
+  console.log(`当前版本: v${PKG.version}`);
+  console.log('正在检查 npm 最新版本...');
+  const upd = await checkLatest({ force: true });
+  if (!upd) {
+    console.error('无法访问 npm registry（网络超时或离线），请稍后重试或手动执行:');
+    console.log(`  ${UPDATE_COMMAND}`);
+    process.exit(1);
+  }
+  if (!upd.updateAvailable) {
+    console.log(`已是最新版本 v${upd.latest}，无需升级`);
+    return;
+  }
+  console.log(`发现新版本 v${upd.latest}，开始升级...`);
+  const check = isRunning();
+  if (check.running) {
+    console.log('先停止运行中的服务（升级完成后需手动重新启动）...');
+    stopServer();
+  }
+  try {
+    execSync(UPDATE_COMMAND, { stdio: 'inherit' });
+    console.log('');
+    console.log(`升级完成: v${PKG.version} -> v${upd.latest}`);
+    console.log('运行 agents-chat 重新启动服务');
+  } catch (err) {
+    console.error('升级失败:', err.message);
+    console.log('可手动执行:');
+    console.log(`  ${UPDATE_COMMAND}`);
+    process.exit(1);
+  }
+}
+
+function showVersion() {
+  console.log(`agents-chat v${PKG.version}`);
 }
 
 // 主逻辑
@@ -235,18 +286,29 @@ switch (command) {
   case 'open':
     openBrowser();
     break;
+  case 'update':
+  case 'upgrade':
+    updateSelf();
+    break;
+  case 'version':
+  case '-v':
+  case '--version':
+    showVersion();
+    break;
   case 'help':
   case '--help':
   case '-h':
     console.log(`
-Agents Chat CLI
+Agents Chat CLI v${PKG.version}
 
 用法:
-  agents-chat          启动服务（后台运行，自动打开浏览器）
-  agents-chat start    同上
-  agents-chat stop     停止服务
-  agents-chat status   查看服务状态
-  agents-chat open     仅打开浏览器
+  agents-chat            启动服务（后台运行，自动打开浏览器）
+  agents-chat start      同上
+  agents-chat stop       停止服务
+  agents-chat status     查看服务状态（含版本与更新检查）
+  agents-chat open       仅打开浏览器
+  agents-chat update     检查并一键升级到 npm 最新版
+  agents-chat version    查看当前版本
 
 环境变量:
   AGENTS_CHAT_PORT     端口号 (默认: 3456)

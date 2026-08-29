@@ -190,6 +190,18 @@
   /* 空看板引导 */
   .board-guide{grid-column:1/-1;text-align:center;padding:40px 10px;color:var(--dim)}
   .board-guide .bg-actions{display:flex;gap:10px;justify-content:center;margin-top:14px}
+  /* 使用帮助 */
+  .help-sec{margin:0 0 14px}
+  .help-sec h4{margin:0 0 6px;font-size:13.5px;color:var(--acc)}
+  .help-sec ul,.help-sec ol{margin:0;padding-left:20px}
+  .help-sec li{margin:4px 0;font-size:12.5px;line-height:1.65;color:#333}
+  .help-sec code{background:var(--bg2);padding:1px 5px;border-radius:4px;font-size:11.5px;color:var(--acc)}
+  .help-sec p{font-size:12.5px;line-height:1.65;color:#333;margin:6px 0}
+  /* 版本徽标与更新提示条 */
+  .ver-chip{font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:10px;padding:2px 8px;white-space:nowrap}
+  .update-bar{position:fixed;top:0;left:0;right:0;z-index:60;background:#fffbe6;border-bottom:1px solid #ffe58f;color:#614700;font-size:12.5px;padding:7px 14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .update-bar button{border:1px solid #d8b94a;background:#fff;border-radius:5px;padding:2px 10px;font-size:12px;cursor:pointer;color:#614700}
+  .update-bar button:hover{background:#fff7d6}
 </style>
 </head>
 <body>
@@ -216,6 +228,8 @@
   <button class="btn primary" id="btnRun" title="按依赖与优先级调度全部待执行任务">▶ 开始编排</button>
   <button class="btn danger" id="btnStop" disabled title="停止编排：进行中的任务复位为待执行（不影响追加聊天），未开始的任务保留">⏹ 停止</button>
   <button class="btn" id="btnClear">清空</button>
+  <button class="btn" id="btnHelp" title="多任务编排使用帮助">❓ 帮助</button>
+  <span class="ver-chip" id="verChip" title="当前版本"></span>
 </header>
 
 <div class="kernel-banner" id="kernelBanner"></div>
@@ -316,6 +330,14 @@
 </div>
 
 <!-- 垃圾桶 -->
+<!-- 使用帮助 -->
+<div class="mask" id="helpMask">
+  <div class="modal" style="width:min(720px,94vw);max-height:86vh;overflow-y:auto">
+    <h3>❓ 多任务编排使用帮助</h3>
+    <div id="helpBody"></div>
+    <div class="foot"><button class="btn primary" id="helpClose">关闭</button></div>
+  </div>
+</div>
 <div class="mask" id="trashMask">
   <div class="modal">
     <h3>🗑️ 垃圾桶 <span style="font-size:12px;color:var(--dim)">（保留 30 天内删除的任务快照）</span></h3>
@@ -360,6 +382,7 @@ async function loadCards(){
   if(data.config) $('#wsInput').value = data.config.workspace || '';
   if(data.maxParallel) $('#parallelSel').value = String(data.maxParallel);
   renderKernelBanner();
+  renderUpdateInfo(data);
   render();
   renderGraph();
   loadTrashCount();
@@ -930,6 +953,83 @@ async function openTrash(){
 }
 $('#trashFab').onclick=openTrash;
 $('#trashClose').onclick=()=>$('#trashMask').classList.remove('show');
+
+// ---------- 使用帮助 ----------
+function openHelp(){
+  $('#helpBody').innerHTML = `
+  <div class="help-sec"><h4>🗂 这是什么</h4>
+    <p>把要做的事写成一张张「任务卡牌」，程序按<b>依赖关系与优先级</b>自动调度 AI 执行：上游完成才启动下游，无依赖的任务并行跑。适合批量任务、流水线作业（翻译→润色→排版）与多分支并行调研。</p>
+    <p>与群聊的关系：群聊是「对话式」由管家现场拆解调度；本页是「清单式」由你预先定义好每张卡，执行过程可暂停、追问、重跑。</p>
+  </div>
+  <div class="help-sec"><h4>🚀 快速开始（三步）</h4>
+    <ol>
+      <li>「＋ 新建任务」：写标题与任务内容（描述越具体越好，支持 Markdown）</li>
+      <li>（可选）在表单里选「依赖任务」：被依赖的卡完成后本卡才执行</li>
+      <li>「▶ 开始编排」：按依赖拓扑 + 优先级自动调度全部待执行卡牌</li>
+    </ol>
+  </div>
+  <div class="help-sec"><h4>⚙ 三种执行模式（新建任务表单）</h4>
+    <ul>
+      <li><b>新进程（new）</b>：独立会话执行，互不影响——默认</li>
+      <li><b>同会话续聊（continue）</b>：接续某张卡（续聊链首）的会话继续，AI 记得之前的成果，适合「初稿→修改→定稿」链</li>
+      <li><b>并行独立进程（parallel）</b>：与前后卡同时开跑，适合批量同类任务（同时查 5 个城市天气）</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>🔀 依赖、优先级与并行度</h4>
+    <ul>
+      <li><b>依赖任务</b>可多选：全部完成后本卡才可执行（失败/跳过的依赖会阻断）</li>
+      <li><b>优先级</b>数字越小越先执行；拖拽看板卡到新位置会按新顺序自动重写优先级</li>
+      <li>顶栏 <b>⚡ 并行</b>（1-8）：同时执行的最大任务数，改完即时生效</li>
+      <li>左下角「▶ 依赖图」可视化全部依赖关系，可放大查看</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>📌 看板四列</h4>
+    <ul>
+      <li>待执行 → 执行中 → 完成 / 失败；卡牌角标显示该卡过程消息条数</li>
+      <li>失败列的「↻ 全部重跑」把失败卡重置为待执行并立即重新编排</li>
+      <li>顶栏搜索框按标题/内容即时过滤看板；统计条实时显示总数与完成率</li>
+      <li>删除的卡进入回收站，可随时恢复（清空需二次确认）</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>💬 追问（完成后继续聊）</h4>
+    <ul>
+      <li>点开已完成的卡，详情页底部可输入追加消息：同一会话继续对话（让它改改措辞、补个章节都行）</li>
+      <li>追问期间不影响其他卡牌执行；追问结果计入该卡日志</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>📄 详情、日志与导出</h4>
+    <ul>
+      <li>点任意卡看执行过程（实时滚动，含工具调用）、最终结果与失败原因</li>
+      <li>「⬇ 导出」把该卡导出为 Markdown（元信息 + 过程 + 结果），适合汇报存档</li>
+      <li>「🗑 清空」只清看板卡牌，群聊/单聊数据不受影响</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>📁 工作区与内核</h4>
+    <ul>
+      <li>顶栏「工作文件夹」：选定后 Agent 在该目录读写相关文件（写代码、改文档直接落到你指定的目录），可选</li>
+      <li>执行内核与群聊共用同一套（opencode / Claude Code / Codex / pi），在群聊页「⚙ 智能体配置」里切换</li>
+      <li>头部徽标显示当前内核；未检测到内核时顶部横幅会给出安装指引</li>
+    </ul>
+  </div>`;
+  $('#helpMask').classList.add('show');
+}
+$('#btnHelp').onclick=openHelp;
+$('#helpClose').onclick=()=>$('#helpMask').classList.remove('show');
+$('#helpMask').addEventListener('click',e=>{ if(e.target.id==='helpMask') e.target.classList.remove('show'); });
+
+// ---------- 版本徽标与更新提示 ----------
+function renderUpdateInfo(data){
+  if(data.version) $('#verChip').textContent='v'+data.version;
+  if(!data.updateAvailable) return;
+  if(document.getElementById('updateBar')) return;
+  const bar=document.createElement('div');
+  bar.id='updateBar'; bar.className='update-bar';
+  bar.innerHTML='📦 发现新版本 <b>v'+esc(data.latestVersion)+'</b>（当前 v'+esc(data.version)+'）：终端运行 <code>agents-chat update</code> 一键升级，或执行 <code>'+esc(data.updateCommand)+'</code>'
+    +' <button id="updateCopy">复制升级命令</button>';
+  document.body.prepend(bar);
+  document.body.style.paddingTop='34px';
+  $('#updateCopy').onclick=()=>copyText(data.updateCommand||('npm install -g @iamsamyiok/agents-chat@latest'));
+}
 $('#trashEmpty').onclick=async()=>{ if(!confirm('确认清空垃圾桶？所有快照及其过程日志将被永久删除，不可恢复。'))return; const r=await post('/api/cards/trash/empty'); toast('已清空 '+r.cleared+' 项'); await loadCards(); };
 
 // ---- 进程状态条（PID + 工作状态，SSE 事件驱动 + 2s 轮询兜底） ----

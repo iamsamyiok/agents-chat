@@ -440,6 +440,7 @@
         <button class="cfg-btn" id="agentsCfgBtn" onclick="openAgents()">⚙ 智能体配置</button>
         <button class="cfg-btn" id="cardsNavBtn" onclick="openCards()" title="多任务编排 · 卡牌：把任务写成卡牌，Agent 干完一件自动注入下一件">🗂️ 多任务编排</button>
         <span class="runner-tag" id="runnerTag" style="display:none"></span>
+        <span class="ver-chip" id="verChip" title="当前版本" style="font-size:11px;color:#999;border:1px solid #e2e2e2;border-radius:10px;padding:2px 8px;white-space:nowrap"></span>
         <button class="cfg-btn" id="helpBtn" onclick="openHelp()" title="使用帮助">❓ 帮助</button>
       </div>
     </header>
@@ -665,7 +666,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.20.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.26.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -759,6 +760,7 @@ async function init() {
   if (health.version && health.version !== PAGE_VERSION) {
     addSys(`⚠ 页面版本（${PAGE_VERSION}）与服务端（${health.version}）不一致：浏览器缓存了旧页面，请按 Ctrl+F5 强制刷新`);
   }
+  renderUpdateInfo(health);
 
   input.addEventListener('input', handleAtInput);
   input.addEventListener('blur', () => setTimeout(hideAt, 150));
@@ -3249,8 +3251,31 @@ function openCards() {
   window.open('/cards', '_blank');
 }
 
+// 版本徽标与更新提示条（health 下发；无新版静默）
+function renderUpdateInfo(health) {
+  if (!health) return;
+  const chip = document.getElementById('verChip');
+  if (chip && health.version) chip.textContent = 'v' + health.version;
+  if (!health.updateAvailable || document.getElementById('updateBar')) return;
+  const bar = document.createElement('div');
+  bar.id = 'updateBar';
+  bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:60;background:#fffbe6;border-bottom:1px solid #ffe58f;color:#614700;font-size:12.5px;padding:7px 14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap';
+  bar.innerHTML = `📦 发现新版本 <b>v${esc(health.latestVersion)}</b>（当前 v${esc(health.version)}）：终端运行 <code>agents-chat update</code> 一键升级，或执行 <code>${esc(health.updateCommand)}</code> <button id="updateCopy" style="border:1px solid #d8b94a;background:#fff;border-radius:5px;padding:2px 10px;font-size:12px;cursor:pointer;color:#614700">复制升级命令</button>`;
+  document.body.prepend(bar);
+  document.body.style.paddingTop = '34px';
+  document.getElementById('updateCopy').onclick = () => copyText(health.updateCommand || 'npm install -g @iamsamyiok/agents-chat@latest');
+}
+
 function openHelp() {
   document.getElementById('helpBody').innerHTML = kernelBanner() + `
+  <div class="help-sec"><h4>🧭 三种使用模式（先选对界面）</h4>
+    <ul>
+      <li><b>👥 群聊</b>（本页默认）：一句话发给整个团队——管家理解需求、拆解任务、调度子智能体协作完成；也可以 <code>@</code> 点名。适合不确定怎么拆、需要 AI 自己规划的事</li>
+      <li><b>👤 单聊</b>（左上角开关切换）：与一个 AI 一对一连续对话，像用普通 AI 助手；同一会话多轮续聊，顶部可选默认模型。适合问答、写作、改代码这类单人事务</li>
+      <li><b>🗂️ 多任务编排</b>（顶栏按钮进入）：把任务写成卡牌清单，按依赖与优先级自动批量执行。适合一次布置一批任务、流水线作业。编排在独立页面，有专属帮助（页面右上角 ❓）</li>
+    </ul>
+    <p>三者数据互通（同一数据目录、同一套内核），随时切换界面，互不干扰。</p>
+  </div>
   <div class="help-sec"><h4>🚀 快速开始</h4>
     <ol>
       <li>本机安装任一执行内核并登录模型（模型与密钥由内核自己管理，本程序不做任何 API 配置）：<br>

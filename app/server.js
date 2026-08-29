@@ -1,6 +1,7 @@
 // Agents Chat Portable - 零依赖 HTTP 服务
 // 启动：node app/server.js [--port 3456]
-const APP_VERSION = '3.20.0'; // 页面与服务端版本互检，不一致提示强刷
+const APP_VERSION = require('../package.json').version; // 单源版本：与 package.json 始终一致（页面互检/更新检查共用）
+const { checkLatest, UPDATE_COMMAND } = require('./lib/updatecheck');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -302,9 +303,14 @@ const server = http.createServer(async (req, res) => {
     const { resolveRunner, detectKernels } = require('./lib/agent');
     const runner = resolveRunner();
     const kernels = detectKernels();
+    // 更新检查（1 小时缓存，失败静默返回 null 字段）
+    const upd = await checkLatest().catch(() => null);
     json(res, 200, {
       success: true,
       version: APP_VERSION,
+      latestVersion: upd ? upd.latest : '',
+      updateAvailable: upd ? upd.updateAvailable : false,
+      updateCommand: upd && upd.updateAvailable ? UPDATE_COMMAND : '',
       runner: runner.kind,
       kernelLabel: runner.kernel ? runner.kernel.label : '',
       kernelCmd: runner.cmd || '',
@@ -973,9 +979,13 @@ const server = http.createServer(async (req, res) => {
       runnerInfo = { kind: r.kind, label: r.kernel ? r.kernel.label : '' };
     } catch { /* ignore */ }
     const { getCorruptedFiles } = require('./lib/cards');
+    // 版本与更新信息（cards 页无 health 轮询，随主列表接口下发；1 小时缓存）
+    const upd = await checkLatest().catch(() => null);
     json(res, 200, {
       success: true, cards, running: cardRunner.isRunning(), maxParallel: cardRunner.maxP(), msgCounts: counts, config: CardStore.getConfig(),
-      followupIds: cardRunner.getFollowupIds(), runner: runnerInfo, corrupted: getCorruptedFiles()
+      followupIds: cardRunner.getFollowupIds(), runner: runnerInfo, corrupted: getCorruptedFiles(),
+      version: APP_VERSION, latestVersion: upd ? upd.latest : '', updateAvailable: upd ? upd.updateAvailable : false,
+      updateCommand: upd && upd.updateAvailable ? UPDATE_COMMAND : ''
     });
     return;
   }
@@ -1456,9 +1466,27 @@ server.listen(PORT, () => {
   startScheduler();
   startAutoStop();
   startPruneTimer();
-  console.log(`Agents Chat 已启动: http://localhost:${PORT}`);
+  console.log(`Agents Chat v${APP_VERSION} 已启动: http://localhost:${PORT}`);
   console.log(`运行内核: ${kindText}`);
   console.log('退出提示: 请用 Ctrl+C（或 agents-chat stop）退出，会自动清理执行中的 AI 子进程；直接关闭窗口可能残留正在执行的进程');
   console.log(`本机可用内核: ${avail}（配置页可切换）`);
   console.log(`数据目录: ${store.DATA_DIR}`);
+  // 开发自检：页面内 PAGE_VERSION 落后于服务端 → 提示同步，避免互检误报强刷
+  try {
+    for (const f of ['index.html', 'cards.html']) {
+      const html = fs.readFileSync(path.join(PUBLIC_DIR, f), 'utf8');
+      const m = html.match(/PAGE_VERSION\s*=\s*'([^']+)'/);
+      if (m && m[1] !== APP_VERSION) console.warn(`[版本自检] ${f} 的 PAGE_VERSION（${m[1]}）与服务端（${APP_VERSION}）不一致，发版前请同步`);
+    }
+  } catch { /* ignore */ }
+  // 异步更新检查：不阻塞启动，有新版打印一键升级提示
+  checkLatest().then((upd) => {
+    if (upd && upd.updateAvailable) {
+      console.log(`──────────────────────────────────────────────`);
+      console.log(`📦 发现新版本 v${upd.latest}（当前 v${APP_VERSION}）`);
+      console.log(`   命令行一键升级: agents-chat update`);
+      console.log(`   或手动执行: ${UPDATE_COMMAND}`);
+      console.log(`──────────────────────────────────────────────`);
+    }
+  }).catch(() => { /* ignore */ });
 });
