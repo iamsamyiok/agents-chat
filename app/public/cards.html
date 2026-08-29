@@ -1036,7 +1036,7 @@ function renderUpdateInfo(data){
     +' <button id="updateCopy">复制升级命令</button>';
   document.body.prepend(bar);
   document.body.style.paddingTop='34px';
-  $('#updateCopy').onclick=()=>copyText(data.updateCommand||('npm install -g agents-chat@latest'));
+  $('#updateCopy').onclick=()=>copyText(data.updateCommand||('npm install -g agents-chat-cli@latest'));
 }
 $('#trashEmpty').onclick=async()=>{ if(!confirm('确认清空垃圾桶？所有快照及其过程日志将被永久删除，不可恢复。'))return; const r=await post('/api/cards/trash/empty'); toast('已清空 '+r.cleared+' 项'); await loadCards(); };
 

@@ -3271,7 +3271,7 @@ function renderUpdateInfo(health) {
   bar.innerHTML = `📦 发现新版本 <b>v${esc(health.latestVersion)}</b>（当前 v${esc(health.version)}）：终端运行 <code>agents-chat update</code> 一键升级，或执行 <code>${esc(health.updateCommand)}</code> <button id="updateCopy" style="border:1px solid #d8b94a;background:#fff;border-radius:5px;padding:2px 10px;font-size:12px;cursor:pointer;color:#614700">复制升级命令</button>`;
   document.body.prepend(bar);
   document.body.style.paddingTop = '34px';
-  document.getElementById('updateCopy').onclick = () => copyText(health.updateCommand || 'npm install -g agents-chat@latest');
+  document.getElementById('updateCopy').onclick = () => copyText(health.updateCommand || 'npm install -g agents-chat-cli@latest');
 }
 
 function openHelp() {
