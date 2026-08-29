@@ -343,12 +343,17 @@ class CardRunner {
     return true;
   }
 
-  // 供前端展示：当前存活进程 + opencode 是否在工作中（近 5s 有活动即视为工作中）
+  // 供前端展示：当前存活进程 + 是否有近期活动
+  // 可靠性加固：
+  //   1) 死进程过滤——close 事件竞争窗口或异常挂起时，登记表可能残留已退出进程，
+  //      以 child.exitCode/killed 为准过滤，绝不显示死 PID（占位阶段 child=null 保留，代表启动中）
+  //   2) 活动窗口 15s——AI 长思考期间（无流式输出）不误报「空闲」
   getProcesses() {
     const out = [];
     const now = Date.now();
     for (const [cardId, p] of this.procs) {
-      out.push({ cardId, pid: p.pid || null, working: (now - (p.lastActive || 0)) < 5000 });
+      if (p.child && (p.child.exitCode !== null || p.child.killed)) continue; // 已退出的子进程：不展示
+      out.push({ cardId, pid: p.pid || null, working: (now - (p.lastActive || 0)) < 15000 });
     }
     return out;
   }

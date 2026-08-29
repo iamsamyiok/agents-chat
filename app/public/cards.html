@@ -931,7 +931,7 @@ $('#trashFab').onclick=openTrash;
 $('#trashClose').onclick=()=>$('#trashMask').classList.remove('show');
 $('#trashEmpty').onclick=async()=>{ if(!confirm('确认清空垃圾桶？所有快照及其过程日志将被永久删除，不可恢复。'))return; const r=await post('/api/cards/trash/empty'); toast('已清空 '+r.cleared+' 项'); await loadCards(); };
 
-// ---- 进程状态条（PID + 是否工作中） ----
+// ---- 进程状态条（PID + 工作状态，SSE 事件驱动 + 2s 轮询兜底） ----
 async function refreshProcs(){
   try{
     const d = await api('/api/cards/processes');
@@ -940,8 +940,9 @@ async function refreshProcs(){
     const kname = (RUNNER_INFO && RUNNER_INFO.label) || 'opencode';
     if(!procs.length){ bar.innerHTML='<span class="ptitle">进程：</span><span class="proc-empty">无运行中的 '+esc(kname)+' 进程</span>'; return; }
     bar.innerHTML='<span class="ptitle">进程：</span>'+procs.map(p=>{
-      const working=p.working;
-      return `<span class="proc-chip ${working?'':'idle'}"><span class="dot"></span><span class="pid">PID ${p.pid}</span><span class="st">${working?'工作中':'空闲'}</span></span>`;
+      const pidLabel = p.pid ? ('PID '+p.pid) : '启动中…';
+      const st = p.working ? '工作中' : '等待输出';
+      return `<span class="proc-chip ${p.working?'':'idle'}" title="${p.working?'近 15 秒内有输出活动':'进程存活，暂无新输出（长思考属正常）'}"><span class="dot"></span><span class="pid">${pidLabel}</span><span class="st">${st}</span></span>`;
     }).join('');
   }catch{ /* ignore */ }
 }
@@ -1006,6 +1007,8 @@ es.onmessage = (e)=>{
   }
   // proc 仅刷新进程条（另有 2s 轮询兜底），不重建看板 DOM
   if(ev.type==='proc'){ refreshProcs(); }
+  // 任务结束/编排停止：进程条目随之移除，立即刷新进程条（不等 2s 轮询）
+  if(ev.type==='task_done'||ev.type==='followup_done'||ev.type==='runner_stopped') refreshProcs();
   // tool 事件仅在打开对应详情时追加过程日志，避免工具密集时高频全量刷新
   if(ev.type==='tool' && OPEN_ID===ev.cardId){
     const log=$('#dLog'); if(log.querySelector('.empty')) log.innerHTML='';
