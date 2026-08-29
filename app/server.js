@@ -107,7 +107,20 @@ function readBody(req) {
   });
 }
 
+// 单文件 exe（bun compile）构建时由 scripts/build-exe.js 生成，内嵌全部页面资源；
+// npm/源码运行时该文件不存在 → 走磁盘，开发模式改页面即时生效
+let EMBEDDED_ASSETS = null;
+try { EMBEDDED_ASSETS = require('./lib/embedded-assets'); } catch { /* 开发模式 */ }
+const IS_STANDALONE = process.env.AGENTS_CHAT_STANDALONE === '1' || !!process.versions.bun; // 单文件 exe 形态（构建期注入标识）
+const RELEASES_URL = 'https://github.com/iamsamyiok/agents-chat/releases/latest';
+
 function serveStatic(res, filePath) {
+  const base = path.basename(filePath);
+  if (EMBEDDED_ASSETS && EMBEDDED_ASSETS[base] !== undefined) {
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath)] || 'text/html; charset=utf-8' });
+    res.end(EMBEDDED_ASSETS[base]);
+    return;
+  }
   fs.readFile(filePath, (err, data) => {
     if (err) {
       res.writeHead(404);
@@ -310,7 +323,8 @@ const server = http.createServer(async (req, res) => {
       version: APP_VERSION,
       latestVersion: upd ? upd.latest : '',
       updateAvailable: upd ? upd.updateAvailable : false,
-      updateCommand: upd && upd.updateAvailable ? UPDATE_COMMAND : '',
+      updateCommand: upd && upd.updateAvailable && !IS_STANDALONE ? UPDATE_COMMAND : '',
+      standalone: IS_STANDALONE,
       runner: runner.kind,
       kernelLabel: runner.kernel ? runner.kernel.label : '',
       kernelCmd: runner.cmd || '',
@@ -985,7 +999,7 @@ const server = http.createServer(async (req, res) => {
       success: true, cards, running: cardRunner.isRunning(), maxParallel: cardRunner.maxP(), msgCounts: counts, config: CardStore.getConfig(),
       followupIds: cardRunner.getFollowupIds(), runner: runnerInfo, corrupted: getCorruptedFiles(),
       version: APP_VERSION, latestVersion: upd ? upd.latest : '', updateAvailable: upd ? upd.updateAvailable : false,
-      updateCommand: upd && upd.updateAvailable ? UPDATE_COMMAND : ''
+      updateCommand: upd && upd.updateAvailable && !IS_STANDALONE ? UPDATE_COMMAND : '', standalone: IS_STANDALONE
     });
     return;
   }
@@ -1484,9 +1498,24 @@ server.listen(PORT, () => {
     if (upd && upd.updateAvailable) {
       console.log(`──────────────────────────────────────────────`);
       console.log(`📦 发现新版本 v${upd.latest}（当前 v${APP_VERSION}）`);
-      console.log(`   命令行一键升级: agents-chat update`);
-      console.log(`   或手动执行: ${UPDATE_COMMAND}`);
+      if (IS_STANDALONE) {
+        console.log(`   单文件版：请到 GitHub Releases 下载最新版覆盖`);
+        console.log(`   ${RELEASES_URL}`);
+      } else {
+        console.log(`   命令行一键升级: agents-chat update`);
+        console.log(`   或手动执行: ${UPDATE_COMMAND}`);
+      }
       console.log(`──────────────────────────────────────────────`);
     }
   }).catch(() => { /* ignore */ });
+  // 单文件 exe 直接双击运行：自动打开浏览器（AGENTS_CHAT_NO_OPEN=1 可关闭；npm 版由 CLI 开，避免重复）
+  if (IS_STANDALONE && process.env.AGENTS_CHAT_NO_OPEN !== '1') {
+    try {
+      const { exec } = require('child_process');
+      const url = `http://localhost:${PORT}`;
+      const cmd = process.platform === 'win32' ? `start "" "${url}"`
+        : process.platform === 'darwin' ? `open "${url}"` : `xdg-open "${url}"`;
+      setTimeout(() => { try { exec(cmd, () => {}); } catch { /* ignore */ } }, 600);
+    } catch { /* ignore */ }
+  }
 });

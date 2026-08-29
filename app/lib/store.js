@@ -5,7 +5,11 @@ const fs = require('fs');
 const path = require('path');
 const safejson = require('./safejson');
 
-const ROOT = path.join(__dirname, '..', '..');
+// 数据目录基准：单文件 exe（构建时 --define 注入 AGENTS_CHAT_STANDALONE=1）= exe 所在目录（便携，数据随身）；
+// 源码/npm 运行 = 项目根目录。AGENTS_CHAT_DATA 显式指定时优先。
+let ROOT;
+if (process.env.AGENTS_CHAT_STANDALONE === '1' && process.execPath) ROOT = path.dirname(process.execPath);
+else ROOT = path.join(__dirname, '..', '..');
 const DATA_DIR = process.env.AGENTS_CHAT_DATA || path.join(ROOT, '.data');
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 const TASKS_PATH = path.join(DATA_DIR, 'tasks.json');

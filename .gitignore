@@ -18,6 +18,10 @@ package-lock.json
 bin/node.exe
 bin/node.exe.manifest
 
+# 单文件 exe 构建产物与中间文件（scripts/build-exe.js 生成）
+dist/
+app/lib/embedded-assets.js
+
 # IDE / OS
 .vscode/
 .idea/
