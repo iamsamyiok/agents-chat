@@ -30,9 +30,14 @@ const { spawn } = require('child_process');
   } catch { /* 日志系统自身失败：静默，服务照常 */ }
 })();
 
-// 首先加载 .env（根目录，行为开关配置）
+// 首先加载 .env（行为开关配置）：
+// 1) 数据目录 .env（npm/exe 形态用户配置处：~/.agents-chat/.env 或 exe 旁 .data/.env，优先）
+// 2) 程序根目录 .env（源码开发形态）
 const { loadEnv } = require('./lib/env');
 const ROOT_DIR = path.join(__dirname, '..');
+const ENV_DATA_DIR = process.env.AGENTS_CHAT_DATA
+  || (process.env.AGENTS_CHAT_STANDALONE === '1' && process.execPath ? path.join(path.dirname(process.execPath), '.data') : '');
+loadEnv(path.join(ENV_DATA_DIR || path.join(ROOT_DIR, '.data'), '.env'));
 loadEnv(path.join(ROOT_DIR, '.env'));
 
 // ---------- 日志 tee：控制台输出同时写入 .data/server.log ----------

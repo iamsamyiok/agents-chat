@@ -215,14 +215,14 @@
   .at-tx i { font-style: normal; color: #999; font-size: 11px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
 
   /* ---------- 弹窗 ---------- */
-  #modalMask, #batchMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask, #memMask, #diffMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
+  #modalMask, #batchMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask, #memMask, #diffMask, #welcomeMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
   /* 弹窗出现动画：遮罩淡入（含毛玻璃）+ 内容上浮，全站弹窗统一节奏 */
   div[id$="Mask"] { backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
   div[id$="Mask"].show { animation: fade-in .18s ease; }
   .modal, .preview-card { animation: modal-in .24s cubic-bezier(.2,.7,.3,1); }
   @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
   @keyframes modal-in { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
-  #modalMask.show, #batchMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show, #memMask.show, #diffMask.show { display: flex; }
+  #modalMask.show, #batchMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show, #memMask.show, #diffMask.show, #welcomeMask.show { display: flex; }
   /* 团队仓库卡片 */
   .team-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
   .team-card .tc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -261,6 +261,15 @@
   .flow-detail .fd-title { font-weight: 600; margin-bottom: 6px; }
   .flow-detail .fd-files { color: #7d5ac8; }
   .modal { background: #fff; border-radius: 10px; width: 560px; max-width: 92vw; max-height: 88vh; overflow-y: auto; padding: 20px; }
+  /* 新手引导步骤卡 */
+  .onb-step { flex: 1; background: #f5f7fa; border-radius: 8px; padding: 10px; font-size: 12px; line-height: 1.6; display: flex; flex-direction: column; gap: 4px; }
+  .onb-step .onb-num { width: 22px; height: 22px; border-radius: 50%; background: #10aeff; color: #fff; font-weight: 600; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+  .onb-step span { color: #666; }
+  /* 主会话空状态欢迎卡 */
+  .main-welcome { text-align: center; padding: 44px 18px; color: #666; }
+  .main-welcome h4 { font-size: 16px; margin: 0 0 8px; color: #222; }
+  .main-welcome p { font-size: 13px; line-height: 1.9; margin: 0 0 14px; }
+  .main-welcome .onb-acts { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
   /* Git 改动视图：行级着色 */
   .diff-pre { margin: 6px 0 0; padding: 8px; background: #fff; border-radius: 6px; font-size: 12px; line-height: 1.55; overflow-x: auto; white-space: pre; font-family: ui-monospace, Menlo, Consolas, monospace; }
   .diff-pre .dl { padding: 0 4px; border-radius: 3px; }
@@ -516,6 +525,24 @@
   </div>
 </div>
 
+<!-- 新手引导弹窗 -->
+<div id="welcomeMask">
+  <div class="modal" style="width:600px">
+    <h3>👋 欢迎使用 Agents Chat</h3>
+    <div class="tip">一个页面指挥一支 AI 智能体团队：你说需求，管家拆解调度，多个智能体并行干活、互相验收。三步上手：</div>
+    <div style="display:flex;gap:10px;margin:10px 0">
+      <div class="onb-step"><div class="onb-num">1</div><b>直接聊</b><span>下方输入框发需求，管家自动安排团队分工协作</span></div>
+      <div class="onb-step"><div class="onb-num">2</div><b>批量任务</b><span>「导入任务」一次粘贴多条，可排序、可定时、可 Git 隔离</span></div>
+      <div class="onb-step"><div class="onb-num">3</div><b>无人值守</b><span>定时任务到点自动跑，完成推送通知，错过自动补跑</span></div>
+    </div>
+    <div class="tip" id="onbKernelTip" style="margin-bottom:6px"></div>
+    <div class="modal-actions">
+      <button onclick="closeWelcome(true)">我自己逛逛</button>
+      <button class="primary" onclick="seedDemoTasks()">🚀 一键体验示例（自动导入并执行）</button>
+    </div>
+  </div>
+</div>
+
 <!-- 任务 Git 改动弹窗（隔离区 diff / 合并 / 丢弃） -->
 <div id="diffMask">
   <div class="modal" style="max-width:860px">
@@ -675,6 +702,8 @@
     <h3>❓ 使用帮助</h3>
     <div id="helpBody"></div>
     <div class="modal-actions">
+      <button class="mini-btn" onclick="closeHelp(); openWelcome()">👋 重新查看新手引导</button>
+      <span style="flex:1"></span>
       <button class="primary" onclick="closeHelp()">关闭</button>
     </div>
   </div>
@@ -720,7 +749,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.32.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.33.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -838,6 +867,15 @@ async function init() {
   }
   renderUpdateInfo(health);
   refreshNotifyBtn();
+
+  // 新手引导：从未使用过（主会话无消息、无任务、本机未看过引导）→ 自动弹欢迎
+  try {
+    if (!localStorage.getItem(ONBOARD_KEY)
+      && getSess('').length === 0
+      && tasks.filter(t => t.kind !== 'scheduled').length === 0) {
+      openWelcome();
+    }
+  } catch { /* localStorage 不可用时跳过 */ }
 
   input.addEventListener('input', handleAtInput);
   input.addEventListener('blur', () => setTimeout(hideAt, 150));
@@ -1483,7 +1521,7 @@ function renderTasks() {
           ${wtBtn(t)}
           <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
         </div>`;
-      }).join('') : '<div class="task-empty">暂无顺序任务<br>点上方「导入任务」添加<br>（单聊任务由 OpenCode 单体执行）</div>';
+      }).join('') : '<div class="task-empty">暂无顺序任务<br>点上方「导入任务」添加<br>（单聊任务由 OpenCode 单体执行）<br><button class="mini-btn" style="margin-top:6px" onclick="seedDemoTasks()">🚀 试试示例任务</button></div>';
     }
     el.innerHTML = `<div class="list-sep">${taskView === 'sched' ? '定时任务（单聊 · 到点自动执行）' : '单聊任务（点击查看会话，可拖拽排序）'}</div>` + tasksHtml;
     return;
@@ -1531,7 +1569,7 @@ function renderTasks() {
 
   let tasksHtml;
   if (vis.length === 0) {
-    tasksHtml = '<div class="task-empty">暂无顺序任务<br>点上方「导入任务」添加<br>定时任务请切到上方「⏰ 定时任务」</div>';
+    tasksHtml = '<div class="task-empty">暂无顺序任务<br>点上方「导入任务」添加<br>定时任务请切到上方「⏰ 定时任务」<br><button class="mini-btn" style="margin-top:6px" onclick="seedDemoTasks()">🚀 试试示例任务</button></div>';
   } else {
     tasksHtml = vis.map((t) => {
       const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : '•';
@@ -1973,6 +2011,18 @@ function renderMessages() {
     all[i]._dom = node;
     box.appendChild(node);
     finalizeMsgLinks(all[i]); // 定稿消息中的 .md 路径变成可点击预览链接
+  }
+  // 主会话空状态：欢迎卡 + 快捷动作（新用户零点击成本看到入口）
+  if (curTaskId === '' && chatMode === 'group' && all.length === 0) {
+    box.innerHTML = `<div class="main-welcome">
+      <h4>👋 今天想让团队做点什么？</h4>
+      <p>直接在下方输入需求，管家会拆解调度智能体团队协作完成；<br>也可以先导入一批任务批量执行，或点「试试示例」看完整流程。</p>
+      <div class="onb-acts">
+        <button class="primary" onclick="seedDemoTasks()">🚀 试试示例</button>
+        <button onclick="openImport()">📥 导入任务</button>
+        <button onclick="openHelp()">📖 查看帮助</button>
+      </div>
+    </div>`;
   }
   scrollBottom();
   requestAnimationFrame(() => requestAnimationFrame(() => box.classList.remove('bulk')));
@@ -2691,6 +2741,41 @@ async function discardTaskDiff() {
   const data = await api('/api/tasks/discard', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: diffTask.id }) });
   if (data.success) { toast('隔离区已丢弃'); closeTaskDiff(); loadTasks(); }
   else toast(data.error || '丢弃失败');
+}
+
+// ---------- 新手引导与一键示例 ----------
+const ONBOARD_KEY = 'acOnboarded';
+function closeWelcome(markSeen) {
+  document.getElementById('welcomeMask').classList.remove('show');
+  if (markSeen) try { localStorage.setItem(ONBOARD_KEY, '1'); } catch { /* 隐私模式忽略 */ }
+}
+function openWelcome() {
+  const tip = document.getElementById('onbKernelTip');
+  const rs = runnerState || {};
+  if (rs.kind === 'demo') tip.innerHTML = '🧪 当前为<b>演示模式</b>（模拟输出，无需任何配置即可体验完整流程）；安装 OpenCode 后即为真实执行';
+  else if (rs.kind === 'missing') tip.innerHTML = '⚠ 未检测到执行内核，真实任务前需安装：npm install -g opencode-ai（详见帮助）';
+  else tip.innerHTML = `✅ 运行内核就绪：${rs.label || 'OpenCode'}`;
+  document.getElementById('welcomeMask').classList.add('show');
+}
+// 一键体验：自动导入一组示例任务并立即执行（群聊=管家编排双任务；单聊=OpenCode 续聊链）
+async function seedDemoTasks() {
+  closeWelcome(true);
+  const solo = chatMode === 'solo';
+  const text = solo
+    ? '1. 用一句话介绍你能帮我做什么，再列出你最擅长的三类任务\n2. -继续：针对上面三类任务，各举一个具体例子说明你会怎么完成'
+    : '1. 盘点当前工作目录的文件与子目录结构，输出一份简明的目录说明\n2. 根据上一任务的盘点结果，为这个项目生成一份 README.md 草稿';
+  const data = await api('/api/tasks/import', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, mode: 'sequential', runner: solo ? 'solo' : '' })
+  });
+  if (!data.success) { toast(data.error || '示例导入失败'); return; }
+  tasks = data.tasks || [];
+  renderSidebar();
+  addSys(`🚀 已导入 ${data.added} 个示例任务，开始体验（随时可在任务列表删除）`);
+  const ids = tasks.filter(t => t.runner === (solo ? 'solo' : '') && t.kind === 'sequential' && t.status === 'pending').map(t => t.id);
+  if (!ids.length) { toast('示例任务已导入，请手动执行'); return; }
+  if (solo) await soloExecTasks(ids.slice(0, 2));
+  else await runTask(ids[0]);
 }
 
 async function clearTasks() {
