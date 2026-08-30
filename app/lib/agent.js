@@ -349,10 +349,13 @@ function runAgent(agent, prompt, onChunk, scope) {
 }
 
 // 智能体工作目录（全局统一）：
-// - 环境变量 AGENTS_CHAT_CWD 优先（卡牌 workspace 等单次执行场景注入）
+// - 任务隔离上下文优先（worktree 任务执行期间注入，见 lib/worktree.js runWithTaskCwd）
+// - 环境变量 AGENTS_CHAT_CWD 次之（卡牌 workspace 等单次执行场景注入）
 // - 配置了有效 globalCwd → 所有智能体共用该目录（文件资料集中在一处）
 // - 否则默认 <数据目录>/workspace/ 共享目录
 function resolveCwd() {
+  const wtCwd = require('./worktree').currentTaskCwd();
+  if (wtCwd) return wtCwd;
   const envCwd = String(process.env.AGENTS_CHAT_CWD || '').trim();
   if (envCwd) {
     try { if (fs.existsSync(envCwd) && fs.statSync(envCwd).isDirectory()) return envCwd; } catch { /* ignore */ }

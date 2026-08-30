@@ -215,14 +215,14 @@
   .at-tx i { font-style: normal; color: #999; font-size: 11px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
 
   /* ---------- 弹窗 ---------- */
-  #modalMask, #batchMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask, #memMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
+  #modalMask, #batchMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask, #memMask, #diffMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
   /* 弹窗出现动画：遮罩淡入（含毛玻璃）+ 内容上浮，全站弹窗统一节奏 */
   div[id$="Mask"] { backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
   div[id$="Mask"].show { animation: fade-in .18s ease; }
   .modal, .preview-card { animation: modal-in .24s cubic-bezier(.2,.7,.3,1); }
   @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
   @keyframes modal-in { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
-  #modalMask.show, #batchMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show, #memMask.show { display: flex; }
+  #modalMask.show, #batchMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show, #memMask.show, #diffMask.show { display: flex; }
   /* 团队仓库卡片 */
   .team-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
   .team-card .tc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -261,6 +261,12 @@
   .flow-detail .fd-title { font-weight: 600; margin-bottom: 6px; }
   .flow-detail .fd-files { color: #7d5ac8; }
   .modal { background: #fff; border-radius: 10px; width: 560px; max-width: 92vw; max-height: 88vh; overflow-y: auto; padding: 20px; }
+  /* Git 改动视图：行级着色 */
+  .diff-pre { margin: 6px 0 0; padding: 8px; background: #fff; border-radius: 6px; font-size: 12px; line-height: 1.55; overflow-x: auto; white-space: pre; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .diff-pre .dl { padding: 0 4px; border-radius: 3px; }
+  .diff-pre .dl.add { background: #e6ffec; color: #116329; }
+  .diff-pre .dl.del { background: #ffebe9; color: #82071e; }
+  .diff-pre .dl.hun { color: #0550ae; background: #ddf4ff; }
   .modal h3 { font-size: 15px; margin-bottom: 6px; }
   .modal .tip { font-size: 12px; color: #999; line-height: 1.7; margin-bottom: 10px; }
   .modal textarea { width: 100%; height: 200px; border: 1px solid #ddd; border-radius: 6px; padding: 10px; font-size: 13px; resize: vertical; outline: none; }
@@ -510,6 +516,20 @@
   </div>
 </div>
 
+<!-- 任务 Git 改动弹窗（隔离区 diff / 合并 / 丢弃） -->
+<div id="diffMask">
+  <div class="modal" style="max-width:860px">
+    <h3 id="diffTitle">🌿 任务改动</h3>
+    <div class="tip" id="diffMeta"></div>
+    <div id="diffBody" style="max-height:52vh;overflow:auto;border:1px solid #d8dee9;border-radius:8px;padding:8px;background:#fafbfc"></div>
+    <div class="modal-actions">
+      <button class="mini-btn danger" onclick="discardTaskDiff()">🗑 丢弃隔离区</button>
+      <button class="primary" onclick="mergeTaskDiff()">合并到主目录</button>
+      <button onclick="closeTaskDiff()">关闭</button>
+    </div>
+  </div>
+</div>
+
 <!-- 导入任务弹窗 -->
 <div id="modalMask">
   <div class="modal">
@@ -522,6 +542,10 @@
     <div class="ta-wrap">
       <textarea id="importText" onkeydown="importKeydown(event)"></textarea>
       <div id="importAtMenu"></div>
+    </div>
+    <div class="ag-row" style="margin:6px 0 2px;align-items:center;gap:6px">
+      <input type="checkbox" id="importIsolated" style="width:auto">
+      <label for="importIsolated" style="flex:1;cursor:pointer">🌿 Git 隔离执行：每个任务在独立 Git worktree 分支中执行，互不污染；完成后可查看改动、合并回主目录或整体丢弃（统一工作目录需是 Git 仓库）</label>
     </div>
     <div class="modal-actions">
       <button onclick="closeImport()">取消</button>
@@ -696,7 +720,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.31.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.32.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -1402,6 +1426,15 @@ function linkBadge(t) {
     ? '<span style="color:#8a6fe8;font-size:11px;margin-right:4px" title="在上一任务的会话中继续执行（同进程续聊）">↪ 续聊</span>'
     : '<span style="color:#0a742e;font-size:11px;margin-right:4px" title="与相邻并行任务同时执行（独立进程）">⚡ 并行</span>';
 }
+// Git 隔离徽标与改动按钮
+function wtBadge(t) {
+  return t.worktree ? '<span style="color:#0a742e;font-size:11px;margin-right:4px" title="Git 隔离执行（独立 worktree 分支）">🌿</span>' : '';
+}
+function wtBtn(t) {
+  return (t.worktree && (t.status === 'done' || t.status === 'failed'))
+    ? `<button class="mini-btn" title="查看本任务在隔离区的 Git 改动（可合并/丢弃）" onclick="event.stopPropagation();openTaskDiff('${escAttr(t.id)}')">改动</button>`
+    : '';
+}
 function renderTasks() {
   const el = document.getElementById('taskList');
   const badge = document.getElementById('pendingBadge');
@@ -1424,10 +1457,11 @@ function renderTasks() {
           <div class="task-avatar st-${t.status === 'pending' ? 'scheduled' : t.status}">${icon}</div>
           <div class="task-main">
             <div class="task-title">${esc(t.title)}</div>
-            <div class="task-sub"><span>${linkBadge(t)}${st}</span></div>
+            <div class="task-sub"><span>${linkBadge(t)}${wtBadge(t)}${st}</span></div>
           </div>
           ${t.status === 'pending' ? `<button class="mini-btn" title="不再等到点，立即执行" onclick="event.stopPropagation();runSchedNow('${escAttr(t.id)}')">立即执行</button>` : ''}
           ${t.status === 'failed' ? `<button class="mini-btn" title="重新执行" onclick="event.stopPropagation();runSchedNow('${escAttr(t.id)}')">重跑</button>` : ''}
+          ${wtBtn(t)}
           <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
         </div>`;
       }).join('') : '<div class="task-empty">暂无定时任务<br>点上方「导入任务」→「定时任务」标签添加</div>';
@@ -1443,9 +1477,10 @@ function renderTasks() {
           <div class="task-avatar st-${t.status}">${icon}</div>
           <div class="task-main">
             <div class="task-title">${esc(t.title)}</div>
-            <div class="task-sub"><span>${linkBadge(t)}${statusText(t.status)}</span><span>${fmtTime(t.createdAt)}</span></div>
+            <div class="task-sub"><span>${linkBadge(t)}${wtBadge(t)}${statusText(t.status)}</span><span>${fmtTime(t.createdAt)}</span></div>
           </div>
           ${t.status === 'pending' || t.status === 'failed' ? `<button class="mini-btn" onclick="event.stopPropagation();runTask('${escAttr(t.id)}')">执行</button>` : ''}
+          ${wtBtn(t)}
           <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
         </div>`;
       }).join('') : '<div class="task-empty">暂无顺序任务<br>点上方「导入任务」添加<br>（单聊任务由 OpenCode 单体执行）</div>';
@@ -1475,10 +1510,11 @@ function renderTasks() {
           <div class="task-avatar st-${t.status === 'pending' ? 'scheduled' : t.status}">${icon}</div>
           <div class="task-main">
             <div class="task-title">${esc(t.title)}</div>
-            <div class="task-sub"><span>${st}${assign}</span></div>
+            <div class="task-sub"><span>${wtBadge(t)}${st}${assign}</span></div>
           </div>
           ${t.status === 'pending' ? `<button class="mini-btn" title="不再等到点，立即执行" onclick="event.stopPropagation();runSchedNow('${escAttr(t.id)}')">立即执行</button>` : ''}
           ${t.status === 'failed' ? `<button class="mini-btn" title="重新执行" onclick="event.stopPropagation();runSchedNow('${escAttr(t.id)}')">重跑</button>` : ''}
+          ${wtBtn(t)}
           <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
         </div>`;
       }).join('');
@@ -1505,9 +1541,10 @@ function renderTasks() {
         <div class="task-avatar st-${t.status}">${icon}</div>
         <div class="task-main">
           <div class="task-title">${esc(t.title)}</div>
-          <div class="task-sub"><span>${statusText(t.status)}${assign}</span><span>${fmtTime(t.createdAt)}</span></div>
+          <div class="task-sub"><span>${wtBadge(t)}${statusText(t.status)}${assign}</span><span>${fmtTime(t.createdAt)}</span></div>
         </div>
         ${t.status === 'pending' || t.status === 'failed' ? `<button class="mini-btn" onclick="event.stopPropagation();runTask('${escAttr(t.id)}')">执行</button>` : ''}
+        ${wtBtn(t)}
         <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
       </div>`;
     }).join('');
@@ -2571,11 +2608,17 @@ async function doImport() {
   // 单聊导入时记录当前所选模型，定时触发时用它执行（页面关闭也不丢）
   const data = await api('/api/tasks/import', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, mode: importMode, runner: chatMode === 'solo' ? 'solo' : '', model: chatMode === 'solo' ? (curOcModel || '') : '' })
+    body: JSON.stringify({
+      text, mode: importMode, runner: chatMode === 'solo' ? 'solo' : '', model: chatMode === 'solo' ? (curOcModel || '') : '',
+      isolated: !!(document.getElementById('importIsolated') || {}).checked
+    })
   });
   if (data.success) {
     tasks = data.tasks || [];
     renderSidebar();
+    if (data.isolated > 0) {
+      (chatMode === 'solo' ? addSoloSys : addSys)(`🌿 ${data.isolated} 个任务将在 Git 隔离区执行（独立分支，互不污染）`);
+    }
     if (chatMode === 'solo') {
       addSoloSys(importMode === 'scheduled'
         ? `已添加 ${data.added} 个单聊定时任务（到点由 OpenCode 自动执行）`
@@ -2589,6 +2632,65 @@ async function doImport() {
     closeImport();
     importText.value = '';
   } else toast(data.error || '导入失败');
+}
+
+// ---------- Git 隔离区改动查看 / 合并 / 丢弃 ----------
+let diffTask = null; // 当前弹窗对应的任务
+function escDiffLine(l) {
+  const e = esc(l);
+  if (l.startsWith('+')) return `<div class="dl add">${e}</div>`;
+  if (l.startsWith('-')) return `<div class="dl del">${e}</div>`;
+  if (l.startsWith('@@')) return `<div class="dl hun">${e}</div>`;
+  return `<div class="dl">${e}</div>`;
+}
+async function openTaskDiff(id) {
+  const t = tasks.find(x => x.id === id);
+  if (!t) return;
+  document.getElementById('diffTitle').textContent = `🌿 改动：${t.title.slice(0, 30)}`;
+  document.getElementById('diffMeta').textContent = '加载中…';
+  document.getElementById('diffBody').innerHTML = '';
+  document.getElementById('diffMask').classList.add('show');
+  diffTask = t;
+  const data = await api('/api/tasks/diff?id=' + encodeURIComponent(id));
+  if (!data.success) { document.getElementById('diffMeta').textContent = data.error || '加载失败'; return; }
+  const d = data.diff;
+  const addAll = d.stat.reduce((a, s) => a + (s.add || 0), 0);
+  const delAll = d.stat.reduce((a, s) => a + (s.del || 0), 0);
+  const merged = t.mergedAt ? '（已合并过）' : '';
+  document.getElementById('diffMeta').innerHTML =
+    `分支 ${esc(d.branch)}${merged} · ${d.stat.length} 个文件 · <span style="color:#0a742e">+${addAll}</span> / <span style="color:#c0392b">-${delAll}</span>${d.truncated ? '（内容过长已截断）' : ''}`;
+  if (!d.stat.length) {
+    document.getElementById('diffBody').innerHTML = '<div style="color:#666;padding:12px">隔离区没有任何改动</div>';
+    return;
+  }
+  const byFile = Object.fromEntries((d.files || []).map(f => [f.path, f.patch]));
+  document.getElementById('diffBody').innerHTML = d.stat.map(s => `
+    <details ${d.stat.length <= 5 ? 'open' : ''} style="margin-bottom:8px">
+      <summary style="cursor:pointer;font-size:13px;padding:4px 6px;background:#eef1f5;border-radius:6px">
+        <b>${esc(s.file)}</b>
+        <span style="color:#0a742e">+${s.add == null ? '二进制' : s.add}</span>
+        <span style="color:#c0392b">-${s.del == null ? '' : s.del}</span>
+      </summary>
+      <pre class="diff-pre">${(byFile[s.file] || '').split('\n').map(escDiffLine).join('')}</pre>
+    </details>`).join('');
+}
+function closeTaskDiff() {
+  document.getElementById('diffMask').classList.remove('show');
+  diffTask = null;
+}
+async function mergeTaskDiff() {
+  if (!diffTask) return;
+  if (!confirm(`把「${diffTask.title.slice(0, 30)}」的隔离区改动合并到主工作目录？\n（未提交改动会先自动提交到隔离分支，再在主目录执行 git merge）`)) return;
+  const data = await api('/api/tasks/merge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: diffTask.id }) });
+  if (data.success) { toast(data.already ? '隔离区改动此前已合并' : '已合并到主工作目录'); closeTaskDiff(); loadTasks(); }
+  else toast(data.error || '合并失败');
+}
+async function discardTaskDiff() {
+  if (!diffTask) return;
+  if (!confirm(`丢弃「${diffTask.title.slice(0, 30)}」的隔离区？\n（删除独立 worktree 与分支，其中未合并的改动将永久丢失；任务本身保留，可重新执行）`)) return;
+  const data = await api('/api/tasks/discard', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: diffTask.id }) });
+  if (data.success) { toast('隔离区已丢弃'); closeTaskDiff(); loadTasks(); }
+  else toast(data.error || '丢弃失败');
 }
 
 async function clearTasks() {
@@ -3511,6 +3613,13 @@ function openHelp() {
       <li>弹窗内实时显示 <b>Token 用量</b>（今日/累计，内核输出携带用量数据时统计）；「📊 空间占用」查看数据目录分布，「🧹 清理旧数据」手动执行一次滚动清理</li>
       <li>「🕘 历史」弹窗底部：<b>⬇ 导出 sessions.md</b> 把全部会话（含任务会话与单聊会话）导出为一个 Markdown 文件；<b>🗑 清空全部会话</b> 一键删除消息、单聊会话、会话产出文件与流转日志（任务列表保留）</li>
       <li>全部页面关闭且无任务执行/审批等待时，后台服务空闲约 1 分钟自动退出（需要定时任务到点执行请保持页面打开，或运行 <code>agents-chat autostart on</code> 开机自启；<code>.env AGENTS_CHAT_AUTOSTOP=0</code> 可关闭），需要时重新运行 start 即可</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>🌿 Git 隔离执行（worktree）</h4>
+    <ul>
+      <li>导入任务时勾选「Git 隔离执行」：每个任务在<b>独立 Git worktree 分支</b>中执行，多任务并行互不污染，失败的尝试可整体丢弃（统一工作目录需是 Git 仓库且至少有一个提交）</li>
+      <li>任务完成后任务条出现「改动」按钮：<b>逐文件查看 diff</b>（新增/删除/修改着色显示），确认后「合并到主目录」（自动提交隔离分支并 git merge，冲突会还原主目录并提示）或「丢弃隔离区」（删除该 worktree 与分支）</li>
+      <li>隔离区随数据维护自动治理：任务删除或完结超 15 天的 worktree 自动清理</li>
     </ul>
   </div>
   <div class="help-sec"><h4>🔔 完成通知</h4>

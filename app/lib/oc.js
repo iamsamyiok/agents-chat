@@ -193,9 +193,16 @@ function chatSolo(runnerKind, runner, opts, onEvent) {
   const ocSessionId = String(opts.ocSessionId || '');
   // 进程归属 scope：停止编排（stopScope('solo')）只杀编排任务，追加聊天用独立 scope 免受牵连
   const scope = String(opts.scope || 'solo');
-  // 工作区：指定后 Agent 在该目录读写文件（卡牌可选 workspace）
-  const cwd = opts.cwd && fs.existsSync(opts.cwd) && fs.statSync(opts.cwd).isDirectory() ? opts.cwd : '';
-  const cwdEnv = cwd ? { ...process.env, AGENTS_CHAT_CWD: cwd } : process.env;
+  // 工作区：指定后 Agent 在该目录读写文件（卡牌可选 workspace；任务隔离 worktree 经 ALS 注入）
+  const alsCwd = require('./worktree').currentTaskCwd();
+  const cwdInput = opts.cwd || alsCwd;
+  const cwd = cwdInput && fs.existsSync(cwdInput) && fs.statSync(cwdInput).isDirectory() ? cwdInput : '';
+  // 演示模式按调用场景选择 mock 行为（solo-task 会真实写产出文件，供隔离区 diff 演示）
+  const cwdEnv = {
+    ...process.env,
+    ...(cwd ? { AGENTS_CHAT_CWD: cwd } : {}),
+    ...(runnerKind === 'demo' ? { MOCK_BEHAVIOR: String(opts.behavior || 'echo') } : {})
+  };
 
   // ---- 演示模式：mock 子进程 + 快照模拟 ----
   if (runnerKind === 'demo') {

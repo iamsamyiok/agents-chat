@@ -1076,32 +1076,37 @@ async function runTasks(tasks, butler, subAgents, opts, emit, onMessage, onTaskS
       emit({ type: 'notice', content: '已手动停止，剩余任务保持待执行状态' });
       break;
     }
-    const prompt = `请完成以下任务并给出结果：\n${task.title}${task.notes ? `\n\n补充说明：${task.notes}` : ''}`;
-    // 先建历史背景（不含本任务的起始消息），再写入任务会话首条消息
-    const history = opts.getHistory ? opts.getHistory(task.id) : '';
-    if (onTaskStart) onTaskStart(task);
-    // 该任务产生的全部消息都归入对应任务会话
-    const persistTask = (m) => onMessage({ ...m, taskId: task.id });
+    // 任务隔离 worktree：opts.taskCwd(task) 返回隔离目录（空 = 共享目录），整任务执行期间注入 cwd 上下文
+    const taskCwd = opts.taskCwd ? String(opts.taskCwd(task) || '') : '';
+    if (taskCwd) emit({ type: 'notice', content: `🌿 本任务在 Git 隔离区执行：${taskCwd}`, taskId: task.id });
+    await require('./worktree').runWithTaskCwd(taskCwd, async () => {
+      const prompt = `请完成以下任务并给出结果：\n${task.title}${task.notes ? `\n\n补充说明：${task.notes}` : ''}`;
+      // 先建历史背景（不含本任务的起始消息），再写入任务会话首条消息
+      const history = opts.getHistory ? opts.getHistory(task.id) : '';
+      if (onTaskStart) onTaskStart(task);
+      // 该任务产生的全部消息都归入对应任务会话
+      const persistTask = (m) => onMessage({ ...m, taskId: task.id });
 
-    const assigned = opts.resolveAssign ? opts.resolveAssign(task) : null;
-    let r;
-    if (assigned && assigned.id !== butler.id) {
-      // 指派子智能体：独立完成，无管家编排
-      emit({ type: 'task_start', taskId: task.id, title: task.title, agentName: assigned.name });
-      emit({ type: 'notice', content: `本任务由 @${assigned.name} 独立完成（无管家调度）`, taskId: task.id });
-      r = await runMentioned([assigned], prompt, { taskId: task.id, history, scope: opts.scope, isStopped }, emit, persistTask);
-    } else {
-      emit({ type: 'task_start', taskId: task.id, title: task.title, agentName: butler.name });
-      r = await runButler(butler, subAgents, prompt, { taskId: task.id, history, scope: opts.scope, isStopped }, emit, persistTask);
-    }
-    let status = r.ok ? 'done' : 'failed';
-    let resultText = (r.finalText || '').trim() || '执行失败';
-    if (isStopped() && !r.ok) {
-      status = 'pending'; // 手动停止的任务回到待执行，可随时重跑
-      resultText = '已手动停止，可重新执行';
-    }
-    onTaskDone(task.id, { status, result: resultText.slice(0, 10000) });
-    emit({ type: 'task_done', taskId: task.id, status, title: task.title });
+      const assigned = opts.resolveAssign ? opts.resolveAssign(task) : null;
+      let r;
+      if (assigned && assigned.id !== butler.id) {
+        // 指派子智能体：独立完成，无管家编排
+        emit({ type: 'task_start', taskId: task.id, title: task.title, agentName: assigned.name });
+        emit({ type: 'notice', content: `本任务由 @${assigned.name} 独立完成（无管家调度）`, taskId: task.id });
+        r = await runMentioned([assigned], prompt, { taskId: task.id, history, scope: opts.scope, isStopped }, emit, persistTask);
+      } else {
+        emit({ type: 'task_start', taskId: task.id, title: task.title, agentName: butler.name });
+        r = await runButler(butler, subAgents, prompt, { taskId: task.id, history, scope: opts.scope, isStopped }, emit, persistTask);
+      }
+      let status = r.ok ? 'done' : 'failed';
+      let resultText = (r.finalText || '').trim() || '执行失败';
+      if (isStopped() && !r.ok) {
+        status = 'pending'; // 手动停止的任务回到待执行，可随时重跑
+        resultText = '已手动停止，可重新执行';
+      }
+      onTaskDone(task.id, { status, result: resultText.slice(0, 10000) });
+      emit({ type: 'task_done', taskId: task.id, status, title: task.title });
+    });
   }
   emit({ type: 'all_done' });
 }

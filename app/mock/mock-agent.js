@@ -33,10 +33,15 @@ if (behavior === 'solo-chat') {
     `已处理完成 ${DEMO_TAG}`
   ]);
 } else if (behavior === 'solo-task') {
-  // 单聊任务执行演示：输出任务结果（作为 result 持久化）
+  // 单聊任务执行演示：在工作目录真实写入一个成果文件（供 Git 隔离 diff 演示），再流式输出任务结果
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    fs.writeFileSync(path.join(process.cwd(), 'demo-solo-output.md'), '# 单聊任务演示产出\n\n演示模式下写入工作目录的成果文件。\n');
+  } catch { /* 只读目录时跳过 */ }
   streamOutput([
     `[单聊任务] 开始处理：${prompt.slice(0, 120)}`,
-    `任务完成：产出模拟结果 ${DEMO_TAG}`
+    `任务完成：产出模拟结果（已写入 demo-solo-output.md） ${DEMO_TAG}`
   ]);
 } else if (behavior === 'echo') {
   if (prompt.includes('【委派背景】')) {

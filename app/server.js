@@ -629,8 +629,18 @@ const server = http.createServer(async (req, res) => {
     }
     const mode = body.mode === 'scheduled' ? 'scheduled' : 'sequential';
     const runner = body.runner === 'solo' ? 'solo' : '';
-    const { added, warnings } = store.importTasks(body.text, mode, runner, body.model);
-    json(res, 200, { success: true, added, warnings, mode, runner, tasks: store.getTasks() });
+    const { added, warnings, addedTasks } = store.importTasks(body.text, mode, runner, body.model);
+    // Git 隔离执行：为每个新任务创建独立 worktree（工作目录是 git 仓库时生效）
+    let isolated = 0;
+    if (body.isolated && Array.isArray(addedTasks)) {
+      const worktree = require('./lib/worktree');
+      for (const t of addedTasks) {
+        const wt = await worktree.createForTask(t.id);
+        if (wt) { store.updateTask(t.id, { worktree: wt }); isolated++; }
+      }
+      if (!isolated) warnings.push('统一工作目录不是 Git 仓库（或没有任何提交），任务将按共享目录执行');
+    }
+    json(res, 200, { success: true, added, warnings, mode, runner, isolated, tasks: store.getTasks() });
     return;
   }
 
@@ -647,11 +657,59 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/tasks/delete' && req.method === 'POST') {
-    // 删除任务及其会话消息
+    // 删除任务及其会话消息；Git 隔离区一并清理
     const body = await readBody(req);
     if (!body.id) { json(res, 400, { success: false, error: 'id 不能为空' }); return; }
+    const t = store.getTasks().find(x => x.id === String(body.id));
+    if (t && t.worktree) {
+      require('./lib/worktree').removeForTask(t.worktree).catch(() => {});
+    }
     store.deleteTask(String(body.id));
     json(res, 200, { success: true, tasks: store.getTasks() });
+    return;
+  }
+
+  // ---------- Git 隔离区：改动查看 / 合并 / 丢弃 ----------
+  if (p === '/api/tasks/diff' && req.method === 'GET') {
+    const t = store.getTasks().find(x => x.id === String(parsed.query.id || ''));
+    if (!t || !t.worktree) { json(res, 404, { success: false, error: '任务不存在或无隔离区' }); return; }
+    try {
+      const d = await require('./lib/worktree').diff(t.worktree, { withPatch: true });
+      json(res, 200, { success: true, task: { id: t.id, title: t.title, status: t.status }, diff: d });
+    } catch (e) {
+      json(res, 500, { success: false, error: String((e && e.message) || e) });
+    }
+    return;
+  }
+
+  if (p === '/api/tasks/merge' && req.method === 'POST') {
+    const body = await readBody(req);
+    const t = store.getTasks().find(x => x.id === String(body.id || ''));
+    if (!t || !t.worktree) { json(res, 404, { success: false, error: '任务不存在或无隔离区' }); return; }
+    if (runLocks.tasks) { json(res, 409, { success: false, error: '任务批次执行中，暂不能合并' }); return; }
+    try {
+      const r = await require('./lib/worktree').mergeToMain(t.worktree, t.title);
+      if (r.ok) store.updateTask(t.id, { mergedAt: Date.now() });
+      json(res, 200, { success: r.ok, already: !!r.already, error: r.error || '' });
+    } catch (e) {
+      json(res, 500, { success: false, error: String((e && e.message) || e) });
+    }
+    return;
+  }
+
+  if (p === '/api/tasks/discard' && req.method === 'POST') {
+    // 丢弃隔离区：删除 worktree 与分支，任务保留（可重跑重建）
+    const body = await readBody(req);
+    const t = store.getTasks().find(x => x.id === String(body.id || ''));
+    if (!t || !t.worktree) { json(res, 404, { success: false, error: '任务不存在或无隔离区' }); return; }
+    if (runLocks.tasks) { json(res, 409, { success: false, error: '任务批次执行中，暂不能丢弃' }); return; }
+    try {
+      const r = await require('./lib/worktree').removeForTask(t.worktree);
+      if (r.ok) store.updateTask(t.id, { worktree: null });
+      json(res, 200, { success: r.ok, error: r.error || '' });
+    } catch (e) {
+      json(res, 500, { success: false, error: String((e && e.message) || e) });
+    }
     return;
   }
 
@@ -1344,7 +1402,7 @@ async function executeTaskBatch(selected, send, myToken) {
   const persist = (m) => store.addMessage({ ...m, timestamp: new Date().toISOString() });
   await runTasks(
     selected, butler, subAgents,
-    { getHistory: (tid) => buildHistoryText(tid), resolveAssign, scope: 'tasks', isStopped: () => stopTokens.tasks !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval() },
+    { getHistory: (tid) => buildHistoryText(tid), resolveAssign, scope: 'tasks', isStopped: () => stopTokens.tasks !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval(), taskCwd: (task) => (task.worktree && task.worktree.dir) || '' },
     send, persist,
     // 任务会话首条消息：任务本身（用户视角）
     (task) => {
@@ -1397,7 +1455,11 @@ async function executeSoloTaskBatch(selected, send, myToken) {
     const order = [];
     let doneError = '';
     let sesId = ocSessionId || '';
-    await new Promise((resolve) => {
+    // 任务隔离 worktree：整任务执行期间注入 cwd 上下文（ALS，与并发请求互不干扰）
+    const worktreeMod = require('./lib/worktree');
+    const wtDir = task.worktree && task.worktree.dir ? task.worktree.dir : '';
+    if (wtDir) send({ type: 'notice', content: `🌿 本任务在 Git 隔离区执行：${wtDir}`, taskId: task.id });
+    await worktreeMod.runWithTaskCwd(wtDir, () => new Promise((resolve) => {
       const kind = runner.kind === 'demo' ? 'demo' : (runner.kind === 'opencode' ? 'opencode' : 'fallback');
       oc.chatSolo(kind, runner, {
         prompt: cont
@@ -1422,7 +1484,7 @@ async function executeSoloTaskBatch(selected, send, myToken) {
           resolve();
         }
       });
-    });
+    }));
 
     const finalText = order.map(id => texts.get(id)).join('\n\n').trim();
     if (finalText) {
@@ -1503,6 +1565,10 @@ const PRUNE_DAYS = Number(process.env.AGENTS_CHAT_PRUNE_DAYS) > 0 ? Number(proce
 function pruneOldDataQuiet() {
   try {
     const stat = store.pruneOldData(PRUNE_DAYS);
+    // Git 隔离区同步治理：无主（任务已删）或完结超期的 worktree 一并清理
+    require('./lib/worktree').pruneStale(PRUNE_DAYS, store.getTasks())
+      .then(ws => { if (ws.worktrees) { stat.worktrees = ws.worktrees; console.log('[maintenance] 清理过期 Git 隔离区:', ws.worktrees); } })
+      .catch(() => {});
     const touched = Object.values(stat).reduce((a, b) => a + b, 0);
     if (touched) console.log(`[maintenance] 自动清理超 ${PRUNE_DAYS} 天的历史数据：`, JSON.stringify(stat));
   } catch (e) { console.error('[maintenance] 自动清理失败:', e && (e.message || e)); }

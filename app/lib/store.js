@@ -397,7 +397,7 @@ function importTasks(text, mode, runner, model) {
   for (const t of tasks) { if (t.seq === undefined) t.seq = next++; else next = Math.max(next, t.seq + 1); }
   for (const t of parsed) { t.seq = next++; if (runner === 'solo' && model) t.model = String(model); }
   saveTasks(tasks.concat(parsed));
-  return { added: parsed.length, warnings };
+  return { added: parsed.length, warnings, addedTasks: parsed };
 }
 
 // 拖拽排序：按给定 id 顺序重编 seq（ids 应为全量，未包含的追加在末尾）

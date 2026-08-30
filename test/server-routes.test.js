@@ -91,6 +91,28 @@ test('GET /api/search 关键词检索', async () => {
   assert.ok(body.results[0].snippet.includes('needle-xyz'));
 });
 
+test('Git 隔离路由边界：无隔离区返回 404', async () => {
+  // 先导入一个普通（非隔离）任务
+  const imp = await fetch(BASE + '/api/tasks/import', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '1. 普通任务', mode: 'sequential', runner: 'solo' })
+  });
+  const ib = await imp.json();
+  assert.ok(ib.success);
+  const tid = ib.tasks.find(t => t.title.includes('普通任务')).id;
+  // diff：任务存在但无隔离区 → 404
+  const d = await get('/api/tasks/diff?id=' + tid);
+  assert.strictEqual(d.status, 404);
+  // merge/discard：同上
+  const m = await fetch(BASE + '/api/tasks/merge', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: tid }) });
+  assert.strictEqual(m.status, 404);
+  const dc = await fetch(BASE + '/api/tasks/discard', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: tid }) });
+  assert.strictEqual(dc.status, 404);
+  // 不存在的任务 id → 404
+  const d2 = await get('/api/tasks/diff?id=not-exist');
+  assert.strictEqual(d2.status, 404);
+});
+
 test('GET /api/usage 与 /api/data/stats', async () => {
   const u = await get('/api/usage');
   assert.ok(u.body.usage && u.body.usage.total);
