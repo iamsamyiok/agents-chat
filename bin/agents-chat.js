@@ -70,6 +70,12 @@ function startServer() {
     cleanupDeadProcess(check.pid);
   }
 
+  // 兜底自动安装：postinstall 被跳过（yarn/pnpm/离线装包）时，首次 start 补装 opencode
+  try {
+    const { ensureDefaultKernel } = require('../app/lib/kernel-setup');
+    ensureDefaultKernel();
+  } catch { /* 任何失败不阻塞启动 */ }
+
   console.log(`启动 Agents Chat 服务 (端口 ${PORT})...`);
   
   const env = {

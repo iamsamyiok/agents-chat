@@ -49,6 +49,8 @@ const KERNEL_DEFS = [
 // Windows 下 npm 安装的 CLI 是 .cmd 垫片，Node 18.20+ 禁止直接 spawn，须走 shell
 // 显式路径优先级：AGENTS_CHAT_<ID>_CMD（如 AGENTS_CHAT_OPENCODE_CMD）> PATH 查找
 let detectCache = { ts: 0, map: null };
+// 安装新内核后刷新缓存（否则同进程 10 秒内仍认为未安装）
+function resetDetectCache() { detectCache = { ts: 0, map: null }; }
 
 function findCli(def) {
   const custom = process.env[`AGENTS_CHAT_${def.id.toUpperCase()}_CMD`];
@@ -484,4 +486,4 @@ function spawnMock(args, agent, env, onChunk, scope) {
   return child;
 }
 
-module.exports = { runAgent, resolveRunner, detectKernels, KERNEL_DEFS, missingHint, describeTool, stopScope, stopAllChildren, resolveCwd, registerChild };
+module.exports = { runAgent, resolveRunner, detectKernels, resetDetectCache, KERNEL_DEFS, missingHint, describeTool, stopScope, stopAllChildren, resolveCwd, registerChild };

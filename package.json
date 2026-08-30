@@ -1,6 +1,6 @@
 {
   "name": "agents-chat-cli",
-  "version": "3.29.0",
+  "version": "3.30.0",
   "description": "多智能体群聊工具 - 支持 OpenCode/Claude Code/Codex/pi 内核，微信风格聊天界面",
   "main": "lib/start.js",
   "bin": {
@@ -9,7 +9,8 @@
   "files": [
     "bin",
     "lib",
-    "app"
+    "app",
+    "scripts"
   ],
   "keywords": [
     "ai",
@@ -35,6 +36,7 @@
   "scripts": {
     "start": "node app/server.js",
     "test": "node --test \"test/*.test.js\"",
-    "build:exe": "node scripts/build-exe.js"
+    "build:exe": "node scripts/build-exe.js",
+    "postinstall": "node scripts/postinstall.js"
   }
 }
