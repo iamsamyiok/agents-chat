@@ -76,7 +76,9 @@ if (failed.length) {
 const { createHash } = require('crypto');
 const lines = [];
 for (const f of fs.readdirSync(DIST).sort()) {
+  if (!/^agents-chat-/.test(f)) continue; // 只计算产物文件（跳过 .data 等目录与旧清单）
   const fp = path.join(DIST, f);
+  try { if (!fs.statSync(fp).isFile()) continue; } catch { continue; }
   const h = createHash('sha256').update(fs.readFileSync(fp)).digest('hex');
   lines.push(`${h}  ${f}`);
 }
