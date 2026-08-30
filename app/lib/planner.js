@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const agentMod = require('./agent');
 const { extractJSONArray } = require('./teamgen');
+const safejson = require('./safejson');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = process.env.AGENTS_CHAT_DATA || path.join(ROOT, '.data');
@@ -50,11 +51,9 @@ function sessionPath(sid) {
 
 function readSession(sid) {
   if (!sidValid(sid)) return null;
-  try {
-    const s = JSON.parse(fs.readFileSync(sessionPath(sid), 'utf8'));
-    if (!s || !Array.isArray(s.messages)) return null;
-    return s;
-  } catch { return null; }
+  const s = safejson.readJson(sessionPath(sid), null); // 损坏自动备份 .corrupt-* 并进入只读保护
+  if (!s || !Array.isArray(s.messages)) return null;
+  return s;
 }
 
 function writeSession(s) {
@@ -62,7 +61,7 @@ function writeSession(s) {
   // 轮次上限：超出裁最旧（保留最近 ROUNDS_MAX 条）
   if (s.messages.length > ROUNDS_MAX) s.messages = s.messages.slice(-ROUNDS_MAX);
   s.updatedAt = new Date().toISOString();
-  fs.writeFileSync(sessionPath(s.sid), JSON.stringify(s, null, 1));
+  safejson.writeJson(sessionPath(s.sid), s); // tmp+rename 原子写，进程中断不留半截文件
 }
 
 function createSession() {

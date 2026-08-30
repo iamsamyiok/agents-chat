@@ -978,6 +978,7 @@ async function init() {
 const MODE_STORE_KEY = 'acChatMode'; // 模式持久化：刷新后恢复上次所在标签
 let cardsStatsCache = null;          // /api/cards/stats 最近一次结果（角标计算）
 let groupMsgUnread = 0;              // 非群聊模式下主会话收到的未读消息数（切回群聊清零）
+const unreadSess = new Set();        // 会话 key 集合：有未查看的完成消息（声明提前，供上方角标计算引用）
 
 function setChatMode(mode) {
   chatMode = ['solo', 'cards'].includes(mode) ? mode : 'group';
@@ -1773,7 +1774,6 @@ function switchSession(taskId) {
 
 // ---------- 完成提醒：右下角弹窗 + 侧栏未读绿点 ----------
 // 工作中的任务保持原有「执行中」运转标识；空闲且无未读的会话无任何标识
-const unreadSess = new Set(); // 会话 key 集合：有未查看的完成消息
 let doneToastTimer = null;
 
 function markUnread(key) {

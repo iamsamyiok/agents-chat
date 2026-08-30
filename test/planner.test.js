@@ -135,6 +135,19 @@ test('会话删除与最近会话', async () => {
   assert.strictEqual(planner.deleteSession('../evil'), false); // 非法 sid 拒绝
 });
 
+test('会话文件损坏：读取降级 + 只读保护防覆盖', () => {
+  const s = planner.createSession();
+  // 模拟进程中断留下的半截文件
+  require('fs').writeFileSync(path.join(planner.PLANNER_DIR, s.sid + '.json'), '{"sid":"pl-broken","messages":[{"role":"u');
+  // 读取：损坏自动备份并降级为 null（不抛错）
+  assert.strictEqual(planner.readSession(s.sid), null);
+  // 写入：safejson 只读保护，拒绝覆盖写（防止冲掉备份现场）
+  assert.throws(() => planner.writeSession({ sid: s.sid, messages: [{ role: 'user', content: 'x' }] }));
+  // 现场已备份为 .corrupt-*
+  const backups = require('fs').readdirSync(planner.PLANNER_DIR).filter(f => f.startsWith(s.sid + '.json.corrupt-'));
+  assert.strictEqual(backups.length, 1);
+});
+
 test('pruneStale：过期会话清理', async () => {
   const c = await planner.chat({ message: '旧的', runAgentFn: mockRun('ok') });
   const f = path.join(planner.PLANNER_DIR, `${c.sid}.json`);
