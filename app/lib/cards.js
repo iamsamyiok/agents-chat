@@ -11,6 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const { resolveRunner, detectKernels, KERNEL_DEFS, stopScope } = require('./agent');
+const { notifyDone } = require('./notify');
 const oc = require('./oc');
 const store = require('./store');
 const safejson = require('./safejson');
@@ -522,6 +523,7 @@ class CardRunner {
       finishedAt: Date.now()
     });
     broadcast({ type: 'task_done', cardId: card.id, status, title: card.title });
+    notifyDone({ kind: 'card', title: card.title, status, snippet: doneError || finalText });
     // 任务结束，移除进程登记
     this.procs.delete(card.id);
   }

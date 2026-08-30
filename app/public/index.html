@@ -2,7 +2,12 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#07c160">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="AgentsChat">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
 <title>Agents 群聊</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -84,6 +89,11 @@
   #jumpBtn { position: absolute; right: 18px; bottom: 100px; z-index: 5; display: none; border: 1px solid #dcdcdc; background: #fff; color: #333; border-radius: 16px; padding: 6px 14px; font-size: 12px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.15); animation: fade-in .2s ease; transition: color .15s, border-color .15s; }
   #jumpBtn:hover { color: #07c160; border-color: #07c160; }
   .sys-tip { text-align: center; margin: 10px 0; }
+  /* 历史弹窗：全历史搜索结果条目 */
+  .hist-hit { border: 1px solid #eee; border-radius: 8px; padding: 6px 10px; margin: 4px 0; cursor: pointer; background: #fafafa; }
+  .hist-hit:hover { border-color: #07c160; background: #f0f7f0; }
+  .hist-hit .hh-meta { font-size: 11px; color: #999; margin-bottom: 2px; }
+  .hist-hit .hh-snippet { font-size: 12px; color: #333; line-height: 1.5; word-break: break-all; }
   /* 长会话增量渲染：加载更早入口 */
   .load-earlier { display: block; margin: 4px auto 16px; border: 1px solid #dcdcdc; background: #fff; color: #888; border-radius: 14px; padding: 5px 14px; font-size: 12px; cursor: pointer; transition: color .15s, border-color .15s; }
   .load-earlier:hover { color: #07c160; border-color: #07c160; }
@@ -306,6 +316,19 @@
     #menuBtn { display: block !important; }
     .msg-body { max-width: 80%; }
   }
+  /* 触屏/小屏增强：更大触控目标、安全区适配、顶栏按钮收纳 */
+  @media (max-width: 760px) {
+    .hdr-right { flex-wrap: wrap; gap: 4px; }
+    .hdr-right .cfg-btn { padding: 4px 8px; font-size: 11px; }
+    #messages { padding: 10px 8px; }
+    .bubble.left, .bubble.right { font-size: 14px; word-break: break-word; }
+    .composer { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+    #input { font-size: 16px; } /* 防 iOS 聚焦自动放大 */
+    .jumpBtn { bottom: calc(84px + env(safe-area-inset-bottom)); }
+    #jumpBtn { bottom: calc(84px + env(safe-area-inset-bottom)); }
+    .modal.wide { width: 96vw; max-height: 92vh; }
+    #previewMask .preview-card { width: 96vw; height: 92vh; }
+  }
   #menuBtn { display: none; background: none; border: none; font-size: 18px; cursor: pointer; color: #555; margin-right: 10px; }
 
   /* ---------- 侧栏顶部：单聊/群聊开关 + 任务操作按钮 ---------- */
@@ -441,6 +464,7 @@
         <button class="cfg-btn" id="cardsNavBtn" onclick="openCards()" title="多任务编排 · 卡牌：把任务写成卡牌，Agent 干完一件自动注入下一件">🗂️ 多任务编排</button>
         <span class="runner-tag" id="runnerTag" style="display:none"></span>
         <span class="ver-chip" id="verChip" title="当前版本" style="font-size:11px;color:#999;border:1px solid #e2e2e2;border-radius:10px;padding:2px 8px;white-space:nowrap"></span>
+        <button class="cfg-btn" id="notifyBtn" onclick="toggleSysNotify()" title="系统通知：页面在后台时任务完成弹系统级通知（浏览器授权后生效）">🔔 通知</button>
         <button class="cfg-btn" id="helpBtn" onclick="openHelp()" title="使用帮助">❓ 帮助</button>
       </div>
     </header>
@@ -588,10 +612,16 @@
   <div class="modal wide">
     <h3>聊天历史（主会话）</h3>
     <div class="tip">按时间正序展示全部主会话记录（含已开启新会话前的内容），仅供查阅；消息中的 .md 文件路径可点击预览</div>
+    <input id="histSearch" placeholder="🔍 搜索全部会话消息（含任务/单聊会话，关键词匹配）…" autocomplete="off"
+      style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #e2e2e2;border-radius:8px;font-size:12.5px;margin-bottom:6px">
+    <div id="histUsage" style="font-size:11.5px;color:#888;margin:0 0 6px"></div>
+    <div id="histSearchResult" style="display:none"></div>
     <div id="historyList"></div>
     <div class="modal-actions" style="justify-content:space-between">
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="mini-btn" onclick="exportHistory()" title="全部会话（含任务会话）导出为 Markdown 文件">⬇ 导出 sessions.md</button>
+        <button class="mini-btn" onclick="showDataStats()" title="查看数据目录磁盘占用分布">📊 空间占用</button>
+        <button class="mini-btn" onclick="pruneDataNow()" title="手动执行一次滚动清理：过期任务/会话/产出存档等（与每日自动清理同一套规则，默认保留 15 天）">🧹 清理旧数据</button>
         <button class="mini-btn danger" onclick="clearAllHistory()" title="删除全部消息记录、会话产出文件与流转日志（任务列表保留）">🗑 清空全部会话</button>
       </div>
       <button class="primary" onclick="closeHistory()">关闭</button>
@@ -666,7 +696,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.26.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.31.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -703,7 +733,29 @@ function escAttr(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').re
 function fmtTime(ts) { const d = new Date(ts); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
 function fmtSched(ts) { const d = new Date(ts); const p = (n) => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
 function fmtSchedNow() { const d = new Date(); const p = (n) => String(n).padStart(2,'0'); return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`; }
-function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2200); }
+function toast(msg, ms) { const t = document.getElementById('toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', ms || 2200); }
+
+// ---------- 系统通知开关（浏览器 Notification API，状态记忆在 localStorage） ----------
+function refreshNotifyBtn() {
+  const on = localStorage.getItem('sysNotify') === '1';
+  const b = document.getElementById('notifyBtn');
+  if (b) { b.style.color = on ? '#07c160' : ''; b.style.borderColor = on ? '#07c160' : ''; }
+}
+async function toggleSysNotify() {
+  const on = localStorage.getItem('sysNotify') === '1';
+  if (on) {
+    localStorage.setItem('sysNotify', '0');
+    toast('系统通知已关闭');
+  } else {
+    if (typeof Notification === 'undefined') { toast('当前浏览器不支持系统通知'); return; }
+    let perm = Notification.permission;
+    if (perm !== 'granted') perm = await Notification.requestPermission();
+    if (perm !== 'granted') { toast('浏览器未授权通知，请在地址栏权限设置中允许'); return; }
+    localStorage.setItem('sysNotify', '1');
+    toast('系统通知已开启：页面在后台时任务完成将弹系统通知');
+  }
+  refreshNotifyBtn();
+}
 function colorOf(id) { let h = 0; const s = String(id); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_COLORS[h % AV_COLORS.length]; }
 // 智能体显示图标：配置的职业图标 > 名称首字
 function agentIcon(agentId, name) {
@@ -761,6 +813,7 @@ async function init() {
     addSys(`⚠ 页面版本（${PAGE_VERSION}）与服务端（${health.version}）不一致：浏览器缓存了旧页面，请按 Ctrl+F5 强制刷新`);
   }
   renderUpdateInfo(health);
+  refreshNotifyBtn();
 
   input.addEventListener('input', handleAtInput);
   input.addEventListener('blur', () => setTimeout(hideAt, 150));
@@ -1554,6 +1607,16 @@ function lastReportText(taskId) {
 
 // 右下角弹窗：显示最终回答部分内容，点击跳回原会话；不处理 3 秒后自动消失（保留绿点）
 function showDoneToast(taskId, title) {
+  // 系统级通知：开关开启且页面在后台时弹系统通知（人不在电脑前也能收到）
+  try {
+    if (localStorage.getItem('sysNotify') === '1' && document.hidden && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      const n = new Notification('✅ 任务完成：' + (title || ''), {
+        body: (lastReportText(taskId) || '点击查看结果').slice(0, 120),
+        tag: 'agents-chat-done'
+      });
+      n.onclick = () => { window.focus(); n.close(); };
+    }
+  } catch { /* ignore */ }
   const key = sessKey(taskId || '');
   if (key === curKey() || (chatMode === 'solo' && key === curOcId)) return; // 用户正在看该会话，无需提醒
   markUnread(key);
@@ -2287,8 +2350,74 @@ async function openHistory() {
   }
   document.getElementById('historyMask').classList.add('show');
   el.scrollTop = 0;
+  loadUsageBar();
 }
 function closeHistory() { document.getElementById('historyMask').classList.remove('show'); }
+
+// ---------- 全历史搜索（服务端逐分片匹配，含任务/单聊会话） ----------
+let histSearchTimer = null;
+document.getElementById('histSearch').addEventListener('input', (e) => {
+  clearTimeout(histSearchTimer);
+  const q = e.target.value.trim();
+  const box = document.getElementById('histSearchResult');
+  if (!q) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  histSearchTimer = setTimeout(async () => {
+    try {
+      const data = await api('/api/search?q=' + encodeURIComponent(q) + '&limit=50');
+      const list = data.results || [];
+      box.style.display = 'block';
+      box.innerHTML = list.length
+        ? `<div class="tip" style="margin:0 0 4px">找到 ${list.length} 条匹配${list.length >= 50 ? '（已达上限，可加精确关键词）' : ''}</div>` +
+          list.map(r => {
+            const sess = r.sessionId === '' ? '主会话' : `会话 ${esc(r.sessionId.slice(0, 12))}`;
+            const who = r.role === 'user' ? '👤 我' : esc(r.agentName || 'AI');
+            return `<div class="hist-hit" onclick="jumpToSearchSess('${esc(r.sessionId)}')" title="点击定位该会话">
+              <div class="hh-meta">${esc((r.timestamp || '').replace('T', ' ').slice(0, 16))} · ${sess} · ${who}</div>
+              <div class="hh-snippet">${esc(r.snippet)}</div></div>`;
+          }).join('')
+        : '<div class="tip">没有匹配的消息</div>';
+    } catch { box.innerHTML = '<div class="tip">搜索失败</div>'; box.style.display = 'block'; }
+  }, 300);
+});
+function jumpToSearchSess(sessId) {
+  // 主会话结果留在历史弹窗（消息就在下方）；其余会话提示定位方式
+  if (!sessId) { toast('该消息在主会话中，见下方历史记录'); return; }
+  toast('该消息位于会话 ' + sessId.slice(0, 16) + '…：任务消息在任务列表点击对应任务查看，单聊在左侧会话列表选择');
+}
+
+// ---------- 用量统计与空间管理 ----------
+async function loadUsageBar() {
+  try {
+    const d = await api('/api/usage');
+    const u = d.usage || {};
+    const fmt = (n) => n >= 10000 ? (n / 10000).toFixed(1) + '万' : String(n || 0);
+    document.getElementById('histUsage').textContent =
+      `📊 Token 用量：今日 ${fmt(u.today && u.today.tokens)}（${fmt(u.today && u.today.requests)} 次请求）· 累计 ${fmt(u.total && u.total.tokens)}${(!u.total || !u.total.tokens) ? '（内核输出未携带用量数据时不统计）' : ''}`;
+  } catch { /* ignore */ }
+}
+function fmtSize(bytes) {
+  const b = Number(bytes) || 0;
+  if (b >= 1024 * 1024 * 1024) return (b / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+  if (b >= 1024 * 1024) return (b / 1024 / 1024).toFixed(1) + ' MB';
+  if (b >= 1024) return (b / 1024).toFixed(1) + ' KB';
+  return b + ' B';
+}
+async function showDataStats() {
+  try {
+    const d = await api('/api/data/stats');
+    const s = d.stats || {};
+    toast(`数据目录共 ${fmtSize(s.total)}：消息 ${fmtSize(s.messages)} · 产出存档 ${fmtSize(s.outputs)} · 工作区 ${fmtSize(s.workspace)} · 流转日志 ${fmtSize(s.flow)}`, 5000);
+  } catch { toast('查询失败'); }
+}
+async function pruneDataNow() {
+  if (!confirm('立即执行一次滚动清理？规则与每日自动清理相同：过期已完结任务、过期会话、超期产出存档等（默认保留 15 天，任务列表中的未执行任务不受影响）。')) return;
+  try {
+    const r = await api('/api/data/prune', { method: 'POST' });
+    const s = r.stat || {};
+    toast(`清理完成：任务 ${s.tasks || 0} · 会话 ${s.ocSessions || 0} · 消息 ${s.messages || 0} · 产出目录 ${s.outputs || 0} · 流转日志 ${s.flowEvents || 0}`, 5000);
+    openHistory();
+  } catch { toast('清理失败'); }
+}
 
 // ---------- 历史管理：一键导出 sessions.md / 一键清空全部会话 ----------
 async function exportHistory() {
@@ -3378,8 +3507,17 @@ function openHelp() {
   </div>
   <div class="help-sec"><h4>🕘 历史与数据管理</h4>
     <ul>
+      <li>「🕘 历史」弹窗顶部可<b>全历史搜索</b>：关键词匹配全部会话消息（含任务/单聊会话），点击结果定位所属会话</li>
+      <li>弹窗内实时显示 <b>Token 用量</b>（今日/累计，内核输出携带用量数据时统计）；「📊 空间占用」查看数据目录分布，「🧹 清理旧数据」手动执行一次滚动清理</li>
       <li>「🕘 历史」弹窗底部：<b>⬇ 导出 sessions.md</b> 把全部会话（含任务会话与单聊会话）导出为一个 Markdown 文件；<b>🗑 清空全部会话</b> 一键删除消息、单聊会话、会话产出文件与流转日志（任务列表保留）</li>
-      <li>全部页面关闭且无任务执行/审批等待时，后台服务空闲约 1 分钟自动退出（需要定时任务到点执行请保持页面打开；<code>.env AGENTS_CHAT_AUTOSTOP=0</code> 可关闭），需要时重新运行 start 即可</li>
+      <li>全部页面关闭且无任务执行/审批等待时，后台服务空闲约 1 分钟自动退出（需要定时任务到点执行请保持页面打开，或运行 <code>agents-chat autostart on</code> 开机自启；<code>.env AGENTS_CHAT_AUTOSTOP=0</code> 可关闭），需要时重新运行 start 即可</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>🔔 完成通知</h4>
+    <ul>
+      <li>顶栏「🔔 通知」开启后（需浏览器授权），页面在后台时任务/卡牌完成会弹<b>系统级通知</b>，人不在电脑前也不错过</li>
+      <li>进阶：.env 配置 <code>AGENTS_CHAT_WEBHOOK_URL</code> 可把完成事件转发到钉钉/飞书/自建中转（POST JSON，含标题/状态/摘要）</li>
+      <li>定时任务抗机器重启：命令行 <code>agents-chat autostart on</code> 设置开机自启；停机期间错过的定时任务会在下次启动时自动补跑（控制台有日志说明）</li>
     </ul>
   </div>
   <div class="help-sec"><h4>🛂 协作通道（看板 / 委派 / 审批）</h4>

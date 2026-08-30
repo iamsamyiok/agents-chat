@@ -1,0 +1,17 @@
+{
+  "name": "Agents Chat",
+  "short_name": "AgentsChat",
+  "description": "多智能体协作聊天与任务编排",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f5f5",
+  "theme_color": "#07c160",
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

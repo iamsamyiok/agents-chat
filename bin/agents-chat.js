@@ -275,6 +275,104 @@ function showVersion() {
   console.log(`agents-chat v${PKG.version}`);
 }
 
+// ---------- 开机自启（定时任务抗重启）----------
+// Windows: HKCU Run 键 + VBS 静默启动（无黑窗闪烁）；exe 形态直接注册 exe 路径
+// macOS:   ~/Library/LaunchAgents/com.agents-chat.plist（登录即拉起）
+// Linux:   crontab @reboot 行
+const AUTOSTART_KEY = 'AgentsChat';
+function autostartTarget() {
+  // 单文件 exe：直接跑 exe（已无窗口）；npm 形态：VBS 静默执行 agents-chat start
+  if (process.env.AGENTS_CHAT_STANDALONE === '1' || process.versions.bun) {
+    return { kind: 'exe', cmd: `"${process.execPath}"` };
+  }
+  return { kind: 'npm', cmd: null };
+}
+function autostartOn() {
+  const t = autostartTarget();
+  const home = os.homedir();
+  if (process.platform === 'win32') {
+    const run = t.kind === 'exe'
+      ? t.cmd
+      : `wscript.exe "${path.join(home, '.agents-chat', 'autostart.vbs')}"`;
+    if (t.kind === 'npm') {
+      fs.mkdirSync(path.join(home, '.agents-chat'), { recursive: true });
+      // 0 = 隐藏窗口；npm bin 已在用户 PATH（npm 安装时配置）， explorer 启动的进程可继承
+      fs.writeFileSync(path.join(home, '.agents-chat', 'autostart.vbs'),
+        `CreateObject("Wscript.Shell").Run "cmd /c agents-chat start", 0, False\r\n`);
+    }
+    execSync(`reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v ${AUTOSTART_KEY} /t REG_SZ /d "${run}" /f`, { stdio: 'ignore' });
+    console.log('✓ 开机自启已开启（当前用户级，无需管理员）');
+  } else if (process.platform === 'darwin') {
+    const plist = path.join(home, 'Library', 'LaunchAgents', 'com.agents-chat.plist');
+    fs.mkdirSync(path.dirname(plist), { recursive: true });
+    const exe = t.kind === 'exe' ? process.execPath : process.execPath;
+    const arg = t.kind === 'exe' ? [] : [path.join(__dirname, '..', 'app', 'server.js'), '--port', String(PORT)];
+    const envData = `  <key>EnvironmentVariables</key>\n  <dict><key>AGENTS_CHAT_DATA</key><string>${DATA_DIR}</string></dict>`;
+    fs.writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.agents-chat</string>
+  <key>ProgramArguments</key>
+  <array><string>${exe}</string>${arg.map(a => `<string>${a}</string>`).join('')}</array>
+  ${envData}
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>${path.join(home, '.agents-chat', 'autostart.log')}</string>
+  <key>StandardErrorPath</key><string>${path.join(home, '.agents-chat', 'autostart.log')}</string>
+</dict></plist>`);
+    try { execSync(`launchctl unload "${plist}" 2>/dev/null; launchctl load "${plist}"`); } catch { /* 下次登录生效 */ }
+    console.log('✓ 开机自启已开启（LaunchAgent，登录即启动）');
+  } else {
+    // Linux: crontab @reboot
+    let cron = '';
+    try { cron = execSync('crontab -l', { stdio: ['pipe', 'pipe', 'ignore'] }).toString(); } catch { /* 无 crontab */ }
+    const line = t.kind === 'exe'
+      ? `@reboot ${process.execPath}`
+      : `@reboot ${process.execPath} ${path.join(__dirname, '..', 'app', 'server.js')} --port ${PORT}`;
+    if (cron.includes(AUTOSTART_KEY)) {
+      cron = cron.split('\n').filter(l => l && !l.includes(AUTOSTART_KEY)).join('\n');
+    }
+    cron = (cron ? cron.trimEnd() + '\n' : '') + `${line} # ${AUTOSTART_KEY} env AGENTS_CHAT_DATA=${DATA_DIR}`;
+    // @reboot 行无法带 env 前缀于部分 cron 实现，数据目录路径直接写进 server 启动参数不可行时靠默认 ~/.agents-chat
+    execSync('crontab -', { input: cron.replace(/ # [^\n]*/, '') + '\n' });
+    console.log('✓ 开机自启已开启（crontab @reboot，数据目录 ~/.agents-chat）');
+  }
+  console.log('关闭方式: agents-chat autostart off');
+}
+function autostartOff() {
+  try {
+    if (process.platform === 'win32') {
+      execSync(`reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v ${AUTOSTART_KEY} /f`, { stdio: 'ignore' });
+    } else if (process.platform === 'darwin') {
+      const plist = path.join(os.homedir(), 'Library', 'LaunchAgents', 'com.agents-chat.plist');
+      try { execSync(`launchctl unload "${plist}"`); } catch { /* ignore */ }
+      fs.unlinkSync(plist);
+    } else {
+      let cron = '';
+      try { cron = execSync('crontab -l', { stdio: ['pipe', 'pipe', 'ignore'] }).toString(); } catch { }
+      const kept = cron.split('\n').filter(l => l && !(l.includes('@reboot') && (l.includes('app/server.js') || l.includes('agents-chat'))));
+      execSync('crontab -', { input: kept.join('\n') + (kept.length ? '\n' : '') });
+    }
+    console.log('✓ 开机自启已关闭');
+  } catch (err) {
+    console.error('关闭失败:', err.message);
+  }
+}
+function autostartStatus() {
+  try {
+    if (process.platform === 'win32') {
+      execSync(`reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v ${AUTOSTART_KEY}`, { stdio: 'pipe' });
+    } else if (process.platform === 'darwin') {
+      fs.accessSync(path.join(os.homedir(), 'Library', 'LaunchAgents', 'com.agents-chat.plist'));
+    } else {
+      const cron = execSync('crontab -l', { stdio: ['pipe', 'pipe', 'ignore'] }).toString();
+      if (!/@reboot.*agents-chat|@reboot.*app\/server\.js/.test(cron)) throw new Error('not set');
+    }
+    console.log('开机自启: 已开启');
+  } catch {
+    console.log('开机自启: 未开启（agents-chat autostart on 开启）');
+  }
+}
+
 // 主逻辑
 const command = process.argv[2] || 'start';
 
@@ -301,6 +399,12 @@ switch (command) {
   case '--version':
     showVersion();
     break;
+  case 'autostart':
+    if (process.argv[3] === 'off') autostartOff();
+    else if (process.argv[3] === 'status' || !process.argv[3]) autostartStatus();
+    else if (process.argv[3] === 'on') autostartOn();
+    else { console.error('用法: agents-chat autostart on|off|status'); process.exit(1); }
+    break;
   case 'help':
   case '--help':
   case '-h':
@@ -315,6 +419,9 @@ Agents Chat CLI v${PKG.version}
   agents-chat open       仅打开浏览器
   agents-chat update     检查并一键升级到 npm 最新版
   agents-chat version    查看当前版本
+  agents-chat autostart on|off|status
+                         开机自启管理（定时任务抗机器重启，Windows 用户级注册表/
+                         macOS LaunchAgent/Linux crontab）
 
 环境变量:
   AGENTS_CHAT_PORT     端口号 (默认: 3456)

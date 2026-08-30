@@ -2,6 +2,7 @@
 // 启动：node app/server.js [--port 3456]
 const APP_VERSION = require('../package.json').version; // 单源版本：与 package.json 始终一致（页面互检/更新检查共用）
 const { checkLatest, UPDATE_COMMAND } = require('./lib/updatecheck');
+const { notifyDone } = require('./lib/notify');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -326,6 +327,11 @@ const server = http.createServer(async (req, res) => {
     serveStatic(res, path.join(PUBLIC_DIR, 'cards.html'));
     return;
   }
+  if (req.method === 'GET' && p === '/manifest.json') {
+    // PWA 清单（添加到主屏幕/手机访问）
+    serveStatic(res, path.join(PUBLIC_DIR, 'manifest.json'));
+    return;
+  }
   if (req.method === 'GET' && p.startsWith('/static/')) {
     const safe = path.normalize(p.slice('/static/'.length)).replace(/^(\.\.[/\\])+/, '');
     serveStatic(res, path.join(PUBLIC_DIR, safe));
@@ -357,6 +363,30 @@ const server = http.createServer(async (req, res) => {
       // 数据损坏保护：损坏数据文件清单（已备份 .corrupt-*，写入已冻结，需人工处理）
       corruptedDataFiles: store.getCorruptedFiles()
     });
+    return;
+  }
+
+  // ---------- 历史检索 / 用量 / 空间 ----------
+  if (p === '/api/search' && req.method === 'GET') {
+    const q = String(parsed.query.q || '');
+    const limit = Math.min(200, Math.max(1, Number(parsed.query.limit) || 50));
+    json(res, 200, { success: true, results: store.searchMessages(q, { limit }) });
+    return;
+  }
+  if (p === '/api/usage' && req.method === 'GET') {
+    json(res, 200, { success: true, usage: store.getUsageStats() });
+    return;
+  }
+  if (p === '/api/data/stats' && req.method === 'GET') {
+    json(res, 200, { success: true, stats: store.dataStats(), dataDir: store.DATA_DIR });
+    return;
+  }
+  if (p === '/api/data/prune' && req.method === 'POST') {
+    // 手动清理：与每日自动清理同一套逻辑（已完结任务/过期会话/产出存档等），返回各项清理量
+    const body = await readBody(req);
+    const days = Math.max(1, Number(body.days) || PRUNE_DAYS);
+    const stat = store.pruneOldData(days);
+    json(res, 200, { success: true, days, stat });
     return;
   }
 
@@ -656,6 +686,8 @@ const server = http.createServer(async (req, res) => {
       } else {
         await executeTaskBatch(selected, send, myToken);
       }
+      // 群聊批次整体完成通知（单任务通知由 orchestrator 消息流承担，批次级聚合在此）
+      notifyDone({ kind: 'batch', title: `${soloScope ? '单聊' : '群聊'}任务批次（${selected.length} 个）`, status: 'done', snippet: selected.map(t => t.title).join('、') });
     } catch (err) {
       console.error('[tasks/run] 编排异常:', err && (err.stack || err));
       send({ type: 'error', content: `任务编排异常：${err && err.message || err}` });
@@ -1282,6 +1314,10 @@ function shutdown(code) {
   process.exit(code);
 }
 process.on('SIGINT', () => shutdown(0));
+// 兜底：async 路由内的同步异常会以 unhandledRejection 形式出现——记录日志防静默丢错（请求层应自行捕获）
+process.on('unhandledRejection', (err) => {
+  console.error('[unhandledRejection]', err && (err.stack || err));
+});
 process.on('SIGTERM', () => shutdown(0));
 // Windows 关闭控制台窗口（CTRL_CLOSE_EVENT）在 Node 上映射为 SIGHUP，系统给约 5 秒处理宽限：
 // 同步 killTree 足够完成，正在执行的 AI 子进程不再变孤儿
@@ -1353,6 +1389,7 @@ async function executeSoloTaskBatch(selected, send, myToken) {
     if (runner.kind === 'missing') {
       store.updateTask(task.id, { status: 'failed', result: missingHint(runner).slice(0, 2000) });
       send({ type: 'task_done', taskId: task.id, title: task.title, status: 'failed' });
+      notifyDone({ kind: 'task', title: task.title, status: 'failed', snippet: missingHint(runner) });
       return '';
     }
 
@@ -1397,6 +1434,7 @@ async function executeSoloTaskBatch(selected, send, myToken) {
       result: (doneError ? `执行出错：${doneError}` : finalText).slice(0, 2000)
     });
     send({ type: 'task_done', taskId: task.id, title: task.title, status: stopped ? 'pending' : (doneError ? 'failed' : 'done') });
+    notifyDone({ kind: 'task', title: task.title, status: doneError ? 'failed' : 'done', snippet: finalText || doneError });
     return stopped ? '' : sesId;
   };
 
@@ -1430,12 +1468,19 @@ async function executeSoloTaskBatch(selected, send, myToken) {
 // 执行过程照常持久化到对应任务会话，用户打开会话即可查看全过程
 const SCHED_INTERVAL_MS = 15000;
 function startScheduler() {
+  let firstScan = true; // 启动首扫：识别停机期间错过的定时任务并说明补跑
   const timer = setInterval(() => {
     if (runLocks.tasks) return; // 手动批次执行中，下轮再查
     if (store.getSchedEnabled() === false) return; // 用户关闭了定时调度总开关
+    const now = Date.now();
     const due = store.getTasks().filter(t =>
-      t.kind === 'scheduled' && t.status === 'pending' && t.scheduledAt && t.scheduledAt <= Date.now());
-    if (!due.length) return;
+      t.kind === 'scheduled' && t.status === 'pending' && t.scheduledAt && t.scheduledAt <= now);
+    if (!due.length) { firstScan = false; return; }
+    const missed = due.filter(t => now - t.scheduledAt > 60000); // 触发点已过 1 分钟以上 = 停机期间错过
+    if (firstScan && missed.length) {
+      console.log(`[scheduler] 检测到 ${missed.length} 个停机期间错过的定时任务，将立即补跑：${missed.map(t => t.title).join('、')}`);
+    }
+    firstScan = false;
     runLocks.tasks = true;
     const myToken = stopTokens.tasks;
     console.log(`[scheduler] 定时触发 ${due.length} 个任务：${due.map(t => t.title).join('、')}`);

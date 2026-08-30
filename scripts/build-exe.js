@@ -30,10 +30,10 @@ for (const t of targets) {
   }
 }
 
-// 1. 生成内嵌资源模块（HTML → JSON 字符串常量，杜绝转义问题）
+// 1. 生成内嵌资源模块（HTML/JSON/SVG → JSON 字符串常量，杜绝转义问题）
 const assets = {};
 for (const f of fs.readdirSync(PUB)) {
-  if (f.endsWith('.html')) assets[f] = fs.readFileSync(path.join(PUB, f), 'utf8');
+  if (/\.(html|json|svg)$/.test(f)) assets[f] = fs.readFileSync(path.join(PUB, f), 'utf8');
 }
 fs.writeFileSync(EMBED, [
   '// 本文件由 scripts/build-exe.js 构建时自动生成，勿手工编辑、勿提交仓库',
@@ -71,4 +71,15 @@ if (failed.length) {
   console.error(`失败平台: ${failed.join(', ')}`);
   process.exit(1);
 }
+
+// 4. 生成校验清单（Release 附上，供核对下载完整性；exe 未签名场景尤为重要）
+const { createHash } = require('crypto');
+const lines = [];
+for (const f of fs.readdirSync(DIST).sort()) {
+  const fp = path.join(DIST, f);
+  const h = createHash('sha256').update(fs.readFileSync(fp)).digest('hex');
+  lines.push(`${h}  ${f}`);
+}
+fs.writeFileSync(path.join(DIST, 'checksums.txt'), lines.join('\n') + '\n');
+console.log('校验清单: dist/checksums.txt');
 console.log('全部构建完成');

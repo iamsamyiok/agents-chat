@@ -551,6 +551,92 @@ function addMessage(msg) {
     msgs.push(...kept);
   }
   writeJson(msgShardPath(key), msgs);
+  // 用量统计：消息携带 usage（token 数）即累计——所有 runner 的消息路径统一经过这里
+  const u = Number(msg.usage);
+  if (u > 0) recordUsage({ tokens: Math.floor(u), requests: 1 });
+}
+
+// ---------- 全历史关键词检索：逐分片匹配，不合并大数组 ----------
+function searchMessages(q, { limit = 50 } = {}) {
+  const needle = String(q || '').trim().toLowerCase();
+  if (!needle) return [];
+  const out = [];
+  let files = [];
+  try { files = fs.readdirSync(MSG_DIR); } catch { return out; }
+  for (const f of files) {
+    if (!f.endsWith('.json')) continue;
+    let list;
+    try { list = readJson(path.join(MSG_DIR, f), []); } catch { continue; }
+    if (!Array.isArray(list)) continue;
+    // 分片名还原会话标识（hex 编码逆变换，_main 为主会话）
+    const stem = f.replace(/\.json$/, '');
+    const sessionId = stem === '_main' ? '' : (stem.startsWith('_') ? Buffer.from(stem.slice(1), 'hex').toString('utf8') : stem);
+    for (const m of list) {
+      const c = String(m.content || '');
+      if (c.toLowerCase().includes(needle)) {
+        const idx = c.toLowerCase().indexOf(needle);
+        const from = Math.max(0, idx - 40);
+        out.push({
+          sessionId, role: m.role || '', agentName: m.agentName || '',
+          snippet: (from > 0 ? '…' : '') + c.slice(from, from + needle.length + 80) + '…',
+          timestamp: m.timestamp || ''
+        });
+        if (out.length >= limit * 3) break; // 分片内粗截，最后统一排序取 limit
+      }
+    }
+  }
+  out.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
+  return out.slice(0, limit);
+}
+
+// ---------- 用量统计（token/请求数按日累计，usage.json） ----------
+const USAGE_PATH = path.join(DATA_DIR, 'usage.json');
+function readUsage() {
+  const d = readJson(USAGE_PATH, { days: {}, total: { tokens: 0, requests: 0 } });
+  if (!d.days) d.days = {};
+  if (!d.total) d.total = { tokens: 0, requests: 0 };
+  return d;
+}
+function recordUsage({ tokens = 0, requests = 0 } = {}) {
+  const d = readUsage();
+  const day = new Date().toISOString().slice(0, 10);
+  if (!d.days[day]) d.days[day] = { tokens: 0, requests: 0 };
+  d.days[day].tokens += Math.floor(tokens);
+  d.days[day].requests += Math.floor(requests);
+  d.total.tokens += Math.floor(tokens);
+  d.total.requests += Math.floor(requests);
+  // 只保留最近 60 天明细，总量恒累计
+  const days = Object.keys(d.days).sort();
+  while (days.length > 60) delete d.days[days.shift()];
+  writeJson(USAGE_PATH, d);
+}
+function getUsageStats() {
+  const d = readUsage();
+  const today = new Date().toISOString().slice(0, 10);
+  const recent = Object.entries(d.days).slice(-7).map(([day, v]) => ({ day, ...v }));
+  return { today: d.days[today] || { tokens: 0, requests: 0 }, total: d.total, recent };
+}
+
+// ---------- 数据目录占用统计（可见性：让用户看得到空间去哪了） ----------
+function dirSize(p) {
+  let total = 0;
+  let entries = [];
+  try { entries = fs.readdirSync(p, { withFileTypes: true }); } catch { return 0; }
+  for (const e of entries) {
+    const fp = path.join(p, e.name);
+    try {
+      if (e.isDirectory()) total += dirSize(fp);
+      else total += fs.statSync(fp).size;
+    } catch { /* ignore */ }
+  }
+  return total;
+}
+function dataStats() {
+  const parts = {};
+  for (const name of ['messages', 'outputs', 'workspace', 'flow']) {
+    parts[name] = dirSize(path.join(DATA_DIR, name));
+  }
+  return { total: dirSize(DATA_DIR), ...parts };
 }
 
 // 按会话统计消息数（逐分片累加，不合并大数组：统计/导出场景低内存）
@@ -795,6 +881,10 @@ module.exports = {
   addMessage,
   clearMessages,
   countMessagesByTask,
+  searchMessages,
+  recordUsage,
+  getUsageStats,
+  dataStats,
   addFlowEvent,
   getFlow,
   listFlowRuns,
