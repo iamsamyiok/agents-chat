@@ -50,7 +50,8 @@ for (const t of targets) {
   const out = path.join(DIST, t === 'windows-x64' ? `agents-chat-${t}.exe` : `agents-chat-${t}`);
   console.log(`构建 ${t} -> ${path.relative(ROOT, out)} ...`);
   // windows: 双击运行不弹命令行窗口（日志自动落到 exe 旁 .data/agents-chat.log）
-  const extra = t === 'windows-x64' ? ' --windows-hide-console --windows-title "Agents Chat"' : '';
+  // 注：--windows-title/icon 需在 Windows 本机构建，交叉编译只加 hide-console
+  const extra = t === 'windows-x64' ? ' --windows-hide-console' : '';
   try {
     execSync(`bun build --compile --minify --define "process.env.AGENTS_CHAT_STANDALONE=\\"1\\"" --target=bun-${t}${extra} app/server.js --outfile "${path.relative(ROOT, out)}"`, {
       cwd: ROOT, stdio: 'inherit'
