@@ -222,6 +222,48 @@ test('AI 编排与三标签角标路由（demo 拒绝 / 参数校验 / stats / b
   assert.strictEqual(bad.status, 400);
 });
 
+test('分工模式路由：空名单 400 / demo 正常路径 / 409 互斥', async () => {
+  // 1) 空参与名单且消息无 @ → 400
+  const empty = await fetch(BASE + '/api/chat', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ message: '分工做点事', mode: 'divide', participants: [] })
+  });
+  assert.strictEqual(empty.status, 400);
+
+  // 2) demo 正常路径：SSE 流含分工表与成员产出（mock 演示分工 + mock 执行通道）
+  const { body: ag } = await get('/api/agents');
+  assert.ok(ag.success && ag.agents.length > 0);
+  const ids = ag.agents.filter(a => a.id !== 'butler').slice(0, 3).map(a => a.id);
+  assert.ok(ids.length >= 2, '默认团队应有可用子智能体');
+  const r1 = await fetch(BASE + '/api/chat', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ message: '制定季度经营计划', mode: 'divide', participants: ids })
+  });
+  assert.strictEqual(r1.status, 200);
+  assert.ok(/text\/event-stream/.test(r1.headers.get('content-type') || ''));
+
+  // 3) 上一条 SSE 未结束（锁持有中）→ 409 互斥
+  const r2 = await fetch(BASE + '/api/chat', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ message: '第二条消息', mode: 'divide', participants: ids })
+  });
+  assert.strictEqual(r2.status, 409);
+
+  const text = await r1.text(); // 等待编排自然结束
+  assert.ok(text.includes('分工表'));
+  assert.ok(text.includes('演示分工')); // mock 演示分工任务文案
+});
+
+test('LLM 默认模型路由（demo 模式：GET 标注不支持 / POST 400）', async () => {
+  const g = await get('/api/llm/config');
+  assert.strictEqual(g.body.success, true);
+  assert.strictEqual(g.body.supported, false); // 演示模式无真实内核配置
+  const p = await fetch(BASE + '/api/llm/config', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'a/b' })
+  });
+  assert.strictEqual(p.status, 400);
+});
+
 test('404 未知路由', async () => {
   const r = await fetch(BASE + '/api/nonexistent');
   assert.strictEqual(r.status, 404);

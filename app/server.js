@@ -74,7 +74,7 @@ const teamgen = require('./lib/teamgen');
 const planner = require('./lib/planner');
 let suggestInFlight = false; // AI 组队生成互斥：同刻仅一个（内核单次调用，防并发浪费）
 const plannerLocks = new Set(); // AI 编排按会话互斥（每会话同时一个内核调用）
-const { runButler, runMentioned, runRoundtable, runTasks, prepareRerun } = require('./lib/orchestrator');
+const { runButler, runMentioned, runRoundtable, runDivide, runTasks, prepareRerun } = require('./lib/orchestrator');
 const oc = require('./lib/oc');
 const memoryMod = require('./lib/memory');
 const { CardStore, runner: cardRunner, sseSubscribe, MAX_PARALLEL, wouldCycle } = require('./lib/cards');
@@ -898,6 +898,22 @@ const server = http.createServer(async (req, res) => {
     const mentionAgents = resolveMentions(message, agents);
     const clean = stripMentions(message) || message;
 
+    // 分工模式名单先行计算：空名单需在 SSE 响应头发出前返回 400
+    let divideParticipants = null;
+    if (body.mode === 'divide') {
+      const listIds = Array.isArray(body.participants) ? body.participants.map(String) : [];
+      divideParticipants = agents.filter(a => listIds.includes(a.id));
+      // 消息中 @ 命中者自动并入本轮名单（显式意愿优先；管家降为普通成员）
+      for (const ag of mentionAgents) {
+        if (!divideParticipants.find(p => p.id === ag.id)) divideParticipants.push(ag);
+      }
+      if (!divideParticipants.length) {
+        runLocks.chat = false;
+        json(res, 400, { success: false, error: '分工模式需要至少一名参与者，请先在名单中添加成员' });
+        return;
+      }
+    }
+
     // 先构建历史背景（此时还不含当前消息），再落库当前用户消息
     const opts = { taskId, history: buildHistoryText(taskId), scope: 'chat', isStopped: () => stopTokens.chat !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval() };
     store.addMessage({ role: 'user', content: message, taskId, timestamp: new Date().toISOString() });
@@ -906,7 +922,10 @@ const server = http.createServer(async (req, res) => {
     const persist = (m) => store.addMessage({ ...m, taskId, timestamp: new Date().toISOString() });
     try {
       let run;
-      if (body.mode === 'roundtable') {
+      if (body.mode === 'divide') {
+        // 分工模式：参与名单内成员并行执行 + @ 传导接力（无管家调度，统一默认模型）
+        run = runDivide(divideParticipants, clean, opts, send, persist);
+      } else if (body.mode === 'roundtable') {
         // 圆桌讨论：@点名者参与（管家作为主持人不算发言席），未点名则全体子智能体参与
         const speakers = mentionAgents.filter(a => a.id !== butler.id);
         const participants = speakers.length ? speakers : subAgents;
@@ -997,6 +1016,43 @@ const server = http.createServer(async (req, res) => {
     const models = oc.listOcModels(runner, parsed.query.refresh === '1');
     json(res, 200, { success: true, models });
     return;
+  }
+
+  // ---------- LLM 默认模型：AI 组队 / AI 编排 / 未指定模型任务共用的全局默认 ----------
+  if (p === '/api/llm/config') {
+    const { resolveRunner } = require('./lib/agent');
+    const runner = resolveRunner();
+    if (req.method === 'GET') {
+      if (runner.kind !== 'opencode') {
+        json(res, 200, { success: true, supported: false, kernel: runner.kernel ? runner.kernel.label : '', model: '' });
+        return;
+      }
+      json(res, 200, {
+        success: true, supported: true,
+        model: oc.readDefaultModel(),
+        auth: oc.authProviders(runner.cmd)
+      });
+      return;
+    }
+    if (req.method === 'POST') {
+      if (runner.kind !== 'opencode') {
+        json(res, 400, { success: false, error: '当前内核不支持网页端默认模型配置，请在对应内核自身配置中设置' });
+        return;
+      }
+      const body = await readBody(req);
+      const model = String(body.model || '').trim();
+      if (model && !oc.MODEL_RE.test(model)) {
+        json(res, 400, { success: false, error: '模型需形如 provider/model（例：monkeycode-ai/glm-5.3），或留空恢复内核默认' });
+        return;
+      }
+      try {
+        oc.writeDefaultModel(model);
+        json(res, 200, { success: true, model: oc.readDefaultModel() });
+      } catch (e) {
+        json(res, 500, { success: false, error: e && e.message ? e.message : '写入 OpenCode 配置失败' });
+      }
+      return;
+    }
   }
 
   if (p === '/api/oc/sessions' && req.method === 'GET') {

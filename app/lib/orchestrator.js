@@ -1173,8 +1173,305 @@ function prepareRerun(events, fromStage, subAgents) {
   };
 }
 
+// ---------- 分工模式：名单内成员并行执行 + @ 传导接力（无管家实体，统一默认模型） ----------
+// 流程：dividePlan 一次分工调用（每人任务，可空=旁听）→ 并行执行 → 产出中 @ 名单内成员触发传导，
+// 被 @ 者执行后结果回灌、原 @ 者被唤醒继续；硬上限（总段数/传导跳数）防循环；isStopped 全程可停。
+const DIVIDE_MAX_WORK = 8;  // 单轮编排总工作段数上限（含初始与传导）
+const DIVIDE_MAX_HOP = 2;   // 传导跳数上限（初始任务 hop=0，每次 @ 传导 +1）
+const DIVIDE_MENTION_RE = /@([^\s@，。,.；;！!？?、()（）【】[\]"'「」]+)/g;
+
+function dividePlanTimeout() { return Number(process.env.AGENTS_CHAT_DIVIDE_PLAN_TIMEOUT_MS) || 120000; }
+
+// 产出/消息文本中的 @ 解析（与 server.js resolveMentions 同规则：id 或名字精确匹配）
+function divideMentions(text, agents) {
+  const out = [];
+  const seen = new Set();
+  const re = new RegExp(DIVIDE_MENTION_RE.source, 'g');
+  let m;
+  while ((m = re.exec(String(text))) !== null) {
+    const tok = m[1];
+    const ag = agents.find(a => a.id === tok) || agents.find(a => a.name === tok);
+    if (ag && !seen.has(ag.id)) { seen.add(ag.id); out.push(ag); }
+  }
+  return out;
+}
+
+// 分工调用：LLM（默认模型）为名单内每个成员分配任务；task 空 = 本轮旁听
+// 返回 [{agent, task}]；mock 模式返回确定性演示分工；内核调用失败抛错（由调用方降级）
+async function dividePlan(participants, message, history) {
+  if (process.env.AGENTS_CHAT_MOCK === '1') {
+    return participants.map((a, i) => ({
+      agent: a,
+      task: i < Math.min(2, participants.length)
+        ? `【演示分工】围绕「${String(message).slice(0, 30)}」完成${a.name}职责范围内的部分并给出结论。`
+        : ''
+    }));
+  }
+  const roster = participants.map(a => `- ${a.name}（id: ${a.id}）：${a.desc || a.name}`).join('\n');
+  const prompt = `你是团队分工调度员。根据用户消息，为团队成员分配各自要做的任务。
+
+【团队成员】
+${roster}
+
+【用户消息】
+${message}
+${history ? `\n【近期聊天背景】\n${String(history).slice(0, 2000)}` : ''}
+
+要求：
+1. 只给与消息相关的成员分配具体任务；无关成员 task 留空字符串（本轮旁听，不发言不干活）
+2. 任务描述具体到该成员能直接开工，明确各自负责的部分、边界与期望产出
+3. 只输出 JSON 数组，禁止任何其他文字：[{"id":"成员id","task":"任务描述"}]
+名单内每个成员必须且只能出现一次。`;
+  const plannerMod = require('./planner');
+  const { content, error } = plannerMod.runOnce(prompt, dividePlanTimeout(), 'divide-plan');
+  if (error && !content) throw new Error(error);
+  if (!content) throw new Error('分工调用无输出');
+  const { extractJSONArray } = require('./teamgen');
+  const arr = extractJSONArray(content);
+  if (!Array.isArray(arr)) throw new Error('分工结果解析失败');
+  const byKey = new Map();
+  for (const a of participants) { byKey.set(a.id, a); byKey.set(a.name, a); }
+  const plan = participants.map(a => ({ agent: a, task: '' }));
+  const seen = new Set();
+  for (const it of arr) {
+    const ag = byKey.get(String(it && it.id || '').trim());
+    if (ag && !seen.has(ag.id)) {
+      seen.add(ag.id);
+      plan.find(p => p.agent.id === ag.id).task = String(it.task || '').slice(0, 4000);
+    }
+  }
+  return plan;
+}
+
+// ---------- 分工各轮 prompt 组装（内核 --no-session 单轮执行，每段工作必须自包含背景） ----------
+
+// 初始轮：任务 + 协作协议（告知可用 @ 请求同事支持，否则传导无从发生）
+function divideWorkCtx(task) {
+  return `${task}
+
+【协作协议】
+- 你与名单内其他成员并行工作，各自负责分工表中的任务
+- 执行中若确需某位同事提供输入（数据/结论/评审），在产出末尾另起一行写：@同事名：需要对方提供什么。系统会请其响应并把结果带回给你，你将在收到后继续完成工作
+- 请求要具体明确（对方无需猜测）；除必要协作外请独立完成并给出结论`;
+}
+
+// 唤醒轮：初始任务 + 上轮产出 + 同事反馈（反馈到齐或因上限无反馈后的继续）
+function divideWakeupCtx(task, parentOutput, collected, forced) {
+  const base = (task ? `【你的初始任务】\n${task}\n\n` : '')
+    + `【你上一轮的工作产出】\n${String(parentOutput || '').slice(0, 4000)}\n\n`;
+  if (forced) {
+    return base + `【协作状态】\n你此前 @ 的同事因参与上限无法再响应。\n\n请基于已有信息直接给出最终回答，不要再 @ 同事。`;
+  }
+  return base + `【同事的反馈】\n${collected.map(c => `【${c.name}】\n${c.output}`).join('\n\n')}\n\n请基于以上反馈继续完成你的任务并给出结论；若确需其他同事支持，可在产出末尾另起一行 @同事名 提出请求。`;
+}
+
+// 响应轮：同事请求汇总 + 自己最近产出（供引用），要求逐条回应
+function divideResponseCtx(requests, ownLastOutput) {
+  const reqs = requests.map(r => `【${r.name} 的请求背景与产出】\n${String(r.text || '').slice(0, 2000)}`).join('\n\n');
+  return `以下同事在分工协作中请求你支持：
+
+${reqs}
+${ownLastOutput ? `\n【你最近的工作产出（可直接引用其中内容）】\n${String(ownLastOutput).slice(0, 2000)}\n` : ''}
+请针对上述请求逐条给出回应：直接提供对方所需的数据、结论或建议，简明扼要；若确实无法提供，说明原因并给出替代建议。不要重复执行对方的全量任务，只回应其请求的部分。`;
+}
+
+// 调度核心（execFn 注入便于单测）：初始任务并行 → @ 传导 → 结果回灌唤醒 → 上限止停
+// 真实工作语义：
+// - 成员干活时 @ 同事 = 请求支持，自己暂停等待；请求会转达给对方
+// - 对方若手头有活，先完成手头活，再针对请求专门响应一轮（不拿无关产出搪塞）
+// - 同批多人请求同一人时合并为一轮响应（一封信回多人）
+// - 反馈到齐后请求者被唤醒，带着初始任务+反馈继续，直至给出最终回答
+// - 传导深度（跳数）与总段数有硬上限；达上限后当事人仍可收尾（收尾轮不再传导）
+async function runDivideCore(plan, opts, emit, onMessage, execFn) {
+  const taskId = opts.taskId || '';
+  const isStopped = opts.isStopped || (() => false);
+  const members = Array.isArray(opts.participants) && opts.participants.length
+    ? opts.participants : plan.map(p => p.agent); // 传导 @ 生效名单（含旁听成员）
+  const memberAgent = (id) => members.find(m => m.id === id) || (plan.find(p => p.agent.id === id) || {}).agent;
+  const memberName = (id) => { const a = memberAgent(id); return a ? a.name : id; };
+  const taskOf = (id) => { const p = plan.find(x => x.agent.id === id); return p ? p.task : ''; };
+  const rosterText = `📋 分工表\n${plan.map(p => `- ${p.agent.icon || ''}${p.agent.name}：${p.task || '（本轮旁听）'}`).join('\n')}`;
+  emit({ type: 'notice', content: rosterText, taskId });
+  onMessage({ role: 'sys', phase: 'divide', content: rosterText });
+  let total = 0;
+  let capNoticed = false;
+  const capNotice = () => {
+    if (capNoticed) return;
+    capNoticed = true;
+    emit({ type: 'notice', content: `⚠ 已达分工参与上限（${DIVIDE_MAX_WORK} 段 / ${DIVIDE_MAX_HOP} 跳传导），后续 @ 传导停止`, taskId });
+  };
+  const waiters = new Map();   // 请求者 id → {expect:Set(被@者id), collected:[], parentOutput, hop, forced}
+  const pending = new Map();   // 被请求者 id → Set(请求者 id)：待其响应的请求
+  const responding = new Map(); // 被请求者 id → Set(请求者 id)：本轮响应正服务的对象
+  const inflight = new Set();  // 已入队未完成的成员 id（防重复调度）
+  const lastOutput = new Map(); // 成员 id → 最近一次产出（响应轮供引用）
+  const outputs = [];
+  let ok = false;
+  const queue = [];
+  const enqueue = (item) => {
+    // 收尾轮（final）豁免跳数上限：传导停止后当事人必须能交差；总段数上限两者都管
+    if (total >= DIVIDE_MAX_WORK || (!item.final && item.hop > DIVIDE_MAX_HOP)) { capNotice(); return false; }
+    total++;
+    inflight.add(item.agent.id);
+    queue.push(item);
+    return true;
+  };
+  // 回灌：把某成员的产出交给等待它的请求者；请求全部到齐（或因上限强制了结）则唤醒请求者继续
+  const feed = (waiterId, memberName_, memberId, contentText, forced) => {
+    const st = waiters.get(waiterId);
+    if (!st) return;
+    st.expect.delete(memberId);
+    st.collected.push({ name: memberName_, output: contentText });
+    if (forced) st.forced = true;
+    if (st.expect.size > 0) return;
+    waiters.delete(waiterId);
+    const agent = memberAgent(waiterId);
+    if (!agent) return;
+    const ctx = divideWakeupCtx(taskOf(waiterId), st.parentOutput, st.collected, st.forced);
+    const enq = enqueue({ agent, hop: st.hop + 1, wakeUp: '', final: st.forced, context: ctx });
+    if (!enq) emit({ type: 'notice', content: `⚠ ${agent.name} 因参与上限未能完成收尾`, taskId });
+  };
+  let initialCapped = false;
+  for (const p of plan) {
+    if (!p.task) continue;
+    if (total >= DIVIDE_MAX_WORK) { initialCapped = true; break; }
+    queue.push({ agent: p.agent, context: divideWorkCtx(p.task), hop: 0, wakeUp: '', final: false });
+    inflight.add(p.agent.id);
+    total++;
+  }
+  if (initialCapped) capNotice();
+  while (queue.length) {
+    if (isStopped()) break;
+    const batch = queue.splice(0);
+    const outcomes = await Promise.all(batch.map(async (item) => {
+      const out = await execFn(item);
+      // 兜底合并：execFn 未回显的调度字段按入队值补齐（hop/wakeUp/final 属 core 状态）
+      const merged = Object.assign({ hop: item.hop, wakeUp: item.wakeUp || '', final: !!item.final }, out);
+      return { item, out: merged };
+    }));
+    for (const { item, out } of outcomes) {
+      // handoff 转交后产出归属可能变为 finalAgent：入队键与归属键都需释放
+      inflight.delete(item.agent.id);
+      inflight.delete(out.agent.id);
+      const content = out.error ? `[执行出错] ${out.error}` : String(out.output || '');
+      onMessage({
+        role: 'assistant', agentId: out.agent.id, agentName: out.agent.name,
+        actor: 'assistant', phase: 'divide', content: content.slice(0, 20000), outputPath: out.outputPath || ''
+      });
+      if (out.output) { ok = true; outputs.push(content); }
+      // 产出归档以调度对象为准（handoff 转交后仍视为该成员的产出，供后续响应轮引用）
+      lastOutput.set(item.agent.id, content);
+      // 1) 响应轮完成：产出回灌本轮服务的请求者（一次响应服务多人）
+      if (out.wakeUp === 'pending') {
+        const served = responding.get(item.agent.id) || new Set();
+        responding.delete(item.agent.id);
+        for (const w of served) feed(w, out.agent.name, item.agent.id, content);
+      }
+      // 2) 传导：本产出中的 @ 转达为协作请求（收尾轮不再发起；等待反馈中的成员暂不接受新请求）
+      if (out.output && !out.final && !isStopped()) {
+        const all = divideMentions(out.output, members).filter(m => m.id !== out.agent.id);
+        const targets = all.filter(m => !waiters.has(m.id));
+        const waiting = all.filter(m => waiters.has(m.id));
+        if (waiting.length) {
+          emit({ type: 'notice', content: `${waiting.map(m => m.name).join('、')} 正在等待反馈，${out.agent.name} 的 @ 请求暂缓，待其下一轮工作再提出`, taskId });
+        }
+        if (targets.length) {
+          waiters.set(out.agent.id, {
+            expect: new Set(targets.map(t => t.id)), collected: [],
+            parentOutput: content, hop: out.hop || 0, forced: false
+          });
+          for (const m of targets) {
+            if (!pending.has(m.id)) pending.set(m.id, new Set());
+            pending.get(m.id).add(out.agent.id);
+          }
+        }
+      }
+    }
+    // 批末统一调度响应轮：同批多人请求同一人时合并为一轮（请求汇总进同一段 prompt）
+    if (isStopped()) continue;
+    for (const [mid, set] of [...pending]) {
+      if (!set.size) { pending.delete(mid); continue; }
+      if (inflight.has(mid)) continue; // 手头有活：待其完成后由下个批末扫描处理
+      const agent = memberAgent(mid);
+      if (!agent) { pending.delete(mid); continue; }
+      const list = [...set];
+      pending.delete(mid);
+      responding.set(mid, new Set(list));
+      const reqHop = Math.max(...list.map(w => ((waiters.get(w) || {}).hop ?? -1) + 1));
+      const ctx = divideResponseCtx(
+        list.map(w => ({ name: memberName(w), text: (waiters.get(w) || {}).parentOutput || '' })),
+        lastOutput.get(mid) || ''
+      );
+      const okEnq = enqueue({ agent, hop: reqHop, wakeUp: 'pending', final: false, context: ctx });
+      if (!okEnq) {
+        // 上限拒绝：以占位反馈了结请求者，使其仍能收尾
+        responding.delete(mid);
+        for (const w of list) feed(w, agent.name, mid, '[参与上限] 该同事因编排上限无法响应，请基于已有信息继续', true);
+      }
+    }
+  }
+  if (isStopped()) emit({ type: 'notice', content: '已手动停止，分工编排终止', taskId });
+  for (const [id, st] of waiters) {
+    const a = memberAgent(id);
+    emit({
+      type: 'notice', taskId,
+      content: `⚠ ${a ? a.name : id} 等待的同事反馈因编排结束而中止（${[...st.expect].map(memberName).join('、')} 未回应）`
+    });
+  }
+  return { ok, finalText: outputs.join('\n\n'), stopped: isStopped() };
+}
+
+// 分工模式入口：分工调用 → 降级兜底 → 分工表落库 → 调度执行
+async function runDivide(participants, message, opts, emit, onMessage) {
+  const taskId = opts.taskId || '';
+  const runId = newRunId();
+  logFlow({
+    run: runId, type: 'start', from: '用户',
+    summary: String(message).replace(/\s+/g, ' ').slice(0, 200),
+    detail: { taskId, mode: 'divide', members: participants.map(a => a.name) }
+  });
+  emit({ type: 'notice', content: `🤝 分工模式：正在为 ${participants.length} 位成员分工…`, taskId });
+  let plan;
+  try {
+    plan = await dividePlan(participants, message, opts.history);
+    if (!plan.some(p => p.task)) {
+      emit({ type: 'notice', content: '⚠ 分工结果为空，已降级为全员并行执行', taskId });
+      plan = participants.map(a => ({ agent: a, task: message }));
+    }
+  } catch (e) {
+    emit({ type: 'notice', content: `⚠ 分工调用失败（${e && e.message || e}），已降级为全员并行执行`, taskId });
+    plan = participants.map(a => ({ agent: a, task: message }));
+  }
+  const isStopped = opts.isStopped || (() => false);
+  const execFn = async (item) => {
+    const sessionDir = sessionOutDir(taskId);
+    const agent = Object.assign({}, item.agent, { model: '' }); // 分工模式统一默认模型
+    const prompt = item.hop === 0
+      ? appendWorkContext(item.context, [], opts.history)
+      : item.context;
+    const { agent: finalAgent, res } = await runWithHandoff(
+      agent, prompt, participants, opts, emit, 'divide',
+      item.agent.id === 'butler' ? 'butler' : 'worker', taskId, sessionDir, opts.scope || 'chat', isStopped
+    );
+    return {
+      agent: finalAgent, output: res.output, error: res.error, outputPath: res.outputPath,
+      hop: item.hop, wakeUp: item.wakeUp || '', final: !!item.final
+    };
+  };
+  const r = await runDivideCore(plan, Object.assign({}, opts, { participants }), emit, onMessage, execFn);
+  logFlow({
+    run: runId, type: 'finish', from: '分工',
+    summary: (r.ok ? '完成' : '无产出') + (r.stopped ? '（手动停止）' : ''),
+    detail: { mode: 'divide' }
+  });
+  return r;
+}
+
 module.exports = {
-  runButler, runMentioned, runRoundtable, runTasks, prepareRerun, runAutoChecks,
+  runButler, runMentioned, runRoundtable, runDivide, runTasks, prepareRerun, runAutoChecks,
+  // 测试导出（单测用，业务代码请勿依赖）
+  testDividePlan: dividePlan, testRunDivideCore: runDivideCore, testDivideMentions: divideMentions,
+  DIVIDE_MAX_WORK, DIVIDE_MAX_HOP,
   // 测试导出（单测用，业务代码请勿依赖）
   testBoardInit: boardInit, testBoardAppend: boardAppend, testBoardRead: boardRead,
   testExtractBoardNote: extractBoardNote, testParseHandoff: parseHandoff,

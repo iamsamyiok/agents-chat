@@ -253,4 +253,56 @@ function chatSolo(runnerKind, runner, opts, onEvent) {
   );
 }
 
-module.exports = { chatSolo, listOcModels, demoModels, MODEL_RE, parseSoloEventLine };
+// ---------- LLM 默认模型：读写 OpenCode 全局配置（~/.config/opencode/opencode.json 的 model 字段） ----------
+function ocConfigPath() {
+  const os = require('os');
+  const xdg = process.env.XDG_CONFIG_HOME;
+  return path.join(xdg || path.join(os.homedir(), '.config'), 'opencode', 'opencode.json');
+}
+
+function readDefaultModel() {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(ocConfigPath(), 'utf8'));
+    return typeof cfg.model === 'string' ? cfg.model : '';
+  } catch { return ''; } // 无文件/无字段：用内核默认
+}
+
+// merge 写回（保留用户其余配置）；文件损坏时拒绝覆盖，提示人工处理
+function writeDefaultModel(model) {
+  const p = ocConfigPath();
+  let cfg = {};
+  let existed = false;
+  try {
+    const raw = fs.readFileSync(p, 'utf8');
+    existed = true;
+    cfg = JSON.parse(raw);
+    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new Error('not an object');
+  } catch (e) {
+    if (existed) throw new Error(`OpenCode 配置文件损坏（${p}），请人工检查后再试，已跳过覆盖以防丢失配置`);
+  }
+  if (model) cfg.model = model; else delete cfg.model;
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  const tmp = p + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), 'utf8');
+  fs.renameSync(tmp, p); // 原子替换，中断不留半截
+}
+
+// `opencode auth list` 人类可读输出 → 已认证 provider 列表（纯函数便于测试）
+function parseAuthList(text) {
+  const plain = String(text || '').replace(/\x1b\[[0-9;]*m/g, ''); // 去 ANSI 颜色码
+  const out = [];
+  for (const line of plain.split('\n')) {
+    const m = line.match(/^\s*[•*]\s+(\S+)\s+(\S+)/);
+    if (m && m[2] !== '—') out.push({ provider: m[1], type: m[2] });
+  }
+  return out;
+}
+
+function authProviders(runnerCmd) {
+  try {
+    const out = execFileSync(runnerCmd, ['auth', 'list'], { timeout: 8000, encoding: 'utf8' });
+    return parseAuthList(out);
+  } catch { return null; } // 命令不可用/超时：未知状态（与"明确无认证"区分）
+}
+
+module.exports = { chatSolo, listOcModels, demoModels, MODEL_RE, parseSoloEventLine, ocConfigPath, readDefaultModel, writeDefaultModel, parseAuthList, authProviders };
