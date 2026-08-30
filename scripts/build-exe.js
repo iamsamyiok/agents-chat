@@ -49,8 +49,10 @@ let failed = [];
 for (const t of targets) {
   const out = path.join(DIST, t === 'windows-x64' ? `agents-chat-${t}.exe` : `agents-chat-${t}`);
   console.log(`构建 ${t} -> ${path.relative(ROOT, out)} ...`);
+  // windows: 双击运行不弹命令行窗口（日志自动落到 exe 旁 .data/agents-chat.log）
+  const extra = t === 'windows-x64' ? ' --windows-hide-console --windows-title "Agents Chat"' : '';
   try {
-    execSync(`bun build --compile --minify --define "process.env.AGENTS_CHAT_STANDALONE=\\"1\\"" --target=bun-${t} app/server.js --outfile "${path.relative(ROOT, out)}"`, {
+    execSync(`bun build --compile --minify --define "process.env.AGENTS_CHAT_STANDALONE=\\"1\\"" --target=bun-${t}${extra} app/server.js --outfile "${path.relative(ROOT, out)}"`, {
       cwd: ROOT, stdio: 'inherit'
     });
     const mb = (fs.statSync(out).size / 1024 / 1024).toFixed(1);

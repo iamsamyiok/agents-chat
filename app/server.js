@@ -8,6 +8,27 @@ const path = require('path');
 const url = require('url');
 const { spawn } = require('child_process');
 
+// 单文件 exe 无控制台（--windows-hide-console）时 stdout 可能不可写：
+// 把 console.* 重定向到数据目录 agents-chat.log（>2MB 滚动到 .1），出错有迹可循。
+// 必须在任何 console 调用前执行；仅 standalone 形态且写入探测失败时启用。
+(function setupHeadlessLogging() {
+  if (process.env.AGENTS_CHAT_STANDALONE !== '1') return;
+  let writable = true;
+  try { if (!process.stdout || typeof process.stdout.write !== 'function') writable = false; else process.stdout.write(''); }
+  catch { writable = false; }
+  if (writable) return;
+  try {
+    const dir = process.env.AGENTS_CHAT_DATA || path.join(path.dirname(process.execPath), '.data');
+    fs.mkdirSync(dir, { recursive: true });
+    const logPath = path.join(dir, 'agents-chat.log');
+    try { if (fs.statSync(logPath).size > 2 * 1024 * 1024) fs.renameSync(logPath, logPath + '.1'); } catch { /* 新文件 */ }
+    const stream = fs.createWriteStream(logPath, { flags: 'a' });
+    const fmt = (args) => args.map(a => typeof a === 'string' ? a : (() => { try { return JSON.stringify(a); } catch { return String(a); } })()).join(' ') + '\n';
+    console.log = (...a) => { try { stream.write(fmt(a)); } catch { /* ignore */ } };
+    console.warn = console.error = console.log;
+  } catch { /* 日志系统自身失败：静默，服务照常 */ }
+})();
+
 // 首先加载 .env（根目录，行为开关配置）
 const { loadEnv } = require('./lib/env');
 const ROOT_DIR = path.join(__dirname, '..');
