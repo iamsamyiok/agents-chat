@@ -152,6 +152,76 @@ test('POST /api/agents/suggest 演示模式拒绝 + 参数校验', async () => {
   assert.strictEqual(r3.status, 400);
 });
 
+test('AI 编排与三标签角标路由（demo 拒绝 / 参数校验 / stats / batch）', async () => {
+  // demo 模式：chat/plan 明确拒绝并给指引
+  const c = await fetch(BASE + '/api/planner/chat', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: '做个官网' })
+  });
+  const cb = await c.json();
+  assert.strictEqual(cb.success, false);
+  assert.ok(cb.error.includes('真实执行内核'));
+  const p = await fetch(BASE + '/api/planner/plan', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sid: 'pl-x' })
+  });
+  assert.strictEqual((await p.json()).success, false);
+  // message 空 / 超长 → 400
+  const c2 = await fetch(BASE + '/api/planner/chat', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: '  ' })
+  });
+  assert.strictEqual(c2.status, 400);
+  const c3 = await fetch(BASE + '/api/planner/chat', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: 'x'.repeat(4001) })
+  });
+  assert.strictEqual(c3.status, 400);
+  // session 恢复：不存在的 sid → found:false
+  const s = await get('/api/planner/session?sid=pl-nope');
+  assert.strictEqual(s.body.found, false);
+  // 卡牌统计：字段齐全
+  const st = await get('/api/cards/stats');
+  assert.ok(st.body.success);
+  const k = st.body.stats;
+  for (const f of ['total', 'pending', 'running', 'done', 'failed']) assert.strictEqual(typeof k[f], 'number');
+  assert.strictEqual(k.total, k.pending + k.running + k.done + k.failed);
+  // 批量导入：append 建卡 + 批内依赖映射 + 环依赖跳过
+  const batch = await fetch(BASE + '/api/cards/batch', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ tasks: [
+      { title: '步骤一', content: '先做', mode: 'new', deps: [] },
+      { title: '步骤二', content: '再做', mode: 'continue', deps: [1] },
+      { title: '环A', content: 'x', mode: 'new', deps: [4] },
+      { title: '环B', content: 'y', mode: 'new', deps: [3] }
+    ] })
+  });
+  const bb = await batch.json();
+  assert.strictEqual(bb.success, true);
+  assert.strictEqual(bb.cards.length, 4);
+  assert.ok(bb.warnings.length >= 1, '环依赖应产生 warning');
+  const step2 = bb.cards[1];
+  assert.strictEqual(step2.mode, 'continue');
+  assert.strictEqual(step2.chainId, bb.cards[0].id); // 续聊链首 = 第一个依赖
+  assert.deepStrictEqual(step2.dependsOn, [bb.cards[0].id]);
+  // 环依赖至少一跳被丢弃
+  const cyc = bb.cards.map(x => x.dependsOn);
+  const flat = [].concat(...cyc);
+  assert.ok(flat.length <= 3);
+  // replace 模式：清空再导入
+  const rep = await fetch(BASE + '/api/cards/batch', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ tasks: [{ title: '唯一', content: 'one', mode: 'new', deps: [] }], importMode: 'replace' })
+  });
+  const rb = await rep.json();
+  assert.strictEqual(rb.success, true);
+  assert.ok(rb.replaced >= 4);
+  assert.strictEqual(rb.cards.length, 1);
+  const after = await get('/api/cards/stats');
+  assert.strictEqual(after.body.stats.total, 1);
+  // 空 tasks → 400
+  const bad = await fetch(BASE + '/api/cards/batch', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tasks: [] })
+  });
+  assert.strictEqual(bad.status, 400);
+});
+
 test('404 未知路由', async () => {
   const r = await fetch(BASE + '/api/nonexistent');
   assert.strictEqual(r.status, 404);

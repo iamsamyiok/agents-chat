@@ -37,8 +37,8 @@ function buildPrompt(requirements, existingNames) {
   ].filter(line => line !== '').join('\n');
 }
 
-// 容错提取 JSON 数组：裸数组 → ```json 代码块 → 首个 [ 到最后一个 ] 的子串
-function extractTeamJSON(text) {
+// 通用容错提取 JSON 数组（planner 等模块共享）：裸数组 → ```json 代码块 → 首个 [ 到最后一个 ] 的子串
+function extractJSONArray(text) {
   const raw = String(text || '').trim();
   if (!raw) return null;
   // 1. 整体就是合法 JSON
@@ -55,6 +55,11 @@ function extractTeamJSON(text) {
     try { const v = JSON.parse(raw.slice(start, end + 1)); if (Array.isArray(v)) return v; } catch { /* 放弃 */ }
   }
   return null;
+}
+
+// 兼容保留：团队配置提取（实现转用通用函数）
+function extractTeamJSON(text) {
+  return extractJSONArray(text);
 }
 
 // 清洗生成结果：字段类型归一 + 长度截断 + 空名补名 + 重名后缀 + 数量上限
@@ -135,4 +140,4 @@ async function suggestTeam({ requirements, existingNames, runAgentFn, timeoutMs 
   return { success: true, agents };
 }
 
-module.exports = { buildPrompt, extractTeamJSON, cleanSuggestedTeam, suggestTeam, LIMITS, TEAM_MIN, TEAM_MAX, REQ_MAX };
+module.exports = { buildPrompt, extractTeamJSON, extractJSONArray, cleanSuggestedTeam, suggestTeam, LIMITS, TEAM_MIN, TEAM_MAX, REQ_MAX };

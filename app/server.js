@@ -71,7 +71,9 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const store = require('./lib/store');
 const { runAgent, resolveRunner, missingHint, stopScope, stopAllChildren } = require('./lib/agent');
 const teamgen = require('./lib/teamgen');
+const planner = require('./lib/planner');
 let suggestInFlight = false; // AI 组队生成互斥：同刻仅一个（内核单次调用，防并发浪费）
+const plannerLocks = new Set(); // AI 编排按会话互斥（每会话同时一个内核调用）
 const { runButler, runMentioned, runRoundtable, runTasks, prepareRerun } = require('./lib/orchestrator');
 const oc = require('./lib/oc');
 const memoryMod = require('./lib/memory');
@@ -630,6 +632,71 @@ const server = http.createServer(async (req, res) => {
     } finally {
       suggestInFlight = false;
     }
+    return;
+  }
+
+  // ---------- AI 智能编排（卡牌控制台聊天式编排） ----------
+  if (p === '/api/planner/chat' && req.method === 'POST') {
+    const body = await readBody(req);
+    const message = String(body.message || '').trim();
+    if (!message || message.length > planner.MSG_MAX) {
+      json(res, 400, { success: false, error: `消息不能为空且不超过 ${planner.MSG_MAX} 字` });
+      return;
+    }
+    const runner = resolveRunner();
+    if (runner.kind === 'demo' || runner.kind === 'missing') {
+      const why = runner.kind === 'demo'
+        ? '当前为演示模式（AGENTS_CHAT_MOCK=1），删除 .env 中该配置并重启本程序后即可使用'
+        : missingHint(runner);
+      json(res, 200, { success: false, error: `AI 编排需要真实执行内核：${why}` });
+      return;
+    }
+    const sid = body.sid ? String(body.sid) : '';
+    if (plannerLocks.has(sid)) { json(res, 409, { success: false, error: '上一条还在处理中，请稍候' }); return; }
+    plannerLocks.add(sid);
+    try {
+      const r = await planner.chat({ sid, message });
+      if (r.error) json(res, 200, { success: false, error: r.error });
+      else json(res, 200, { success: true, sid: r.sid, reply: r.reply });
+    } finally {
+      plannerLocks.delete(sid);
+    }
+    return;
+  }
+
+  if (p === '/api/planner/plan' && req.method === 'POST') {
+    const body = await readBody(req);
+    const sid = String(body.sid || '');
+    const runner = resolveRunner();
+    if (runner.kind === 'demo' || runner.kind === 'missing') {
+      const why = runner.kind === 'demo'
+        ? '当前为演示模式（AGENTS_CHAT_MOCK=1），删除 .env 中该配置并重启本程序后即可使用'
+        : missingHint(runner);
+      json(res, 200, { success: false, error: `AI 编排需要真实执行内核：${why}` });
+      return;
+    }
+    if (plannerLocks.has(sid)) { json(res, 409, { success: false, error: '上一条还在处理中，请稍候' }); return; }
+    plannerLocks.add(sid);
+    try {
+      const r = await planner.plan({ sid });
+      if (r.error) json(res, 200, { success: false, error: r.error });
+      else json(res, 200, { success: true, plan: r.plan });
+    } finally {
+      plannerLocks.delete(sid);
+    }
+    return;
+  }
+
+  if (p === '/api/planner/session' && req.method === 'GET') {
+    const sid = String(parsed.query.sid || '');
+    const s = sid ? planner.readSession(sid) : planner.latestSession();
+    json(res, 200, { success: true, found: !!s, sid: s ? s.sid : '', messages: s ? s.messages : [] });
+    return;
+  }
+  if (p === '/api/planner/session/delete' && req.method === 'POST') {
+    const body = await readBody(req);
+    const ok = planner.deleteSession(String(body.sid || ''));
+    json(res, 200, { success: ok });
     return;
   }
 
@@ -1212,6 +1279,71 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (p === '/api/cards/stats' && req.method === 'GET') {
+    // 三模式标签角标：轻量统计（<1KB），避免主界面拉全量卡牌
+    const stat = { total: 0, pending: 0, running: 0, done: 0, failed: 0 };
+    for (const c of CardStore.list()) {
+      stat.total++;
+      if (stat[c.status] !== undefined) stat[c.status]++;
+    }
+    json(res, 200, { success: true, stats: stat });
+    return;
+  }
+
+  if (p === '/api/cards/batch' && req.method === 'POST') {
+    // AI 编排清单批量导入：importMode=append 追加 | replace 先清空全部再导入
+    const body = await readBody(req);
+    const tasksIn = Array.isArray(body.tasks) ? body.tasks : [];
+    if (!tasksIn.length || tasksIn.length > 50) {
+      json(res, 400, { success: false, error: 'tasks 必须是 1-50 个任务的数组' });
+      return;
+    }
+    const { wouldCycle } = require('./lib/cards');
+    let replaced = 0;
+    if (String(body.importMode) === 'replace') {
+      for (const c of CardStore.list()) { CardStore.remove(c.id); replaced++; }
+    }
+    // 第一步：先全部创建（暂不带依赖），拿到序号 → id 映射
+    const idMap = new Map();
+    const cards = [];
+    tasksIn.forEach((t, i) => {
+      const card = CardStore.add({
+        title: String(t.title || '').trim() || String(t.content || '').slice(0, 40) || `任务${i + 1}`,
+        content: String(t.content || ''),
+        priority: Number.isFinite(Number(t.priority)) ? Number(t.priority) : 100 + i,
+        mode: 'new'
+      });
+      idMap.set(i + 1, card.id);
+      cards.push(card);
+    });
+    // 第二步：按清单回填 mode / deps（映射为批内 id）与续聊链首；环依赖丢弃并计警告
+    const warnings = [];
+    tasksIn.forEach((t, i) => {
+      const id = idMap.get(i + 1);
+      let mode = String(t.mode || 'new');
+      if (!['new', 'continue', 'parallel'].includes(mode)) mode = 'new';
+      let deps = Array.isArray(t.deps) ? t.deps : [];
+      deps = [...new Set(deps.map(d => parseInt(d, 10)).filter(Number.isInteger))]
+        .map(d => idMap.get(d)).filter(x => x && x !== id);
+      let chainId = '';
+      if (mode === 'continue' && deps.length) {
+        chainId = deps[0]; // 续聊链首 = 第一个依赖（清单内前一步）
+      } else if (mode === 'continue') {
+        mode = 'new'; // 无链首的续聊退化为新进程
+      }
+      const safe = [];
+      for (const d of deps) {
+        if (wouldCycle(id, [...safe, d])) { warnings.push(`任务 ${i + 1} 的依赖（序号 ${d}）会形成循环，已跳过`); continue; }
+        safe.push(d);
+      }
+      CardStore.update(id, { mode, dependsOn: safe, chainId });
+      const c = cards.find(x => x.id === id);
+      if (c) { c.mode = mode; c.dependsOn = safe; c.chainId = chainId; }
+    });
+    json(res, 200, { success: true, cards, warnings, replaced });
+    return;
+  }
+
   if (p === '/api/cards/clear' && req.method === 'POST') {
     const all = CardStore.list();
     for (const c of all) CardStore.remove(c.id);
@@ -1609,6 +1741,9 @@ function pruneOldDataQuiet() {
     require('./lib/worktree').pruneStale(PRUNE_DAYS, store.getTasks())
       .then(ws => { if (ws.worktrees) { stat.worktrees = ws.worktrees; console.log('[maintenance] 清理过期 Git 隔离区:', ws.worktrees); } })
       .catch(() => {});
+    // AI 编排聊天会话同步滚动清理（与任务/会话同一保留窗口）
+    const pl = require('./lib/planner').pruneStale(PRUNE_DAYS);
+    if (pl) { stat.plannerSessions = pl; console.log('[maintenance] 清理过期编排会话:', pl); }
     const touched = Object.values(stat).reduce((a, b) => a + b, 0);
     if (touched) console.log(`[maintenance] 自动清理超 ${PRUNE_DAYS} 天的历史数据：`, JSON.stringify(stat));
   } catch (e) { console.error('[maintenance] 自动清理失败:', e && (e.message || e)); }
