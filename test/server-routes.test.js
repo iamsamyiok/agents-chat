@@ -130,6 +130,28 @@ test('POST /api/data/prune 手动清理', async () => {
   assert.ok(body.stat);
 });
 
+test('POST /api/agents/suggest 演示模式拒绝 + 参数校验', async () => {
+  // 演示模式（服务以 AGENTS_CHAT_MOCK=1 启动）→ 明确拒绝并给出指引，不返回模拟团队
+  const r = await fetch(BASE + '/api/agents/suggest', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requirements: '做一个电商网站团队' })
+  });
+  const body = await r.json();
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(body.success, false);
+  assert.ok(body.error.includes('真实执行内核'));
+  assert.ok(!Array.isArray(body.agents) || body.agents.length === 0);
+  // 需求为空 → 400
+  const r2 = await fetch(BASE + '/api/agents/suggest', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requirements: '   ' })
+  });
+  assert.strictEqual(r2.status, 400);
+  // 需求超长 → 400
+  const r3 = await fetch(BASE + '/api/agents/suggest', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requirements: '长'.repeat(2001) })
+  });
+  assert.strictEqual(r3.status, 400);
+});
+
 test('404 未知路由', async () => {
   const r = await fetch(BASE + '/api/nonexistent');
   assert.strictEqual(r.status, 404);

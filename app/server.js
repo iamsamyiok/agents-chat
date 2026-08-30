@@ -69,7 +69,9 @@ process.on('unhandledRejection', (err) => {
 const PORT = Number(process.argv.includes('--port') ? process.argv[process.argv.indexOf('--port') + 1] : (process.env.PORT || 3456));
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const store = require('./lib/store');
-const { runAgent, stopScope, stopAllChildren } = require('./lib/agent');
+const { runAgent, resolveRunner, missingHint, stopScope, stopAllChildren } = require('./lib/agent');
+const teamgen = require('./lib/teamgen');
+let suggestInFlight = false; // AI 组队生成互斥：同刻仅一个（内核单次调用，防并发浪费）
 const { runButler, runMentioned, runRoundtable, runTasks, prepareRerun } = require('./lib/orchestrator');
 const oc = require('./lib/oc');
 const memoryMod = require('./lib/memory');
@@ -595,6 +597,39 @@ const server = http.createServer(async (req, res) => {
     const approval = ['off', 'plan', 'verify', 'all'].includes(approvalIn) ? approvalIn : undefined;
     store.saveAgents(clean, globalCwd, kernel, approval);
     json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '', kernel: String(store.getConfig().kernel || 'auto'), approval: approvalSetting(), warnings: dirWarn });
+    return;
+  }
+
+  if (p === '/api/agents/suggest' && req.method === 'POST') {
+    // AI 智能组队：需求文本 → 执行内核生成团队配置（预览态，不落盘；应用走 /api/agents 保存链路）
+    const body = await readBody(req);
+    const requirements = String(body.requirements || '').trim();
+    if (!requirements || requirements.length > teamgen.REQ_MAX) {
+      json(res, 400, { success: false, error: `需求描述不能为空且不超过 ${teamgen.REQ_MAX} 字` });
+      return;
+    }
+    if (suggestInFlight) {
+      json(res, 409, { success: false, error: '上一次生成还在进行中，请稍候' });
+      return;
+    }
+    const runner = resolveRunner();
+    if (runner.kind === 'demo' || runner.kind === 'missing') {
+      const why = runner.kind === 'demo'
+        ? '当前为演示模式（AGENTS_CHAT_MOCK=1），删除 .env 中该配置并重启本程序后即可使用真实生成'
+        : missingHint(runner);
+      json(res, 200, { success: false, error: `AI 组队需要真实执行内核：${why}` });
+      return;
+    }
+    suggestInFlight = true;
+    try {
+      const r = await teamgen.suggestTeam({
+        requirements,
+        existingNames: store.getAgents().map(a => a.name)
+      });
+      json(res, 200, r);
+    } finally {
+      suggestInFlight = false;
+    }
     return;
   }
 

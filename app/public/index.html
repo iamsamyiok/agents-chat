@@ -215,14 +215,14 @@
   .at-tx i { font-style: normal; color: #999; font-size: 11px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
 
   /* ---------- 弹窗 ---------- */
-  #modalMask, #batchMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask, #memMask, #diffMask, #welcomeMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
+  #modalMask, #batchMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask, #memMask, #diffMask, #welcomeMask, #suggestMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
   /* 弹窗出现动画：遮罩淡入（含毛玻璃）+ 内容上浮，全站弹窗统一节奏 */
   div[id$="Mask"] { backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
   div[id$="Mask"].show { animation: fade-in .18s ease; }
   .modal, .preview-card { animation: modal-in .24s cubic-bezier(.2,.7,.3,1); }
   @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
   @keyframes modal-in { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
-  #modalMask.show, #batchMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show, #memMask.show, #diffMask.show, #welcomeMask.show { display: flex; }
+  #modalMask.show, #batchMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show, #memMask.show, #diffMask.show, #welcomeMask.show, #suggestMask.show { display: flex; }
   /* 团队仓库卡片 */
   .team-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
   .team-card .tc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -588,6 +588,7 @@
     <div class="tip">每个智能体都是一个独立的 AI Agent：执行内核由顶部下拉框统一选择（OpenCode / Claude Code / Codex / pi），<b>图标</b>用于辨认，<b>名称</b>用于 @ 点名，<b>技能说明</b>供管家调度参考，<b>自定义提示词</b>会在任务下发时附加在用户提示词前面。所有智能体使用所选内核的默认模型。「管家」为内置调度智能体，不可修改。</div>
     <div class="butler-ro" id="butlerRo"></div>
     <div class="ag-row" style="margin:8px 0 2px">
+      <button class="add-agent" style="flex:1" onclick="openSuggest()">🪄 AI 组队 · 一句话生成团队</button>
       <button class="add-agent" style="flex:1" onclick="openTeams()">📦 团队仓库 · 一键换经典团队</button>
     </div>
     <div class="global-cwd-box">
@@ -655,6 +656,25 @@
     <div id="teamsList"></div>
     <div class="modal-actions">
       <button class="primary" onclick="closeTeams()">关闭</button>
+    </div>
+  </div>
+</div>
+<!-- AI 智能组队弹窗 -->
+<div id="suggestMask">
+  <div class="modal wide">
+    <h3>🪄 AI 组队</h3>
+    <div class="tip">用一句话描述你的需求，AI 扮演团队设计师，生成一套分工明确的智能体团队（名称/图标/技能说明/提示词）。先预览再应用，应用后仍可自由增删改，点配置页「保存」才生效。</div>
+    <div class="ta-wrap"><textarea id="sgReqInput" style="min-height:88px" placeholder="例如：我要从零做一个跨境电商独立站，需要市场调研、选品分析、网站前后端开发、内容文案和上线测试，帮我组建一支能覆盖全流程的团队"></textarea></div>
+    <div class="ag-row" style="margin:8px 0">
+      <button id="sgRunBtn" class="primary" style="flex:1" onclick="runSuggest()">✨ 生成团队</button>
+    </div>
+    <div id="sgResult"></div>
+    <div class="modal-actions">
+      <button class="mini-btn" onclick="runSuggest()">🔄 重新生成</button>
+      <span style="flex:1"></span>
+      <button onclick="closeSuggest()">放弃</button>
+      <button class="mini-btn" style="background:#07c160;color:#fff" onclick="applySuggest('append')">＋ 应用（合并到现有团队）</button>
+      <button class="primary" onclick="applySuggest('replace')">应用（替换全部子智能体）</button>
     </div>
   </div>
 </div>
@@ -749,7 +769,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.33.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.34.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行' };
 // 职业图标库（智能体配置可选）
@@ -3354,6 +3374,94 @@ function applyTeamPreset(i, mode) {
   toast(`已应用「${t.name}」（${mode === 'replace' ? '替换' : '追加'} ${incoming.length} 个智能体），点「保存」后生效`);
 }
 
+// ---------- AI 智能组队：一句话需求 → 内核生成团队 → 预览应用 ----------
+let sgDraft = []; // 预览态候选（仅前端内存，应用才进 editing）
+
+function openSuggest() {
+  document.getElementById('sgResult').innerHTML = '';
+  sgDraft = [];
+  document.getElementById('suggestMask').classList.add('show');
+  setTimeout(() => document.getElementById('sgReqInput').focus(), 50);
+}
+function closeSuggest() { document.getElementById('suggestMask').classList.remove('show'); }
+
+async function runSuggest() {
+  const reqEl = document.getElementById('sgReqInput');
+  const requirements = String(reqEl.value || '').trim();
+  if (!requirements) { toast('先描述一下你的需求，AI 才知道要组什么团队'); reqEl.focus(); return; }
+  const btn = document.getElementById('sgRunBtn');
+  const out = document.getElementById('sgResult');
+  btn.disabled = true;
+  btn.textContent = '⏳ 生成中…（AI 正在设计团队分工，最长约 2 分钟）';
+  out.innerHTML = '<div class="task-empty" style="padding:16px">AI 正在根据你的需求设计团队分工，请稍候…</div>';
+  sgDraft = [];
+  try {
+    const r = await api('/api/agents/suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requirements }) });
+    if (r.success) {
+      sgDraft = r.agents || [];
+      renderSuggestCards();
+      toast(`已生成 ${sgDraft.length} 个智能体，确认后点下方「应用」`);
+    } else {
+      out.innerHTML = `<div class="task-empty" style="padding:16px;color:#c0392b">❌ ${esc(r.error || '生成失败，请稍后重试')}</div>`;
+    }
+  } catch (e) {
+    out.innerHTML = `<div class="task-empty" style="padding:16px;color:#c0392b">❌ 生成失败：${esc(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✨ 生成团队';
+  }
+}
+
+function renderSuggestCards() {
+  const el = document.getElementById('sgResult');
+  if (!sgDraft.length) {
+    el.innerHTML = '<div class="task-empty" style="padding:16px">暂无生成结果，输入需求后点「生成团队」</div>';
+    return;
+  }
+  el.innerHTML = sgDraft.map((a, i) => `
+    <div class="ag-card">
+      <div class="ag-row">
+        <span style="font-size:20px;align-self:center">${esc(a.icon || '🤖')}</span>
+        <b style="align-self:center;flex:1">${esc(a.name)}</b>
+        <button class="mini-btn gray" onclick="sgDraft.splice(${i},1);renderSuggestCards()">删除</button>
+      </div>
+      <input value="${escAttr(a.desc || '')}" placeholder="技能说明" oninput="sgDraft[${i}].desc=this.value">
+      <details>
+        <summary style="font-size:12px;color:#666;cursor:pointer;margin:4px 0">自定义提示词（点击展开查看，可直接修改）</summary>
+        <textarea oninput="sgDraft[${i}].systemPrompt=this.value">${esc(a.systemPrompt || '')}</textarea>
+      </details>
+    </div>`).join('');
+}
+
+// 应用候选：append=合并到现有名单（重名自动加序号）；replace=替换全部子智能体
+function applySuggest(mode) {
+  if (!sgDraft.length) { toast('还没有可应用的生成结果'); return; }
+  const incoming = sgDraft.map(a => ({
+    id: '', behavior: 'echo',
+    name: String(a.name || '').trim(),
+    icon: String(a.icon || ''),
+    desc: String(a.desc || ''),
+    systemPrompt: String(a.systemPrompt || '')
+  })).filter(a => a.name);
+  if (!incoming.length) { toast('候选智能体缺少名称，无法应用'); return; }
+  if (mode === 'replace') {
+    editing = incoming;
+  } else {
+    const names = new Set(['管家', 'butler', ...editing.map(a => String(a.name || '').trim())]);
+    for (const a of incoming) {
+      let final = a.name, n = 2;
+      while (names.has(final)) final = `${a.name}${n++}`;
+      a.name = final;
+      names.add(final);
+      editing.push(a);
+    }
+  }
+  sgDraft = [];
+  renderAgentCards();
+  closeSuggest();
+  toast(`已应用 AI 生成的团队（${mode === 'replace' ? '替换' : '合并'} ${incoming.length} 个智能体），点配置页「保存」后生效`);
+}
+
 function iconPicker(i) {
   const cur = editing[i].icon || '';
   return '<div class="icon-row">' + ICON_PRESETS.map(ic =>
@@ -3605,6 +3713,7 @@ function openHelp() {
       <li>本机安装任一执行内核并登录模型（模型与密钥由内核自己管理，本程序不做任何 API 配置）：<br>
         <code>${KERNEL_INSTALL.opencode}</code><br><code>${KERNEL_INSTALL.claude}</code><br><code>${KERNEL_INSTALL.codex}</code><br><code>${KERNEL_INSTALL.pi}</code></li>
       <li>启动本程序后浏览器打开 <code>http://localhost:3456</code>，会自动识别已安装的内核</li>
+      <li>不知道配什么团队？「⚙ 智能体配置」里点「🪄 AI 组队」，一句话描述需求，AI 自动生成整套智能体团队（先预览再应用）；也可从「📦 团队仓库」一键换经典团队</li>
       <li>直接在输入框说话即可开始；粘贴任务清单可批量执行</li>
     </ol>
   </div>

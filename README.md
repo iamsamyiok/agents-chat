@@ -26,6 +26,7 @@ npm install -g opencode-ai
 | 能力 | 说明 |
 |---|---|
 | 群聊编排 | 直接输入需求，管家智能体拆解成阶段计划，调度子智能体并行执行，自动验收不合格返工 |
+| AI 组队 | 一句话描述需求，执行内核自动生成整套智能体团队（名称/图标/技能/提示词），预览后合并或替换应用 |
 | 批量任务 | 粘贴一段文本一次导入多条任务（`1. xxx` 每行一条），可拖拽排序、批量执行 |
 | 定时任务 | 行首写时间即定时（`2026-08-18 13:07 生成日报`），到点自动执行，停机错过的启动时补跑，可开机自启 |
 | Git 隔离 | 导入时勾选「Git 隔离执行」：每任务独立 worktree 分支互不污染，完成后逐文件看 diff、一键合并或丢弃 |
@@ -84,7 +85,7 @@ OpenCode（推荐）/ Claude Code / Codex CLI / pi，页面右上角可切换。
 git clone https://github.com/iamsamyiok/agents-chat
 cd agents-chat && npm install
 AGENTS_CHAT_MOCK=1 npm start   # 演示模式开发，无需内核
-npm test                       # 66 个测试用例
+npm test                       # 81 个测试用例
 ```
 
 零运行时依赖，Node 原生模块实现（HTTP/SSE/存储均为自研轻量层）。
