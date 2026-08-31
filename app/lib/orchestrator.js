@@ -1233,7 +1233,8 @@ ${history ? `\n【近期聊天背景】\n${String(history).slice(0, 2000)}` : ''
 要求：
 1. 只给与消息相关的成员分配具体任务；无关成员 task 留空字符串（本轮旁听，不发言不干活）
 2. 任务描述具体到该成员能直接开工，明确各自负责的部分、边界与期望产出
-3. 只输出 JSON 数组，禁止任何其他文字：[{"id":"成员id","task":"任务描述"}]
+3. 数组按执行先后顺序排列：产出被他人依赖的成员排在前，依赖他人产出的排在后（如：先调研 → 再实现 → 后成稿）
+4. 只输出 JSON 数组，禁止任何其他文字：[{"id":"成员id","task":"任务描述"}]
 名单内每个成员必须且只能出现一次。`;
   const plannerMod = require('./planner');
   const { content, error } = await plannerMod.runOnce(prompt, dividePlanTimeout(), 'divide-plan');
@@ -1309,6 +1310,11 @@ async function runDivideCore(plan, opts, emit, onMessage, execFn) {
   const taskOf = (id) => { const p = plan.find(x => x.agent.id === id); return p ? p.task : ''; };
   const rosterText = `📋 分工表\n${plan.map(p => `- ${p.agent.icon || ''}${p.agent.name}：${p.task || '（本轮旁听）'}`).join('\n')}`;
   emit({ type: 'notice', content: rosterText, taskId });
+  // 结构化分工表（有序）：前端据此按序预建成员气泡占位，产出消息按分工顺序稳定排列（并行执行完成顺序不影响显示顺序）
+  emit({
+    type: 'divide_plan', taskId,
+    plan: plan.filter(p => p.task).map(p => ({ id: p.agent.id, name: p.agent.name, icon: p.agent.icon || '', task: p.task }))
+  });
   onMessage({ role: 'sys', phase: 'divide', content: rosterText });
   let total = 0;
   let capNoticed = false;

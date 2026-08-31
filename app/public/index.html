@@ -363,6 +363,7 @@
     #previewMask .preview-card { width: 96vw; height: 92vh; }
   }
   #menuBtn { display: none; background: none; border: none; font-size: 18px; cursor: pointer; color: #555; margin-right: 10px; }
+  /* 左栏折叠开关（☰）：宽屏收起左栏、窄屏抽屉化，menuBtn 始终可见 */
 
   /* 中等窗口（笔记本半屏/小平板）：三栏收窄，消息气泡放宽 */
   @media (max-width: 1080px) {
@@ -374,14 +375,29 @@
   /* 窄屏：隐藏中栏任务列表（操作入口仍在批量管理弹窗可达），左栏抽屉化 */
   @media (max-width: 860px) {
     #taskbar { display: none; }
+    #taskExpand { display: none !important; }
     #sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 70; transform: translateX(-100%); transition: transform .2s; box-shadow: 0 0 24px rgba(0,0,0,.18); }
     #sidebar.open { transform: none; }
+    body.coll-left #sidebar { display: flex; } /* 窄屏不用 coll-left，抽屉态优先 */
     #menuBtn { display: block !important; }
   }
 
    .ttab .badge { margin-left: 4px; vertical-align: 1px; }
 
-   /* ---------- 多任务编排模式：隐藏中栏，控制台占满 ---------- */
+   /* ---------- 面板折叠：左栏（☰）/ 中栏（⟨），折叠后聊天区占满 ---------- */
+   body.coll-left #sidebar { display: none; }
+   body.coll-task #taskbar { display: none; }
+   #taskExpand { position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 56; width: 26px; padding: 12px 2px; border: 1px solid #ddd; border-left: none; border-radius: 0 8px 8px 0; background: #fff; color: #07c160; font-size: 12px; line-height: 1.5; cursor: pointer; box-shadow: 2px 0 10px rgba(0,0,0,.08); }
+   #taskExpand:hover { background: #f0faf4; }
+   body.coll-task #taskExpand { display: block; }
+   #menuBtn { display: block; background: none; border: none; font-size: 18px; cursor: pointer; color: #555; margin-right: 10px; }
+
+   /* ---------- 分工/编排模式：会话列表与任务面板自动隐藏，聊天/控制台占满 ---------- */
+   body.mode-divide #sessArea,
+   body.mode-cards #sessArea { display: none; }
+   body.mode-divide .list-sep,
+   body.mode-cards .list-sep { display: none; }
+   body.mode-divide #taskbar,
    body.mode-cards #taskbar { display: none; }
    body.mode-cards #newSessBtn,
    body.mode-cards #histBtn,
@@ -489,6 +505,7 @@
       <button class="mini-btn" onclick="openImport()">📥 导入任务</button>
       <button class="mini-btn gray" onclick="openBatchMgr()" title="批量管理全部顺序任务与定时任务（删除/执行）">批量管理</button>
       <button class="mini-btn gray" onclick="clearTasks()" title="清空全部任务">清空</button>
+      <button class="mini-btn gray" onclick="toggleTaskbar()" title="收起任务面板（聊天区占满）">⟨</button>
     </div>
     <div class="task-tabs" id="taskTabs">
       <button class="ttab active" id="ttabSeq" onclick="setTaskView('seq')">📋 顺序任务</button>
@@ -505,7 +522,7 @@
   <main id="chat">
     <header id="chatHeader">
       <div style="display:flex;align-items:center;min-width:0;">
-        <button id="menuBtn" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+        <button id="menuBtn" onclick="toggleSidebar()" title="收起/展开左侧面板">☰</button>
         <div style="min-width:0;">
           <div class="chat-title" id="chatTitle">Agents 群聊</div>
           <div class="chat-members" id="members"></div>
@@ -560,6 +577,8 @@
     </div>
   </main>
 </div>
+<!-- 任务面板收起后的展开按钮（浮动于聊天区左缘） -->
+<button id="taskExpand" onclick="toggleTaskbar()" title="展开任务面板" style="display:none">任<br>务<br>⟩</button>
 <!-- 版本号：页面右下角角落（次要信息，不与操作按钮混排） -->
 <span class="ver-chip" id="verChip" title="当前版本"></span>
 
@@ -845,7 +864,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.39.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.39.1'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -1051,7 +1070,8 @@ function setChatMode(mode) {
   chatMode = ['solo', 'divide', 'cards'].includes(mode) ? mode : 'group';
   try { localStorage.setItem(MODE_STORE_KEY, chatMode); } catch { /* ignore */ }
   if (chatMode === 'group' || chatMode === 'divide') groupMsgUnread = 0; // 回到聊天视图即视为已读主会话
-  document.body.classList.toggle('mode-cards', chatMode === 'cards'); // 多任务编排：侧栏只留标签
+  document.body.classList.toggle('mode-cards', chatMode === 'cards'); // 编排模式：聊天相关区域隐藏
+  document.body.classList.toggle('mode-divide', chatMode === 'divide'); // 分工模式：会话/任务面板自动隐藏
   document.getElementById('modeSoloBtn').classList.toggle('active', chatMode === 'solo');
   document.getElementById('modeGroupBtn').classList.toggle('active', chatMode === 'group');
   document.getElementById('modeDivideBtn').classList.toggle('active', chatMode === 'divide');
@@ -1095,6 +1115,16 @@ function setChatMode(mode) {
     loadOcModels();
     setTimeout(() => { try { document.getElementById('soloInput').focus(); } catch {} }, 100);
   }
+}
+
+// ---------- 面板折叠：左栏（☰，宽屏收起/窄屏抽屉）与中栏（⟨/⟩，任务面板） ----------
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  if (window.matchMedia('(max-width: 860px)').matches) sb.classList.toggle('open');
+  else document.body.classList.toggle('coll-left');
+}
+function toggleTaskbar() {
+  document.body.classList.toggle('coll-task');
 }
 
 // ---------- 四标签角标：完成进度（✓d/t）+ 未读绿点数字 ----------
@@ -2324,7 +2354,7 @@ function sealLiveStreams(ev) {
   }
 }
 
-function onStreamText(ev) {
+function onStreamText(ev, placeholder) {
   const key = sessKey(ev.taskId);
   const sk = ev.agentId + '|' + ev.phase + '|' + key;
   const arr = getSess(key);
@@ -2334,6 +2364,21 @@ function onStreamText(ev) {
   }
   if (!m) {
     m = { role: 'assistant', content: '', agentId: ev.agentId, agentName: ev.agentName, phase: ev.phase, taskId: ev.taskId, _sk: sk, _live: true, ts: Date.now() };
+    if (placeholder && key === curKey()) {
+      // 分工占位转正：流式消息落在占位条原位置（视觉顺序=分工表顺序，不受并行完成先后影响）
+      const idx = arr.indexOf(placeholder);
+      if (idx >= 0) {
+        arr.splice(idx, 1, m);
+        const node = msgNode(m);
+        m._dom = node;
+        if (placeholder._dom && document.contains(placeholder._dom)) placeholder._dom.replaceWith(node);
+        else document.getElementById('messages').appendChild(node);
+        followScroll();
+        m.content += ev.content;
+        ensureMsgDom(m);
+        return;
+      }
+    }
     arr.push(m);
   }
   m.content += ev.content;
@@ -2522,7 +2567,7 @@ const workingBars = new Map(); // agentId|phase|taskId -> 前端消息对象
 function workingKey(ev) { return `${ev.agentId}|${ev.phase || ''}|${ev.taskId || ''}`; }
 function addWorking(ev) {
   const key = workingKey(ev);
-  removeWorkingByKey(key);
+  if (workingBars.has(key)) return; // 占位已在（divide_plan 预建/同阶段重复 stage）：保持原位不重建，维持分工顺序
   const m = pushMsg({
     role: 'working', content: '', icon: agentIcon(ev.agentId, ev.agentName),
     agentId: ev.agentId, agentName: ev.agentName, phase: ev.phase, taskId: ev.taskId || '', ts: Date.now()
@@ -2552,8 +2597,9 @@ function handleStreamEvent(e) {
     removeWorkingForTask(e.taskId, 'review');
     addSys(e.accepted ? `✅ 验收通过（第 ${e.round} 轮）` : `⚠ ${e.note || '验收未通过'}`, e.taskId);
   } else if (e.type === 'text') {
+    const ph = workingBars.get(workingKey(e)); // 占位条转正候选：text 到达时在原位替换为流式消息
     removeWorkingByKey(workingKey(e));
-    onStreamText(e);
+    onStreamText(e, ph);
   } else if (e.type === 'saved') {
     removeWorkingByKey(workingKey(e));
     onSaved(e);
@@ -2561,6 +2607,13 @@ function handleStreamEvent(e) {
     if (e.phase === 'report') showDoneToast(e.taskId || '', ''); // 最终交付落盘：用户已切走时右下角提醒
   } else if (e.type === 'notice') {
     addSys(e.content, e.taskId);
+  } else if (e.type === 'divide_plan') {
+    // 结构化分工表（有序）：按分工顺序预建成员「工作中」占位条，产出消息落位与分工表一致
+    if (Array.isArray(e.plan)) {
+      for (const p of e.plan) {
+        addWorking({ type: 'stage', agentId: p.id, agentName: p.name, phase: 'divide', taskId: e.taskId || '' });
+      }
+    }
   } else if (e.type === 'approval_required') {
     pushMsg({ role: 'approval', approvalId: e.approvalId, kind: e.kind, label: e.label, taskId: e.taskId || curTaskId, ts: Date.now() });
   } else if (e.type === 'error') {
