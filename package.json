@@ -1,6 +1,6 @@
 {
   "name": "agents-chat-cli",
-  "version": "3.38.3",
+  "version": "3.39.0",
   "description": "多智能体群聊工具 - 支持 OpenCode/Claude Code/Codex/pi 内核，微信风格聊天界面",
   "main": "lib/start.js",
   "bin": {
