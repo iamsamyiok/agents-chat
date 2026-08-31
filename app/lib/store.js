@@ -441,10 +441,11 @@ function reorderTasks(ids) {
   saveTasks(order);
 }
 
-// 删除任务及其会话消息
+// 删除任务及其会话消息（含新版分片；旧版单文件一并清理）
 function deleteTask(id) {
   saveTasks(getTasks().filter(t => t.id !== id));
   writeJson(MESSAGES_PATH, readJson(MESSAGES_PATH, []).filter(m => (m.taskId || '') !== id));
+  try { fs.unlinkSync(msgShardPath(id)); } catch { /* 分片不存在（旧数据/空任务）无需处理 */ }
   return true;
 }
 
@@ -898,11 +899,11 @@ function pruneOldData(days) {
     }
   } catch { /* 无目录 */ }
 
-  // 4. 流转日志：超期事件行过滤重写
+  // 4. 流转日志：超期事件行过滤重写（e.t 为 ISO 字符串，需 Date.parse；解析失败的行顺带清除）
   try {
     const lines = fs.readFileSync(FLOW_PATH, 'utf8').split(/\r?\n/).filter(Boolean);
     const kept = lines.filter(l => {
-      try { const e = JSON.parse(l); if (Number(e.t || 0) < cutoff) { stat.flowEvents++; return false; } } catch { stat.flowEvents++; return false; }
+      try { const e = JSON.parse(l); if ((Date.parse(e.t || '') || 0) < cutoff) { stat.flowEvents++; return false; } } catch { stat.flowEvents++; return false; }
       return true;
     });
     if (kept.length !== lines.length) fs.writeFileSync(FLOW_PATH, kept.length ? kept.join('\n') + '\n' : '');

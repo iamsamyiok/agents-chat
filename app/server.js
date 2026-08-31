@@ -131,10 +131,15 @@ function json(res, code, data) {
 function readBody(req) {
   return new Promise((resolve) => {
     let buf = '';
-    req.on('data', (c) => { buf += c; if (buf.length > 5 * 1024 * 1024) req.destroy(); });
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    req.on('data', (c) => { buf += c; if (buf.length > 5 * 1024 * 1024) { req.destroy(); finish({}); } });
     req.on('end', () => {
-      try { resolve(JSON.parse(buf || '{}')); } catch { resolve({}); }
+      try { finish(JSON.parse(buf || '{}')); } catch { finish({}); }
     });
+    // 客户端异常断开（超时/网络中断）：必须放行，否则运行锁永久卡死
+    req.on('close', () => finish({}));
+    req.on('error', () => finish({}));
   });
 }
 
@@ -321,6 +326,7 @@ function buildHistoryText(taskId) {
 }
 
 const server = http.createServer(async (req, res) => {
+  try {
   const parsed = url.parse(req.url, true);
   const p = parsed.pathname;
   // 页面存活感知：任何请求都视为「有客户端在看」，供自动退出判断
@@ -402,8 +408,9 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/stop' && req.method === 'POST') {
     // 手动停止：kill 对应作用域的全部子进程；编排循环检测令牌后跳过剩余工作
     const body = await readBody(req);
-    const scope = ['tasks', 'solo', 'chat'].includes(body.scope) ? body.scope : 'chat';
+    const scope = ['tasks', 'solo', 'chat', 'card'].includes(body.scope) ? body.scope : 'chat';
     if (scope === 'tasks') stopTokens.tasks++;
+    if (scope === 'chat') stopTokens.chat++; // 聊天/分工/圆桌编排靠令牌跳过剩余阶段，必须递增
     const n = stopScope(scope);
     json(res, 200, { success: true, scope, stopped: n });
     return;
@@ -828,9 +835,9 @@ const server = http.createServer(async (req, res) => {
       json(res, 409, { success: false, error: '已有一批任务正在执行，请等待完成或先停止' });
       return;
     }
+    const body = await readBody(req); // 先读完请求体再加锁：异常连接不会永久占用运行锁
     runLocks.tasks = true;
     const myToken = stopTokens.tasks; // 执行期间令牌变化 = 用户请求了停止
-    const body = await readBody(req);
     const soloScope = body.scope === 'solo';
     const all = store.getTasks().slice().sort((a, b) => a.createdAt - b.createdAt);
     const selected = Array.isArray(body.taskIds) && body.taskIds.length > 0
@@ -871,9 +878,9 @@ const server = http.createServer(async (req, res) => {
       json(res, 409, { success: false, error: '上一条消息还在处理中，请等待完成或点「停止」' });
       return;
     }
+    const body = await readBody(req); // 先读完请求体再加锁：异常连接不会永久占用运行锁
     runLocks.chat = true;
     const myToken = stopTokens.chat;
-    const body = await readBody(req);
     const message = String(body.message || '').trim();
     const taskId = String(body.taskId || '');
     if (!message) {
@@ -1614,6 +1621,14 @@ const server = http.createServer(async (req, res) => {
 
   res.writeHead(404);
   res.end('Not Found');
+  } catch (err) {
+    // 路由级兜底：数据文件损坏（safejson 只读保护）等意外异常时返回 500，避免响应悬挂
+    console.error('[route error]', req.method, req.url, err && (err.stack || err));
+    try {
+      if (!res.headersSent) json(res, 500, { success: false, error: '服务内部错误：' + (err && err.message || err) });
+      else res.end();
+    } catch { /* 连接已断 */ }
+  }
 });
 
 // 优雅退出：停掉全部子进程、把执行中任务复位为待执行，避免残留与假死状态

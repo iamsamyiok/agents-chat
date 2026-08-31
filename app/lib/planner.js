@@ -160,7 +160,7 @@ async function doChat(sess, message, timeoutMs) {
   const timeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : CHAT_TIMEOUT_MS;
   sess.messages.push({ role: 'user', content: text });
   const prompt = `${PLANNER_SYSTEM}\n\n【对话记录】\n${historyText(sess.messages)}\n\n请以助手身份回复最后一条用户消息。`;
-  const r = await runOnce(prompt, timeout, 'planner-chat');
+  const r = await runOnce(prompt, timeout, `planner-chat-${sess.sid}`); // scope 带会话 id：跨会话并发的超时停止互不误杀
   if (r.error) {
     sess.messages.pop(); // 失败不污染历史（用户可重发）
     return { sid: sess.sid, reply: '', error: r.error };
@@ -197,7 +197,7 @@ async function doPlan(sess, timeoutMs) {
     '同会话续聊（continue）用于同一件事分步推进；互不依赖的可并行任务用 parallel 且 deps 为空。'
   ].join('\n');
   const prompt = `${PLANNER_SYSTEM}\n\n【对话记录】\n${historyText(sess.messages)}\n\n【当前指令】\n${instruct}`;
-  const r = await runOnce(prompt, timeout, 'planner-plan');
+  const r = await runOnce(prompt, timeout, `planner-plan-${sess.sid}`); // scope 带会话 id：跨会话并发的超时停止互不误杀
   if (r.error) return { error: r.error };
   const parsed = extractJSONArray(r.content);
   if (!parsed) return { error: '生成结果无法解析为任务清单，请补充信息后重试' };
@@ -243,5 +243,5 @@ module.exports = {
   PLANNER_DIR, MSG_MAX, ROUNDS_MAX, PLAN_MIN, PLAN_MAX,
   PLANNER_SYSTEM,
   readSession, createSession, latestSession, deleteSession, pruneStale,
-  chat, plan, cleanPlan
+  runOnce, chat, plan, cleanPlan
 };

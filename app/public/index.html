@@ -839,7 +839,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.38.1'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.38.2'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -875,7 +875,7 @@ let curOcModel = '';           // 当前选中模型（localStorage 记忆）
 const input = document.getElementById('input');
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
-function escAttr(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+function escAttr(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;'); }
 function fmtTime(ts) { const d = new Date(ts); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); }
 function fmtSched(ts) { const d = new Date(ts); const p = (n) => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
 function fmtSchedNow() { const d = new Date(); const p = (n) => String(n).padStart(2,'0'); return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`; }
@@ -883,21 +883,23 @@ function toast(msg, ms) { const t = document.getElementById('toast'); t.textCont
 
 // ---------- 系统通知开关（浏览器 Notification API，状态记忆在 localStorage） ----------
 function refreshNotifyBtn() {
-  const on = localStorage.getItem('sysNotify') === '1';
+  let on = false;
+  try { on = localStorage.getItem('sysNotify') === '1'; } catch { /* 禁用存储的浏览器：默认关 */ }
   const b = document.getElementById('notifyBtn');
   if (b) { b.style.color = on ? '#07c160' : ''; b.style.borderColor = on ? '#07c160' : ''; }
 }
 async function toggleSysNotify() {
-  const on = localStorage.getItem('sysNotify') === '1';
+  let on = false;
+  try { on = localStorage.getItem('sysNotify') === '1'; } catch { /* ignore */ }
   if (on) {
-    localStorage.setItem('sysNotify', '0');
+    try { localStorage.setItem('sysNotify', '0'); } catch { /* ignore */ }
     toast('系统通知已关闭');
   } else {
     if (typeof Notification === 'undefined') { toast('当前浏览器不支持系统通知'); return; }
     let perm = Notification.permission;
     if (perm !== 'granted') perm = await Notification.requestPermission();
     if (perm !== 'granted') { toast('浏览器未授权通知，请在地址栏权限设置中允许'); return; }
-    localStorage.setItem('sysNotify', '1');
+    try { localStorage.setItem('sysNotify', '1'); } catch { /* ignore */ }
     toast('系统通知已开启：页面在后台时任务完成将弹系统通知');
   }
   refreshNotifyBtn();
@@ -1055,6 +1057,7 @@ function setChatMode(mode) {
   const rtBtn = document.getElementById('rtBtn');
   const rosterBar = document.getElementById('dvRosterBar');
   if (chatMode === 'divide') {
+    toggleRoundtableOff(); // 分工模式无圆桌：关掉残留开关，避免发送语义被劫持且无处可关
     renderDvRoster();
     rosterBar.classList.add('show');
     rtBtn.style.display = 'none'; // 分工模式无圆桌
@@ -1475,7 +1478,7 @@ async function soloSend() {
       } else if (e.type === 'error') {
         addSoloSys('单聊异常: ' + e.content, e.sessionId || curOcId);
       }
-    });
+    }, (msg) => addSoloSys(msg, curOcId)); // 网络/HTTP 错误也落在单聊视图（默认会写进群聊会话，用户看不到）
   } catch (err) {
     addSoloSys('处理异常：' + (err && err.message || err), curOcId);
   } finally {
@@ -1540,11 +1543,12 @@ async function soloExecTasks(taskIds) {
       } else if (e.type === 'error') {
         addSoloSys('执行出错: ' + e.content, e.taskId);
       }
-    });
+    }, (msg) => addSoloSys(msg, curOcId)); // 网络/HTTP 错误也落在单聊视图（默认会写进群聊会话，用户看不到）
     if (!gotAllDone) addSoloSys('⚠ 与服务的连接中断，任务可能仍在后台执行；刷新页面可查看最新进度', curOcId);
   } catch (err) {
     addSoloSys('处理异常：' + (err && err.message || err), curOcId);
   } finally {
+    sealSoloStream(curOcId); // 连接中断时封口未完成的流式消息，防 soloLive 泄漏
     taskBusy = false;
     stopAsked = false;
     updateRunAllBtn();
@@ -1577,7 +1581,7 @@ function detectBackgroundDone() {
     const prev = prevTaskStatus.get(t.id);
     if (prev === 'running' && t.status === 'done' && t.id !== curTaskId) {
       const title = `任务完成：${t.title}`;
-      if (!chatBusy && !taskBusy) {
+      if (!chatBusy && !taskBusy && !soloBusy) {
         loadMessages().then(() => showDoneToast(t.id, title));
       } else {
         showDoneToast(t.id, title);
@@ -2359,19 +2363,21 @@ function removeMsg(m) {
 }
 
 // ---------- SSE 流 ----------
-async function streamSSE(path, body, onEvent) {
+// onError：网络/HTTP 层错误回调（缺省写入群聊会话）；单聊路径必须传入，否则报错对用户不可见
+async function streamSSE(path, body, onEvent, onError) {
+  const fail = (msg) => { (typeof onError === 'function' ? onError : addSys)(msg); };
   let resp;
   try {
     resp = await fetch(path, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
     });
   } catch (err) {
-    addSys('请求失败：' + (err && err.message || err));
+    fail('请求失败：' + (err && err.message || err));
     return;
   }
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}));
-    addSys('错误: ' + (data.error || resp.status));
+    fail('错误: ' + (data.error || resp.status));
     return;
   }
   const reader = resp.body.getReader();
@@ -2434,6 +2440,7 @@ function toggleRoundtableOff() {
 function renderDvRoster() {
   const box = document.getElementById('dvRosterBar');
   if (!box) return;
+  dvList = dvList.filter(id => agents.some(a => a.id === id)); // 清理已删除智能体的幽灵 id（chips 数与实际发送保持一致）
   if (!dvList.length) dvList = agents.map(a => a.id); // 默认全体成员（含管家，作为普通成员）
   const inList = dvList.map(id => agents.find(a => a.id === id)).filter(Boolean);
   const rest = agents.filter(a => !dvList.includes(a.id));
@@ -2480,7 +2487,7 @@ async function send() {
 
     const isDivide = chatMode === 'divide';
     if (isDivide) { dvRunning = true; updateModeBadges(); }
-    await streamSSE('/api/chat', { message: text, taskId: curTaskId, mode: roundtableOn ? 'roundtable' : (isDivide ? 'divide' : ''), participants: isDivide ? dvList : [] }, (e) => {
+    await streamSSE('/api/chat', { message: text, taskId: curTaskId, mode: isDivide ? 'divide' : (roundtableOn ? 'roundtable' : ''), participants: isDivide ? dvList.filter(id => agents.some(a => a.id === id)) : [] }, (e) => {
       if (typing) { removeMsg(typing); typing = null; }
       handleStreamEvent(e);
     });
@@ -2601,7 +2608,7 @@ async function execTasks(taskIds) {
     await streamSSE('/api/tasks/run', { taskIds }, (e) => {
       if (e.type === 'task_start') {
         switchSession(e.taskId);
-        addSys(`开始执行：${e.title}（${esc(e.agentName || '管家')} 负责，本会话独立）`, e.taskId);
+        addSys(`开始执行：${e.title}（${e.agentName || '管家'} 负责，本会话独立）`, e.taskId); // addSys 渲染时会转义，此处无需 esc
       } else if (e.type === 'task_done') {
         removeWorkingForTask(e.taskId);
         const t = tasks.find(x => x.id === e.taskId);
@@ -2620,6 +2627,7 @@ async function execTasks(taskIds) {
   } catch (err) {
     addSys('处理异常：' + (err && err.message || err));
   } finally {
+    workingBars.clear(); // 中断时兜底清掉残留的「工作中」指示条，防 Map 泄漏
     taskBusy = false;
     stopAsked = false;
     updateRunAllBtn();
@@ -3431,8 +3439,8 @@ async function loadMessages() {
     });
     if (!m.taskId) mainCount++;
   }
-  // 非群聊模式下主会话出现新消息：群聊标签计入未读提醒（回群聊即清零）
-  if (chatMode !== 'group' && mainCount > lastMainMsgCount && lastMainMsgCount >= 0) {
+  // 非聊天视图（单聊/卡片）下主会话出现新消息：群聊标签计入未读提醒（回群聊/分工即清零）
+  if (chatMode !== 'group' && chatMode !== 'divide' && mainCount > lastMainMsgCount && lastMainMsgCount >= 0) {
     groupMsgUnread += mainCount - lastMainMsgCount;
     updateModeBadges();
   }
@@ -3444,12 +3452,12 @@ async function loadMessages() {
 let atState = null; // { start, end, items, active }
 
 function handleAtInput() {
-  const pos = input.selectionStart;
-  const before = input.value.slice(0, pos);
   const m = before.match(/@([^\s@]*)$/);
   if (!m) { hideAt(); return; }
   const q = m[1].toLowerCase();
-  const items = agents.filter(a =>
+  // 分工模式 @ 只在参与名单内收敛（协作语义限定名单成员）
+  const pool = chatMode === 'divide' ? agents.filter(a => dvList.includes(a.id)) : agents;
+  const items = pool.filter(a =>
     !q || a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q) || String(a.desc || '').toLowerCase().includes(q)
   ).slice(0, 8);
   if (!items.length) { hideAt(); return; }

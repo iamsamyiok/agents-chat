@@ -364,7 +364,7 @@ class CardRunner {
     this.running = false;
     this.killedCards.clear();
     if (this.timer) { try { this.timer.unref(); } catch { /* ignore */ } }
-    try { stopScope('solo'); } catch { /* ignore */ }
+    try { stopScope('card'); } catch { /* ignore */ }
     this.procs.clear();
     broadcast({ type: 'notice', content: '⏹ 多任务编排执行已停止，未开始的任务保留待执行' });
     broadcast({ type: 'runner_stopped' });
@@ -475,6 +475,7 @@ class CardRunner {
           model: card.model || '',
           ocSessionId: sesId,
           behavior: 'card',
+          scope: 'card', // 卡牌编排独立进程域：停止卡牌不误杀单聊，反之亦然
           cwd: ws || undefined
         }, (ev) => {
           const proc = this.procs.get(card.id);
