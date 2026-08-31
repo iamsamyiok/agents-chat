@@ -4,7 +4,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 
 const PORT = 3800 + (process.pid % 100);
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -34,6 +34,30 @@ const get = async (p) => {
   const r = await fetch(BASE + p);
   return { status: r.status, body: await r.json().catch(() => null) };
 };
+
+// ---------- opencode 条件测试辅助：本机有 opencode 时起隔离服务（XDG 指向临时目录） ----------
+function hasOc() {
+  try { execSync('which opencode', { stdio: 'ignore', timeout: 5000 }); return true; } catch { return false; }
+}
+async function withOcServer(fn) {
+  const XDG = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-xdg-'));
+  const D2 = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-data-'));
+  const P2 = 3900 + (process.pid % 100);
+  const c2 = spawn(process.execPath, [path.join(__dirname, '..', 'app', 'server.js'), '--port', String(P2)], {
+    env: { ...process.env, AGENTS_CHAT_MOCK: '', AGENTS_CHAT_DATA: D2, AGENTS_CHAT_AUTOSTOP: '0', XDG_CONFIG_HOME: XDG },
+    stdio: 'ignore'
+  });
+  try {
+    for (let i = 0; i < 50; i++) {
+      if (c2.exitCode !== null) throw new Error('opencode 服务进程提前退出');
+      try { await fetch(`http://127.0.0.1:${P2}/api/health`); break; } catch { await new Promise(r => setTimeout(r, 200)); }
+    }
+    await fn(`http://127.0.0.1:${P2}`);
+  } finally {
+    try { c2.kill('SIGKILL'); } catch { /* ignore */ }
+    c2.unref();
+  }
+}
 
 test('GET / 页面与内嵌资源', async () => {
   const r = await fetch(BASE + '/');
@@ -256,12 +280,66 @@ test('分工模式路由：空名单 400 / demo 正常路径 / 409 互斥', asyn
 
 test('LLM 默认模型路由（demo 模式：GET 标注不支持 / POST 400）', async () => {
   const g = await get('/api/llm/config');
-  assert.strictEqual(g.body.success, true);
-  assert.strictEqual(g.body.supported, false); // 演示模式无真实内核配置
+  assert.strictEqual(g.status, 200);
+  assert.ok(g.body.success);
+  assert.strictEqual(g.body.supported, false);
+  assert.strictEqual(g.body.custom, null); // custom 字段契约：未配置/不支持时为 null
   const p = await fetch(BASE + '/api/llm/config', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'a/b' })
   });
   assert.strictEqual(p.status, 400);
+});
+
+test('LLM 自定义接入路由（demo 模式：POST custom / clearCustom 均 400）', async () => {
+  const p1 = await fetch(BASE + '/api/llm/config', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ custom: { baseURL: 'https://a.com/v1', apiKey: 'k', model: 'm' } })
+  });
+  assert.strictEqual(p1.status, 400);
+  assert.match((await p1.json()).error, /不支持网页端/);
+  const p2 = await fetch(BASE + '/api/llm/config', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'clearCustom' })
+  });
+  assert.strictEqual(p2.status, 400);
+});
+
+test('LLM 自定义接入路由（真实 opencode：保存 → 回显脱敏 → 清除，XDG 隔离）', { skip: !hasOc() }, async () => {
+  const t = await withOcServer(async (B) => {
+    // 保存：三项落盘 + 默认模型联动
+    const s = await fetch(B + '/api/llm/config', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ custom: { baseURL: 'https://api.e2e.com/v1', apiKey: 'sk-e2e-abcd1234', model: 'e2e-model' } })
+    });
+    assert.strictEqual(s.status, 200);
+    const sd = await s.json();
+    assert.ok(sd.success);
+    assert.strictEqual(sd.model, 'custom/e2e-model');
+    assert.strictEqual(sd.custom.apiKeyTail, '1234');
+    assert.ok(!('apiKey' in sd.custom)); // 明文 Key 永不回传
+    // GET 回显：脱敏
+    const g = await fetch(B + '/api/llm/config');
+    const gd = await g.json();
+    assert.strictEqual(gd.supported, true);
+    assert.strictEqual(gd.custom.baseURL, 'https://api.e2e.com/v1');
+    assert.strictEqual(gd.custom.hasApiKey, true);
+    assert.strictEqual(gd.custom.apiKeyTail, '1234');
+    // 参数校验：非法 URL 400
+    const bad = await fetch(B + '/api/llm/config', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ custom: { baseURL: 'not-a-url', apiKey: 'k', model: 'm' } })
+    });
+    assert.strictEqual(bad.status, 400);
+    // 清除：恢复 null
+    const c = await fetch(B + '/api/llm/config', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'clearCustom' })
+    });
+    const cd = await c.json();
+    assert.ok(cd.success);
+    assert.strictEqual(cd.custom, null);
+    const g2 = await fetch(B + '/api/llm/config');
+    assert.strictEqual((await g2.json()).custom, null);
+  });
+  await t;
 });
 
 test('404 未知路由', async () => {

@@ -267,24 +267,101 @@ function readDefaultModel() {
   } catch { return ''; } // 无文件/无字段：用内核默认
 }
 
-// merge 写回（保留用户其余配置）；文件损坏时拒绝覆盖，提示人工处理
-function writeDefaultModel(model) {
+// 读取整份配置对象；无文件返回 {}，损坏抛错（提示人工处理）
+function loadOcConfig() {
   const p = ocConfigPath();
-  let cfg = {};
   let existed = false;
   try {
     const raw = fs.readFileSync(p, 'utf8');
     existed = true;
-    cfg = JSON.parse(raw);
+    const cfg = JSON.parse(raw);
     if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) throw new Error('not an object');
+    return cfg;
   } catch (e) {
     if (existed) throw new Error(`OpenCode 配置文件损坏（${p}），请人工检查后再试，已跳过覆盖以防丢失配置`);
+    return {};
   }
-  if (model) cfg.model = model; else delete cfg.model;
+}
+
+// 原子写回（保留用户其余配置）
+function saveOcConfig(cfg) {
+  const p = ocConfigPath();
   fs.mkdirSync(path.dirname(p), { recursive: true });
   const tmp = p + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), 'utf8');
   fs.renameSync(tmp, p); // 原子替换，中断不留半截
+}
+
+// merge 写回（保留用户其余配置）；文件损坏时拒绝覆盖，提示人工处理
+function writeDefaultModel(model) {
+  const cfg = loadOcConfig();
+  if (model) cfg.model = model; else delete cfg.model;
+  saveOcConfig(cfg);
+}
+
+// ---------- 自定义 LLM 接入：用户自带 OpenAI 兼容端点（baseURL + apiKey + 模型名） ----------
+// 写入 opencode.json 的 provider.custom（@ai-sdk/openai-compatible），并联动默认模型 custom/<id>
+// API key 不回传明文：读取只回 hasApiKey + 尾 4 位；写入时空 key = 沿用已存 key
+const CUSTOM_PROVIDER_ID = 'custom';
+const CUSTOM_BASEURL_RE = /^https?:\/\/[^\s]+$/;
+const CUSTOM_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+
+// 模型名安全化为 provider 内合法 id（非安全字符折叠为 -，空则占位名）
+function sanitizeCustomModelId(name) {
+  const id = String(name || '').replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
+  return id || 'custom-model';
+}
+
+function readCustomProvider() {
+  let cfg;
+  try { cfg = loadOcConfig(); } catch { return null; } // 文件损坏按未配置处理（读取不抛错）
+  const pv = cfg.provider && cfg.provider[CUSTOM_PROVIDER_ID];
+  if (!pv || typeof pv !== 'object' || !pv.options || !pv.options.baseURL) return null;
+  const modelIds = Object.keys(pv.models || {});
+  const model = modelIds[0] || '';
+  const key = String(pv.options.apiKey || '');
+  return {
+    baseURL: String(pv.options.baseURL),
+    model,
+    hasApiKey: !!key,
+    apiKeyTail: key ? key.slice(-4) : ''
+  };
+}
+
+function writeCustomProvider({ baseURL, apiKey, model }) {
+  const url = String(baseURL || '').trim();
+  const name = String(model || '').trim();
+  if (!CUSTOM_BASEURL_RE.test(url)) throw new Error('Base URL 需以 http(s):// 开头且不含空白字符');
+  if (!name) throw new Error('模型名不能为空');
+  const id = sanitizeCustomModelId(name);
+  if (!CUSTOM_MODEL_ID_RE.test(id)) throw new Error('模型名安全化后仍非法');
+  const cfg = loadOcConfig();
+  const prev = (cfg.provider && cfg.provider[CUSTOM_PROVIDER_ID] && cfg.provider[CUSTOM_PROVIDER_ID].options) || {};
+  // apiKey 为空 = 沿用已存 key（前端只在用户换了新 key 时才传值）；端点无鉴权则留空串
+  const key = String(apiKey || '').trim() !== '' ? String(apiKey).trim() : (prev.apiKey !== undefined ? String(prev.apiKey) : '');
+  if (!cfg.provider || typeof cfg.provider !== 'object') cfg.provider = {};
+  cfg.provider[CUSTOM_PROVIDER_ID] = {
+    npm: '@ai-sdk/openai-compatible',
+    name: `自定义接入 (${name})`,
+    options: { baseURL: url, apiKey: key },
+    models: { [id]: { name } }
+  };
+  cfg.model = `${CUSTOM_PROVIDER_ID}/${id}`; // 联动设为全局默认（编排/未指定模型任务直接生效）
+  saveOcConfig(cfg);
+  return { model: cfg.model, modelId: id };
+}
+
+function clearCustomProvider() {
+  const cfg = loadOcConfig();
+  let removed = false;
+  if (cfg.provider && cfg.provider[CUSTOM_PROVIDER_ID]) {
+    delete cfg.provider[CUSTOM_PROVIDER_ID];
+    removed = true;
+    if (Object.keys(cfg.provider).length === 0) delete cfg.provider;
+  }
+  if (typeof cfg.model === 'string' && cfg.model.startsWith(`${CUSTOM_PROVIDER_ID}/`)) delete cfg.model;
+  saveOcConfig(cfg);
+  return removed;
 }
 
 // `opencode auth list` 人类可读输出 → 已认证 provider 列表（纯函数便于测试）
@@ -305,4 +382,4 @@ function authProviders(runnerCmd) {
   } catch { return null; } // 命令不可用/超时：未知状态（与"明确无认证"区分）
 }
 
-module.exports = { chatSolo, listOcModels, demoModels, MODEL_RE, parseSoloEventLine, ocConfigPath, readDefaultModel, writeDefaultModel, parseAuthList, authProviders };
+module.exports = { chatSolo, listOcModels, demoModels, MODEL_RE, parseSoloEventLine, ocConfigPath, readDefaultModel, writeDefaultModel, parseAuthList, authProviders, readCustomProvider, writeCustomProvider, clearCustomProvider, sanitizeCustomModelId };

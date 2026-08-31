@@ -49,3 +49,89 @@ test('parseAuthList：ANSI 颜色码剥离 + 项目符号行解析', () => {
   assert.deepStrictEqual(oc.parseAuthList(''), []);
   assert.deepStrictEqual(oc.parseAuthList(null), []);
 });
+
+// ---------- 自定义 LLM 接入：provider.custom 读写 / Key 脱敏 / 联动默认模型 ----------
+
+test('自定义接入：写入三项 → provider.custom + 默认模型联动，读回脱敏', () => {
+  fs.rmSync(cfgPath, { force: true });
+  const r = oc.writeCustomProvider({ baseURL: 'https://api.example.com/v1', apiKey: 'sk-test-1234', model: 'glm-4.6' });
+  assert.strictEqual(r.model, 'custom/glm-4.6'); // 安全化后模型 id 即同名
+  const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  assert.strictEqual(cfg.provider.custom.npm, '@ai-sdk/openai-compatible');
+  assert.strictEqual(cfg.provider.custom.options.baseURL, 'https://api.example.com/v1');
+  assert.strictEqual(cfg.provider.custom.options.apiKey, 'sk-test-1234');
+  assert.strictEqual(cfg.provider.custom.models['glm-4.6'].name, 'glm-4.6');
+  assert.strictEqual(cfg.model, 'custom/glm-4.6'); // 全局默认联动
+  // 读回：明文 Key 不回传，只给 hasApiKey + 尾 4 位
+  const back = oc.readCustomProvider();
+  assert.strictEqual(back.baseURL, 'https://api.example.com/v1');
+  assert.strictEqual(back.model, 'glm-4.6');
+  assert.strictEqual(back.hasApiKey, true);
+  assert.strictEqual(back.apiKeyTail, '1234');
+  assert.ok(!('apiKey' in back)); // 无明文字段
+});
+
+test('自定义接入：模型名安全化（非法字符折叠、空占位）', () => {
+  fs.rmSync(cfgPath, { force: true });
+  const r = oc.writeCustomProvider({ baseURL: 'https://api.example.com/v1', apiKey: '', model: 'Qwen2.5 72B Instruct!' });
+  assert.strictEqual(r.modelId, 'Qwen2.5-72B-Instruct');
+  assert.strictEqual(r.model, 'custom/Qwen2.5-72B-Instruct');
+  assert.strictEqual(oc.sanitizeCustomModelId('///'), 'custom-model'); // 全非法字符 → 占位名
+  assert.strictEqual(oc.sanitizeCustomModelId('a'.repeat(100)).length, 64); // 截断
+});
+
+test('自定义接入：空 Key 沿用已存 Key；有 Key 时覆盖', () => {
+  fs.rmSync(cfgPath, { force: true });
+  oc.writeCustomProvider({ baseURL: 'https://a.com/v1', apiKey: 'sk-old-key9999', model: 'm1' });
+  // 换 URL/模型但 Key 留空：沿用旧 Key
+  oc.writeCustomProvider({ baseURL: 'https://b.com/v1', apiKey: '', model: 'm2' });
+  let cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  assert.strictEqual(cfg.provider.custom.options.apiKey, 'sk-old-key9999');
+  assert.strictEqual(cfg.model, 'custom/m2');
+  // 显式传新 Key：覆盖
+  oc.writeCustomProvider({ baseURL: 'https://b.com/v1', apiKey: 'sk-new-key8888', model: 'm2' });
+  cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  assert.strictEqual(cfg.provider.custom.options.apiKey, 'sk-new-key8888');
+});
+
+test('自定义接入：校验（URL 协议 / 模型名必填 / 损坏保护）', () => {
+  fs.rmSync(cfgPath, { force: true });
+  assert.throws(() => oc.writeCustomProvider({ baseURL: 'ftp://x', apiKey: 'k', model: 'm' }), /Base URL/);
+  assert.throws(() => oc.writeCustomProvider({ baseURL: 'https://a.com/v1 extra', apiKey: 'k', model: 'm' }), /Base URL/);
+  assert.throws(() => oc.writeCustomProvider({ baseURL: 'https://a.com/v1', apiKey: 'k', model: '' }), /模型名/);
+  assert.throws(() => oc.writeCustomProvider({ baseURL: '', apiKey: 'k', model: 'm' }), /Base URL/);
+  // 损坏文件：拒绝覆盖；读取按未配置处理
+  fs.writeFileSync(cfgPath, '{broken');
+  assert.throws(() => oc.writeCustomProvider({ baseURL: 'https://a.com/v1', apiKey: 'k', model: 'm' }), /损坏/);
+  assert.strictEqual(oc.readCustomProvider(), null);
+});
+
+test('自定义接入：清除（provider 移除 + 联动默认恢复，其余保留）', () => {
+  fs.rmSync(cfgPath, { force: true });
+  oc.writeDefaultModel('custom/glm-4.6'); // 模拟联动后的默认
+  oc.writeCustomProvider({ baseURL: 'https://a.com/v1', apiKey: 'sk-x', model: 'glm-4.6' });
+  oc.writeDefaultModel('custom/glm-4.6');
+  // 追加用户其他 provider 与字段
+  let cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  cfg.provider.other = { name: '其他' };
+  cfg.theme = 'dark';
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+  assert.strictEqual(oc.clearCustomProvider(), true);
+  cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  assert.strictEqual(cfg.provider.custom, undefined); // custom 已移除
+  assert.strictEqual(cfg.model, undefined);          // 联动默认一并清除
+  assert.ok(cfg.provider.other);                     // 其他 provider 保留
+  assert.strictEqual(cfg.theme, 'dark');             // 无关字段保留
+  assert.strictEqual(oc.clearCustomProvider(), false); // 再清：无可删
+  assert.strictEqual(oc.readCustomProvider(), null);
+});
+
+test('自定义接入：未配置 / 非 custom 结构时读取返回 null', () => {
+  fs.rmSync(cfgPath, { force: true });
+  assert.strictEqual(oc.readCustomProvider(), null); // 无文件
+  fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+  fs.writeFileSync(cfgPath, JSON.stringify({ model: 'a/b' }));
+  assert.strictEqual(oc.readCustomProvider(), null); // 无 provider.custom
+  fs.writeFileSync(cfgPath, JSON.stringify({ provider: { custom: { options: {} } } }));
+  assert.strictEqual(oc.readCustomProvider(), null); // custom 无 baseURL 视为无效
+});

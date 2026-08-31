@@ -1024,22 +1024,57 @@ const server = http.createServer(async (req, res) => {
     const runner = resolveRunner();
     if (req.method === 'GET') {
       if (runner.kind !== 'opencode') {
-        json(res, 200, { success: true, supported: false, kernel: runner.kernel ? runner.kernel.label : '', model: '' });
+        json(res, 200, { success: true, supported: false, kernel: runner.kernel ? runner.kernel.label : '', model: '', custom: null });
         return;
       }
+      let custom = null;
+      try { custom = oc.readCustomProvider(); } catch { custom = null; }
       json(res, 200, {
         success: true, supported: true,
         model: oc.readDefaultModel(),
-        auth: oc.authProviders(runner.cmd)
+        auth: oc.authProviders(runner.cmd),
+        custom
       });
       return;
     }
     if (req.method === 'POST') {
+      const body = await readBody(req);
+      // 自定义接入清除：恢复内核默认（provider.custom 与联动默认模型一并移除）
+      if (body.action === 'clearCustom') {
+        if (runner.kind !== 'opencode') {
+          json(res, 400, { success: false, error: '当前内核不支持网页端 LLM 配置' });
+          return;
+        }
+        try {
+          oc.clearCustomProvider();
+          json(res, 200, { success: true, custom: null, model: oc.readDefaultModel() });
+        } catch (e) {
+          json(res, 500, { success: false, error: e && e.message ? e.message : '写入 OpenCode 配置失败' });
+        }
+        return;
+      }
+      // 自定义接入：baseURL + apiKey + 模型名 → provider.custom（OpenAI 兼容端点），联动全局默认
+      if (body.custom) {
+        if (runner.kind !== 'opencode') {
+          json(res, 400, { success: false, error: '当前内核不支持网页端 LLM 配置，请在对应内核自身配置中设置' });
+          return;
+        }
+        try {
+          const r = oc.writeCustomProvider({
+            baseURL: body.custom.baseURL,
+            apiKey: body.custom.apiKey,
+            model: body.custom.model
+          });
+          json(res, 200, { success: true, model: r.model, custom: oc.readCustomProvider() });
+        } catch (e) {
+          json(res, 400, { success: false, error: e && e.message ? e.message : '保存自定义 LLM 配置失败' });
+        }
+        return;
+      }
       if (runner.kind !== 'opencode') {
         json(res, 400, { success: false, error: '当前内核不支持网页端默认模型配置，请在对应内核自身配置中设置' });
         return;
       }
-      const body = await readBody(req);
       const model = String(body.model || '').trim();
       if (model && !oc.MODEL_RE.test(model)) {
         json(res, 400, { success: false, error: '模型需形如 provider/model（例：monkeycode-ai/glm-5.3），或留空恢复内核默认' });
