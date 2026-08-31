@@ -425,9 +425,22 @@
   .mode-switch .tab-dot { display: none; position: absolute; top: -5px; right: 4px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: #fa5151; color: #fff; font-size: 10px; line-height: 15px; text-align: center; font-weight: 600; }
   .mode-switch .tab-dot.show { display: block; }
   .mode-switch .tab-dot::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #07c160; margin-right: 2px; vertical-align: 1px; }
-  .side-header .side-actions { display: flex; gap: 6px; width: 100%; }
-  .side-header .side-actions .mini-btn { flex: 1; padding: 4px 0; text-align: center; }
-  .ttab .badge { margin-left: 4px; vertical-align: 1px; }
+   .side-header .side-actions { display: flex; gap: 6px; width: 100%; }
+   .side-header .side-actions .mini-btn { flex: 1; padding: 4px 0; text-align: center; }
+   .ttab .badge { margin-left: 4px; vertical-align: 1px; }
+
+   /* ---------- 编排模式：全页按编排功能排布，侧栏只留三标签 ---------- */
+   body.mode-divide #sidebar { width: auto; }
+   body.mode-divide .side-header { border-bottom: none; padding: 14px 12px; }
+   body.mode-divide #sidebar .side-actions,
+   body.mode-divide #sidebar .side-mid,
+   body.mode-divide #sidebar .side-footer { display: none; }
+   body.mode-divide #menuBtn { display: none !important; } /* 侧栏无列表内容，隐藏抽屉入口 */
+   body.mode-divide #newSessBtn,
+   body.mode-divide #histBtn,
+   body.mode-divide #flowEntryBtn { display: none !important; } /* 聊天相关按钮不进编排页 */
+   /* 编排任务台：归属会话下拉 */
+   #dvSessSel { border: 1px solid #dcdfe6; border-radius: 6px; font-size: 11.5px; padding: 2px 6px; color: #555; background: #fff; max-width: 220px; cursor: pointer; }
 
   /* ---------- 单聊工作台（OpenCode）：模型输入框 / 过程块 ---------- */
   #soloView { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #f7f7f7; }
@@ -586,7 +599,7 @@
         </div>
         <div class="dv-meta">
           <div class="dv-roster" id="dvRoster"></div>
-          <div class="dv-sess" id="dvSessTip"></div>
+          <select id="dvSessSel" title="编排成果归档到哪个会话（历史可在群聊模式回看）" onchange="switchSession(this.value)"></select>
         </div>
       </div>
       <div class="dv-body">
@@ -882,7 +895,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.37.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.37.1'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -1091,6 +1104,7 @@ function setChatMode(mode) {
   chatMode = ['solo', 'divide'].includes(mode) ? mode : 'group';
   try { localStorage.setItem(MODE_STORE_KEY, chatMode); } catch { /* ignore */ }
   if (chatMode === 'group') groupMsgUnread = 0; // 回到群聊即视为已读主会话
+  document.body.classList.toggle('mode-divide', chatMode === 'divide'); // 编排模式：全页按编排功能排布
   document.getElementById('modeSoloBtn').classList.toggle('active', chatMode === 'solo');
   document.getElementById('modeGroupBtn').classList.toggle('active', chatMode === 'group');
   document.getElementById('modeDivideBtn').classList.toggle('active', chatMode === 'divide');
@@ -1099,7 +1113,7 @@ function setChatMode(mode) {
   document.getElementById('divideView').style.display = chatMode === 'divide' ? 'flex' : 'none';
   if (chatMode === 'divide') {
     renderDvRoster();
-    updateDvSessTip();
+    renderDvSessSel();
     setTimeout(() => { try { document.getElementById('dvTaskInput').focus(); } catch {} }, 100);
   }
   renderSidebar();
@@ -1611,6 +1625,7 @@ async function loadTasks(silent) {
   tasks = data.tasks || [];
   detectBackgroundDone();
   renderSidebar();
+  if (chatMode === 'divide') renderDvSessSel(); // 编排归属会话下拉随任务列表同步
   updateModeBadges(); // 三标签角标随任务状态同步
 }
 
@@ -1884,7 +1899,7 @@ function switchSession(taskId) {
   unreadSess.delete(curKey()); // 切到该会话 = 已读，清除绿点
   renderSidebar();
   renderHeader();
-  if (chatMode === 'divide') updateDvSessTip();
+  if (chatMode === 'divide') renderDvSessSel();
   updateModeBadges(); // 已读清除后角标即时更新
   // 有未读（后台完成过）或本地空但任务已结束（定时调度后台跑完）：从服务端拉最新消息
   const t = curTaskId ? tasks.find(x => x.id === curTaskId) : null;
@@ -2496,12 +2511,15 @@ function renderDvRoster() {
 function dvRemove(id) { if (dvBusy) return; dvList = dvList.filter(x => x !== id); renderDvRoster(); }
 function dvAdd(id) { if (!dvBusy && id && !dvList.includes(id)) { dvList.push(id); renderDvRoster(); } }
 
-// 当前编排会话归属提示（跟随左侧选中的群聊会话，历史可在群聊回看）
-function updateDvSessTip() {
-  const el = document.getElementById('dvSessTip');
-  if (!el) return;
-  const t = tasks.find(x => x.id === curTaskId);
-  el.textContent = `成果归档：${t ? `会话「${t.title || '未命名'}」` : '主会话'} · 历史可在群聊模式回看`;
+// 编排归属会话下拉（侧栏在编排模式已收起，归属选择进任务台；历史在群聊模式回看）
+function renderDvSessSel() {
+  const sel = document.getElementById('dvSessSel');
+  if (!sel) return;
+  const groupTasks = tasks.filter(t => t.runner !== 'solo');
+  const opts = [`<option value="">主会话（默认）</option>`]
+    .concat(groupTasks.map(t => `<option value="${escAttr(t.id)}"${t.id === curTaskId ? ' selected' : ''}>${esc((t.title || '未命名').slice(0, 18))}</option>`));
+  sel.innerHTML = opts.join('');
+  if (!groupTasks.find(t => t.id === curTaskId)) sel.value = '';
 }
 
 const DV_STATUS = { idle: '待命', working: '工作中', delivered: '已交付', error: '出错' };
