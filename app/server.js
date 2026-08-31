@@ -53,7 +53,12 @@ function logRotateIfNeeded() {
 }
 try { logRotateIfNeeded(); fs.writeFileSync(LOG_PATH, `=== Agents Chat started ${new Date().toISOString()} ===\n`); } catch { /* ignore */ }
 function teeWrite(args) {
-  try { fs.appendFileSync(LOG_PATH, args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ') + '\n'); } catch { /* ignore */ }
+  try {
+    const line = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ') + '\n';
+    const tmp = LOG_PATH + '.tmp';
+    fs.writeFileSync(tmp, line, 'utf8');
+    fs.renameSync(tmp, LOG_PATH); // 同一文件系统 rename 是原子的，进程中断不会留下半截日志
+  } catch { /* 日志写入失败不影响服务 */ }
 }
 const origLog = console.log.bind(console);
 const origErr = console.error.bind(console);
@@ -61,9 +66,6 @@ console.log = (...args) => { origLog(...args); teeWrite(args); };
 console.error = (...args) => { origErr(...args); teeWrite(args); };
 process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err && err.stack || err);
-});
-process.on('unhandledRejection', (err) => {
-  console.error('[unhandledRejection]', err && (err.stack || err) || err);
 });
 
 const PORT = Number(process.argv.includes('--port') ? process.argv[process.argv.indexOf('--port') + 1] : (process.env.PORT || 3456));
@@ -1726,14 +1728,18 @@ function shutdown(code) {
   process.exit(code);
 }
 process.on('SIGINT', () => shutdown(0));
+// SIGTERM/SIGHUP 也触发完整清理（某些容器/代理通过 SIGTERM 优雅停服务）
+process.on('SIGTERM', () => shutdown(0));
+process.on('SIGHUP', () => shutdown(0));
+// SIGPIPE：父进程管道断开时（如管道被 kill）Node 默认会退出，这里静默忽略避免污染日志
+process.on('SIGPIPE', () => { /* 静默忽略，父进程已断 */ });
+// SIGXCPU/SIGXFSZ：ulimit 限制触发；不拦截（进程应被系统终止），但记录日志便于排查
+process.on('SIGXCPU', () => { console.error('[signal] SIGXCPU 触发：CPU 时间超限，检查任务是否有死循环'); shutdown(1); });
+process.on('SIGXFSZ', () => { console.error('[signal] SIGXFSZ 触发：文件大小超过 ulimit'); shutdown(1); });
 // 兜底：async 路由内的同步异常会以 unhandledRejection 形式出现——记录日志防静默丢错（请求层应自行捕获）
 process.on('unhandledRejection', (err) => {
   console.error('[unhandledRejection]', err && (err.stack || err));
 });
-process.on('SIGTERM', () => shutdown(0));
-// Windows 关闭控制台窗口（CTRL_CLOSE_EVENT）在 Node 上映射为 SIGHUP，系统给约 5 秒处理宽限：
-// 同步 killTree 足够完成，正在执行的 AI 子进程不再变孤儿
-process.on('SIGHUP', () => shutdown(0));
 // 兜底：显式 process.exit 路径（exit 钩子内仅允许同步操作，killTree 为同步调用）
 process.on('exit', () => {
   if (!shutdownDone) {
@@ -1864,7 +1870,7 @@ async function executeSoloTaskBatch(selected, send, myToken) {
       const block = [list[i]];
       while (i + 1 < list.length && (list[i + 1].link || 'new') === 'parallel') block.push(list[++i]);
       if (block.length > 1) {
-        send({ type: 'notice', content: `⚡ ${block.length} 个任务并行执行（各自独立进程）：${block.map(t => `「${t.title.slice(0, 20)}」`).join('、')}` });
+        send({ type: 'notice', content: `[并行] ${block.length} 个任务并行执行（各自独立进程）：${block.map(t => `「${t.title.slice(0, 20)}」`).join('、')}` });
       }
       await Promise.all(block.map(t => runOne(t, '')));
       continue;
@@ -1938,11 +1944,17 @@ function startPruneTimer() {
 
 server.on('error', (err) => {
   if (err && err.code === 'EADDRINUSE') {
-    console.error(`\n❌ 端口 ${PORT} 已被占用：很可能有一个旧版 Agents Chat 进程还在运行！`);
-    console.error(`   你现在访问的是旧版页面，新代码从未生效。请先结束旧进程：`);
-    console.error(`   1) 打开命令行执行：netstat -ano | findstr :${PORT}`);
-    console.error(`   2) 找到 LISTENING 行最后的 PID，执行：taskkill /F /PID <该PID> /T`);
-    console.error(`   3) 再重新运行 npm start，并浏览器 Ctrl+F5 强刷页面\n`);
+    const pidCmd = process.platform === 'win32'
+      ? `netstat -ano | findstr :${PORT}`
+      : `lsof -i :${PORT} | grep LISTEN`;
+    const killCmd = process.platform === 'win32'
+      ? 'taskkill /F /PID <PID> /T'
+      : 'kill -9 <PID>';
+    console.error(`\n[端口占用] 端口 ${PORT} 已被占用：很可能有一个旧版 Agents Chat 进程还在运行！`);
+    console.error(`   请先结束旧进程：`);
+    console.error(`   1) 查 PID：${pidCmd}`);
+    console.error(`   2) 杀进程：${killCmd}`);
+    console.error(`   3) 再重新运行 npm start，浏览器强刷页面\n`);
     process.exit(1);
   }
   console.error('服务器启动失败:', err && (err.stack || err));
@@ -1989,7 +2001,7 @@ server.listen(PORT, LISTEN_HOST, () => {
   checkLatest().then((upd) => {
     if (upd && upd.updateAvailable) {
       console.log(`──────────────────────────────────────────────`);
-      console.log(`📦 发现新版本 v${upd.latest}（当前 v${APP_VERSION}）`);
+      console.log(`[更新] 发现新版本 v${upd.latest}（当前 v${APP_VERSION}）`);
       if (IS_STANDALONE) {
         console.log(`   单文件版：请到 GitHub Releases 下载最新版覆盖`);
         console.log(`   ${RELEASES_URL}`);

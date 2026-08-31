@@ -789,7 +789,11 @@ function addFlowEvent(ev) {
       files: Array.isArray(ev.files) ? ev.files.slice(0, 20).map(f => String(f).slice(0, 300)) : [],
       detail: ev.detail && typeof ev.detail === 'object' ? ev.detail : {}
     };
-    fs.appendFileSync(FLOW_PATH, JSON.stringify(rec) + '\n', 'utf8');
+    // 原子追加：tmp+rename 避免进程中断留下半截行（JSONL 格式单行即一条完整记录）
+    const recLine = JSON.stringify(rec) + '\n';
+    const tmpFlow = FLOW_PATH + '.tmp';
+    fs.writeFileSync(tmpFlow, recLine, 'utf8');
+    fs.renameSync(tmpFlow, FLOW_PATH);
     return rec;
   } catch { return null; }
 }
@@ -975,7 +979,11 @@ function pruneOldData(days) {
       try { const e = JSON.parse(l); if ((Date.parse(e.t || '') || 0) < cutoff) { stat.flowEvents++; return false; } } catch { stat.flowEvents++; return false; }
       return true;
     });
-    if (kept.length !== lines.length) fs.writeFileSync(FLOW_PATH, kept.length ? kept.join('\n') + '\n' : '');
+    if (kept.length !== lines.length) {
+      const tmpF = FLOW_PATH + '.tmp';
+      fs.writeFileSync(tmpF, kept.length ? kept.join('\n') + '\n' : '');
+      fs.renameSync(tmpF, FLOW_PATH);
+    }
   } catch { /* 无文件 */ }
 
   // 5. 产出存档目录 outputs/<会话>/：mtime 超 cutoff → 删除

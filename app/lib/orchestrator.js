@@ -294,7 +294,10 @@ function boardAppend(sessionDir, stageLabel, agentName, summary, note, files) {
     const lines = [`- [${stageLabel}] ${agentName}：${String(summary || '').replace(/\s+/g, ' ').slice(0, 120)}`];
     if (files && files.length) lines.push(`  - 成果文件：${files.join('、')}`);
     if (note) lines.push(`  - 看板更新：${note.slice(0, 300)}`);
-    fs.appendFileSync(p, lines.join('\n') + '\n', 'utf8');
+    const line = lines.join('\n') + '\n';
+    const tmp = p + '.tmp';
+    fs.writeFileSync(tmp, line, 'utf8');
+    fs.renameSync(tmp, p); // 原子追加（同一文件系统 rename 原子；进程中断最多丢一行）
   } catch { /* 看板写失败不影响主流程 */ }
 }
 
