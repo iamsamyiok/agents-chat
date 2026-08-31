@@ -36,3 +36,4 @@ Thumbs.db
 
 # 平台内部工作目录（记忆/方案文档，不随仓库发布）
 .monkeycode/
+.monkeycode-tmp-files/
