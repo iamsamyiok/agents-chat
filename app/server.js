@@ -508,6 +508,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ---------- 分工职工：独立角色库（与群聊智能体不通用） ----------
+  if (p === '/api/divide/staff/presets' && req.method === 'GET') {
+    json(res, 200, { success: true, presets: store.getStaffPresets() });
+    return;
+  }
   if (p === '/api/divide/staff' && req.method === 'GET') {
     json(res, 200, { success: true, staff: store.getStaff() });
     return;

@@ -399,9 +399,18 @@
    /* ---------- 面板折叠：左栏（☰）/ 中栏（⟨），折叠后聊天区占满 ---------- */
    body.coll-left #sidebar { display: none; }
    body.coll-task #taskbar { display: none; }
-   #taskExpand { position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 56; width: 26px; padding: 12px 2px; border: 1px solid #ddd; border-left: none; border-radius: 0 8px 8px 0; background: #fff; color: #07c160; font-size: 12px; line-height: 1.5; cursor: pointer; box-shadow: 2px 0 10px rgba(0,0,0,.08); }
+   #taskExpand { display: none; position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 56; width: 26px; padding: 12px 2px; border: 1px solid #ddd; border-left: none; border-radius: 0 8px 8px 0; background: #fff; color: #07c160; font-size: 12px; line-height: 1.5; cursor: pointer; box-shadow: 2px 0 10px rgba(0,0,0,.08); }
    #taskExpand:hover { background: #f0faf4; }
    body.coll-task #taskExpand { display: block; }
+   /* 左栏底部：任务面板切换 + 通知/帮助/内核标签 */
+   #sideFoot { border-top: 1px solid #f0f0f0; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+   #sideFoot .sf-row { display: flex; align-items: center; gap: 4px; }
+   #sideFoot .sf-btn { border: none; background: none; font-size: 15px; cursor: pointer; color: #666; padding: 3px 5px; border-radius: 6px; }
+   #sideFoot .sf-btn:hover { background: #f5f5f5; }
+   #taskPanelBtn { width: 100%; border: 1px solid #ddd; background: #fafafa; border-radius: 6px; padding: 5px 8px; font-size: 12px; color: #555; cursor: pointer; }
+   #taskPanelBtn:hover { border-color: #07c160; color: #07c160; }
+   body.mode-divide #taskPanelBtn,
+   body.mode-cards #taskPanelBtn { display: none; }
    #menuBtn { display: block; background: none; border: none; font-size: 18px; cursor: pointer; color: #555; margin-right: 10px; }
 
    /* ---------- 分工/编排模式：会话列表与任务面板自动隐藏，聊天/控制台占满 ---------- */
@@ -436,7 +445,13 @@
   /* ---------- 单聊工作台（OpenCode）：模型输入框 / 过程块 ---------- */
   #soloView { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #f7f7f7; }
   #soloChatPane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .oc-model-box { display: flex; align-items: center; }
+  .oc-model-box { display: flex; align-items: center; position: relative; }
+  #ocModelMenu { font-size: 13px; padding: 6px 8px; gap: 2px; }
+  .oc-menu-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; min-width: 0; }
+  .oc-menu-item:hover { background: #f5f5f5; }
+  .oc-menu-item.active { background: #e8f5e9; }
+  .oc-menu-item.free b { color: #07c160; }
+  .oc-menu-empty { padding: 8px; color: #999; font-size: 12px; text-align: center; }
   #ocModelInput { width: 200px; border: 1px solid #e2e2e2; border-radius: 4px; padding: 4px 10px; font-size: 12px; outline: none; color: #333; background: #fff; }
   #ocModelInput:focus { border-color: #07c160; }
   #ocModelInput::placeholder { color: #b2b2b2; }
@@ -511,6 +526,16 @@
     </div>
     <div class="list-sep">会话</div>
     <div id="sessArea"></div>
+    <!-- 左栏底部：通知 / 帮助 / 内核标签（每模式通用）+ 任务面板展开收起 -->
+    <div id="sideFoot">
+      <button id="taskPanelBtn" onclick="toggleTaskbar()" title="收起/展开任务面板">⟩ 任务面板</button>
+      <div class="sf-row">
+        <span class="runner-tag" id="runnerTag" style="display:none"></span>
+        <span style="flex:1"></span>
+        <button class="sf-btn" id="notifyBtn" onclick="toggleSysNotify()" title="系统通知：页面在后台时任务完成弹系统级通知（浏览器授权后生效）">🔔</button>
+        <button class="sf-btn" id="helpBtn" onclick="openHelp()" title="使用帮助">❓</button>
+      </div>
+    </div>
   </aside>
 
   <!-- 中栏：任务管理（操作按钮与任务列表同区，就近操作） -->
@@ -543,21 +568,20 @@
         </div>
       </div>
       <div class="hdr-right">
-        <div class="oc-model-box" id="ocModelBox" style="display:none" title="默认模型：可直接输入 provider/model 筛选选择，点击自动刷新列表">
-          <input id="ocModelInput" list="ocModelList" placeholder="默认模型" autocomplete="off" spellcheck="false">
-          <datalist id="ocModelList"></datalist>
-        </div>
+    <div class="oc-model-box" id="ocModelBox" style="display:none" title="默认模型：点击展开下拉列表选择，或手动输入 provider/model（如：deepseek/deepseek-chat）">
+      <input id="ocModelInput" list="ocModelList" placeholder="默认模型" autocomplete="off" spellcheck="false">
+      <datalist id="ocModelList"></datalist>
+      <div id="ocModelMenu" onmousedown="onOcModelMenuMousedown()" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;background:#fff;border:1px solid #ddd;border-top:none;border-radius:0 0 8px 8px;max-height:320px;overflow-y:auto;flex-direction:column;box-shadow:0 4px 12px rgba(0,0,0,.12);cursor:pointer"></div>
+    </div>
         <button class="cfg-btn" id="newSessBtn" onclick="newSession()">✚ 新会话</button>
         <button class="cfg-btn" id="histBtn" onclick="openHistory()">🕘 历史</button>
         <button class="cfg-btn" id="flowEntryBtn" onclick="openFlow()">🔭 流转</button>
         <button class="cfg-btn" id="agentsCfgBtn" onclick="openAgents()">⚙ 智能体配置</button>
-        <span class="runner-tag" id="runnerTag" style="display:none"></span>
-        <button class="cfg-btn" id="notifyBtn" onclick="toggleSysNotify()" title="系统通知：页面在后台时任务完成弹系统级通知（浏览器授权后生效）">🔔 通知</button>
-        <button class="cfg-btn" id="helpBtn" onclick="openHelp()" title="使用帮助">❓ 帮助</button>
       </div>
     </header>
     <!-- 分工参与名单：聊天面板右上角（仅分工模式显示） -->
     <div id="dvRosterBar"></div>
+    <!-- 通知/帮助/内核标签（已移至左栏底部 #sideFoot，主 header 仅留配置） -->
     <div id="groupView" style="flex:1;min-height:0;display:flex;flex-direction:column;position:relative">
       <div id="messages"></div>
       <button id="jumpBtn" onclick="jumpBottom()" title="有新消息了，点击回到最新">↓ 新消息</button>
@@ -591,7 +615,7 @@
   </main>
 </div>
 <!-- 任务面板收起后的展开按钮（浮动于聊天区左缘） -->
-<button id="taskExpand" onclick="toggleTaskbar()" title="展开任务面板" style="display:none">任<br>务<br>⟩</button>
+<button id="taskExpand" onclick="toggleTaskbar()" title="展开任务面板">任<br>务<br>⟩</button>
 <!-- 版本号：页面右下角角落（次要信息，不与操作按钮混排） -->
 <span class="ver-chip" id="verChip" title="当前版本"></span>
 
@@ -762,12 +786,16 @@
     <h3>🧑‍💼 分工职工配置</h3>
     <div class="tip">分工模式专属职工库（与群聊/单聊智能体相互独立）：每名职工一个专门职业（财务、销售、研发、文案、调研员、程序员、架构师…），职责单一互补。聊天页右上角「参与职工」决定每轮由谁参与分工；消息中 @ 职工可点名协作。</div>
     <div id="staffList"></div>
+    <h3 style="margin-top:14px">📦 职工仓库</h3>
+    <div class="tip">典型专职角色组合，一键安装（已存在于库中的不重复添加）。</div>
+    <div id="staffPresets"></div>
     <h3 style="margin-top:14px">➕ 新增 / 编辑职工</h3>
-    <div class="ag-row">
-      <input id="staffIcon" placeholder="图标 emoji" style="width:90px" maxlength="8">
-      <input id="staffName" placeholder="职工名（如：市场调研员）" style="flex:1" maxlength="40">
-      <input id="staffRole" placeholder="角色（如：调研）" style="width:130px" maxlength="20">
-    </div>
+      <div class="ag-row">
+        <input id="staffIcon" placeholder="图标 emoji" style="flex:1;max-width:160px" maxlength="8">
+        <button id="staffIconBtn" type="button" title="选择 emoji" style="border:1px solid #ddd;background:#fafafa;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:16px">😀</button>
+        <input id="staffName" placeholder="职工名（如：市场调研员）" style="flex:2" maxlength="40">
+        <input id="staffRole" placeholder="角色（如：调研）" style="width:130px" maxlength="20">
+      </div>
     <div class="ag-row"><textarea id="staffDesc" rows="2" placeholder="职责描述：负责什么、擅长什么、产出什么（分工调度的依据）" maxlength="500"></textarea></div>
     <div class="ag-row" style="justify-content:flex-end;gap:8px">
       <button id="staffEditId" style="display:none"></button>
@@ -916,7 +944,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.40.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.41.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -1092,18 +1120,20 @@ async function init() {
   // 单聊模型输入框：点击自动刷新列表；仅 change（选择/修改）生效——不绑 blur，
   // 否则用户只是点开看一眼，自动挑的免费模型就会被写进 localStorage，观感像被锁死
   const om = document.getElementById('ocModelInput');
-  om.addEventListener('focus', () => { loadOcModels(true); });
+  om.addEventListener('focus', () => { loadOcModels(true); showOcModelMenu(); });
+  om.addEventListener('blur', hideOcModelMenu);
   om.addEventListener('change', onOcModelPick);
+  om.addEventListener('input', (e) => { showOcModelMenu(); renderOcMenuItems(e.target.value); });
 
-  // Markdown 预览：消息中的 .md 路径 / 过程存档行 → 点击打开预览弹窗
-  document.addEventListener('click', (e) => {
-    const el = e.target.closest('.md-link, .msg-file[data-path]');
-    if (el && el.dataset.path) { e.preventDefault(); e.stopPropagation(); openPreview(el.dataset.path); }
-  });
-  // Esc 关闭预览弹窗
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closePreview();
-  });
+// Markdown 预览：消息中的 .md 路径 / 过程存档行 → 点击打开预览弹窗
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('.md-link, .msg-file[data-path]');
+  if (el && el.dataset.path) { e.preventDefault(); e.stopPropagation(); openPreview(el.dataset.path); }
+});
+// Esc 关闭预览弹窗
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closePreview();
+});
 
   // 页面心跳：告知服务端「网页还开着」（全部页面关闭后服务端会自动退出）
   setInterval(() => { fetch('/api/health').catch(() => {}); }, 25000);
@@ -1185,7 +1215,11 @@ function toggleSidebar() {
   else document.body.classList.toggle('coll-left');
 }
 function toggleTaskbar() {
+  const opened = !document.body.classList.contains('coll-task');
   document.body.classList.toggle('coll-task');
+  // 左栏底部按钮文案随状态切换
+  const b = document.getElementById('taskPanelBtn');
+  if (b) b.textContent = opened ? '⟩ 任务面板' : '⟨ 任务面板';
 }
 
 // ---------- 四标签角标：完成进度（✓d/t）+ 未读绿点数字 ----------
@@ -1256,22 +1290,54 @@ async function loadOcModels(refresh) {
     renderOcModelSel();
   } catch { /* 模型列表加载失败不影响聊天（用默认模型） */ }
 }
-// 填充输入框 datalist：value=id（发送给内核），展示 label
+// 渲染输入框 + 下拉菜单（点击/聚焦展开，手输可精确 provider/model，支持搜索）
 function renderOcModelSel() {
   const dl = document.getElementById('ocModelList');
-  // localStorage 'ocModel'：null=从未选择过（自动优先挑免费模型）；''=用户主动清空（用内核默认模型）
-  const savedRaw = localStorage.getItem('ocModel');
-  if (!curOcModel) {
-    if (savedRaw === null) {
-      const free = ocModels.find(m => /free/i.test(m.id) || /free/i.test(m.label || ''));
-      if (free) curOcModel = free.id;
-    } else {
-      const saved = savedRaw || '';
-      if (ocModels.some(m => m.id === saved)) curOcModel = saved;
-    }
-  }
+  // datalist 兜底（兼容老浏览器显示）：展示过滤候选
+  const filter = (document.getElementById('ocModelInput')?.value || '').toLowerCase();
   dl.innerHTML = ocModels.map(m => `<option value="${escAttr(m.id)}">${esc(m.label || m.id)}</option>`).join('');
+  renderOcMenuItems(filter);
+}
+function renderOcMenuItems(filter) {
+  const menu = document.getElementById('ocModelMenu');
+  if (!menu) return;
+  const q = (filter || '').toLowerCase();
+  const items = ocModels.filter(m => !q || (m.id || '').toLowerCase().includes(q) || (m.label || '').toLowerCase().includes(q));
+  menu.innerHTML = items.length
+    ? items.map(m => {
+        const free = /free/i.test(m.id) || /free/i.test(m.label || '');
+        return `<div class="oc-menu-item ${curOcModel === m.id ? 'active' : ''} ${free ? 'free' : ''}" data-id="${escAttr(m.id)}" onclick="pickOcModel('${escAttr(m.id)}')" title="${esc(m.label || m.id)}">${esc(m.icon || '⚙️')} <b>${esc(m.name || m.id)}</b>${free ? '<span style="margin-left:auto;font-size:10px;color:#07c160">🆓免费</span>' : ''}</div>`;
+      }).join('')
+    : `<div class="oc-menu-empty">${q ? '无匹配模型' : '无可用模型'}</div>`;
+}
+function pickOcModel(id) {
+  curOcModel = id;
+  localStorage.setItem('ocModel', id);
   syncOcModelInput();
+  hideOcModelMenuNow();
+  toast('已切换模型为 ' + (ocModels.find(m => m.id === id)?.label || id));
+}
+function showOcModelMenu() {
+  const menu = document.getElementById('ocModelMenu');
+  if (!menu) return;
+  menu.style.display = 'flex';
+  renderOcModelSel();
+}
+function hideOcModelMenu() {
+  const menu = document.getElementById('ocModelMenu');
+  if (!menu) return;
+  // 延迟关闭，防止 mousedown 点选时 blur 提前关闭
+  setTimeout(() => { if (!menu.matches(':hover') && !menu.dataset.mouseDown) hideOcModelMenuNow(); }, 150);
+}
+function hideOcModelMenuNow() {
+  const menu = document.getElementById('ocModelMenu');
+  if (!menu) return;
+  menu.style.display = 'none';
+  menu.dataset.mouseDown = '';
+}
+function onOcModelMenuMousedown(e) {
+  const menu = document.getElementById('ocModelMenu');
+  if (menu) menu.dataset.mouseDown = '1';
 }
 function syncOcModelInput() {
   const el = document.getElementById('ocModelInput');
@@ -3633,13 +3699,84 @@ let editing = [];
 
 // ==================== 分工职工配置（独立角色库：与群聊智能体不通用） ====================
 let staffGenCandidates = []; // AI 生成候选 [{name, icon, role, desc, checked}]
+const EMPLOYEE_EMOJIS = [
+  '🧑‍💼','👨‍💻','👩‍💻','🔍','✍️','📊','📈','💰','🎯','🤝',
+  '🎨','📋','🧮','⚖️','🔒','📢','🚀','🧠','🗂️','💬',
+  '🌐','📦','🛠️','📱','💡','🎓','🏷️','📮','📅','⏰',
+  '🔧','🧪','🖥️','📖','🎬','🎤','🏆','⚡','🔥','⭐',
+  '❤️','👀','✅','📌','🔗','🧩','🎲','🧲','🎁','📝',
+  '👤','👥','👑','🦸','🦹','💎','🏅','🎖️','🥇','🔔'
+];
+
+function addEmojiPicker(inputId, btnId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  document.getElementById(btnId).addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeEmojiMenu();
+    const menu = document.createElement('div');
+    menu.id = 'emojiMenu';
+    menu.style.cssText = 'position:fixed;z-index:120;background:#fff;border:1px solid #ddd;border-radius:10px;padding:8px;box-shadow:0 4px 18px rgba(0,0,0,.15);display:flex;flex-wrap:wrap;gap:4px;width:max-content;max-width:340px;';
+    const rect = document.getElementById(btnId).getBoundingClientRect();
+    let top = rect.bottom + 6, left = rect.left;
+    if (top + 120 > window.innerHeight) top = rect.top - 120;
+    if (left + 340 > window.innerWidth) left = window.innerWidth - 348;
+    menu.style.top = top + 'px'; menu.style.left = left + 'px';
+    menu.innerHTML = EMPLOYEE_EMOJIS.map(e => `<span style="font-size:24px;cursor:pointer;padding:4px;border-radius:6px;line-height:1" onmouseenter="this.style.background='#f0f0f0'" onmouseleave="this.style.background=''" onclick="closeEmojiMenu();document.getElementById('${inputId}').value='${e}';">${e}</span>`).join('')
+      + `<div style="width:100%;text-align:right;margin-top:6px"><button onclick="closeEmojiMenu()" style="border:1px solid #ddd;background:#fafafa;border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer">关闭</button></div>`;
+    document.body.appendChild(menu);
+    input.focus();
+  });
+  window.closeEmojiMenu = () => { try { document.getElementById('emojiMenu').remove(); } catch {} };
+  document.addEventListener('click', window.__closeEmojiHandler || (() => { window.closeEmojiMenu(); }));
+  window.__closeEmojiHandler = (e) => { if (e.target.closest('#emojiMenu') || e.target.closest('#' + btnId)) return; closeEmojiMenu(); };
+  document.addEventListener('click', window.__closeEmojiHandler);
+}
+addEmojiPicker('staffIcon', 'staffIconBtn');
 
 function openStaff() {
   staffResetForm();
   document.getElementById('staffGenResult').innerHTML = '';
   staffGenCandidates = [];
   renderStaffList();
+  renderStaffPresets();
   document.getElementById('staffMask').classList.add('show');
+}
+
+async function renderStaffPresets() {
+  const box = document.getElementById('staffPresets');
+  try {
+    const d = await api('/api/divide/staff/presets');
+    if (!d.success || !Array.isArray(d.presets)) { box.innerHTML = ''; return; }
+    box.innerHTML = d.presets.map(p => `
+      <div style="border:1px solid #e8edff;border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#f9faff">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <span style="font-size:22px">${esc(p.icon || '📦')}</span>
+          <div style="flex:1"><b style="font-size:14px">${esc(p.name)}</b><span style="font-size:12px;color:#888;margin-left:6px">${esc(p.desc)}</span></div>
+          <button class="primary" onclick="installStaffPreset('${esc(p.id)}')" style="font-size:12px">📥 安装</button>
+        </div>
+        <div style="font-size:12px;color:#666;margin-bottom:4px">示例用法：<code>${esc(p.usage || '')}</code></div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">${p.staff.map(s => `<span style="background:#eef4ff;border:1px solid #c7d7ff;border-radius:6px;padding:2px 8px;font-size:11px;color:#4a6cf7">${esc(s.icon || '🧑‍💼')} ${esc(s.name)}</span>`).join('')}</div>
+      </div>`).join('');
+  } catch (e) { box.innerHTML = '<div class="tip" style="color:#b00">仓库加载失败</div>'; }
+}
+async function installStaffPreset(id) {
+  try {
+    const d = await api('/api/divide/staff/presets');
+    const preset = (d.presets || []).find(x => x.id === id);
+    if (!preset) { toast('未找到预设'); return; }
+    let added = 0;
+    for (const s of preset.staff) {
+      const existing = dvStaff.find(x => x.name === s.name);
+      if (existing) { toast('「' + s.name + '」已在库中，跳过'); continue; }
+      const r = await api('/api/divide/staff', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ icon: s.icon, name: s.name, role: s.role, desc: s.desc }) });
+      if (r.success) { dvStaff = r.staff; added++; }
+    }
+    renderStaffList();
+    renderStaffPresets();
+    renderDvRoster();
+    toast(`已安装「${preset.name}」：新增 ${added} 名职工`);
+  } catch (e) { toast('安装失败：' + (e.message || e)); }
 }
 function closeStaff() { document.getElementById('staffMask').classList.remove('show'); }
 

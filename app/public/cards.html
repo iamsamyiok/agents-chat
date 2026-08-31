@@ -264,11 +264,10 @@
   <button class="btn danger" id="btnStop" disabled title="停止编排：进行中的任务复位为待执行（不影响追加聊天），未开始的任务保留">⏹ 停止</button>
   <button class="btn" id="btnClear">清空</button>
   <button class="btn" id="btnHelp" title="多任务编排使用帮助">❓ 帮助</button>
+  <span class="proc-chip" id="procBar" title="OpenCode 执行进程状态"><span class="dot"></span><span class="st">等待中</span></span>
 </header>
 
 <div class="kernel-banner" id="kernelBanner"></div>
-
-<div class="procbar" id="procBar"><span class="ptitle">进程：</span><span class="proc-empty">无运行中的 opencode 进程</span></div>
 
 <div id="boardStats">
   <b id="stTotal">0</b> 项任务
@@ -1232,20 +1231,21 @@ function renderUpdateInfo(data){
 $('#trashEmpty').onclick=async()=>{ if(!confirm('确认清空垃圾桶？所有快照及其过程日志将被永久删除，不可恢复。'))return; const r=await post('/api/cards/trash/empty'); toast('已清空 '+r.cleared+' 项'); await loadCards(); };
 
 // ---- 进程状态条（PID + 工作状态，SSE 事件驱动 + 2s 轮询兜底） ----
-async function refreshProcs(){
-  try{
-    const d = await api('/api/cards/processes');
-    const procs = d.processes||[];
-    const bar=$('#procBar');
-    const kname = (RUNNER_INFO && RUNNER_INFO.label) || 'opencode';
-    if(!procs.length){ bar.innerHTML='<span class="ptitle">进程：</span><span class="proc-empty">无运行中的 '+esc(kname)+' 进程</span>'; return; }
-    bar.innerHTML='<span class="ptitle">进程：</span>'+procs.map(p=>{
-      const pidLabel = p.pid ? ('PID '+p.pid) : '启动中…';
-      const st = p.working ? '工作中' : '等待输出';
-      return `<span class="proc-chip ${p.working?'':'idle'}" title="${p.working?'近 15 秒内有输出活动':'进程存活，暂无新输出（长思考属正常）'}"><span class="dot"></span><span class="pid">${pidLabel}</span><span class="st">${st}</span></span>`;
-    }).join('');
-  }catch{ /* ignore */ }
-}
+ async function refreshProcs(){
+   try{
+     const d = await api('/api/cards/processes');
+     const procs = d.processes||[];
+     const bar=$('#procBar');
+     const kname = (RUNNER_INFO && RUNNER_INFO.label) || 'opencode';
+     if(!procs.length){ bar.innerHTML='<span class="dot"></span><span class="st">等待中</span>'; bar.classList.add('idle'); return; }
+     bar.classList.remove('idle');
+     bar.innerHTML=procs.map(p=>{
+       const pidLabel = p.pid ? ('PID '+p.pid) : '启动中…';
+       const st = p.working ? '工作中' : '等待输出';
+       return `<span class="proc-chip ${p.working?'':'idle'}" title="${p.working?'近 15 秒内有输出活动':'进程存活，暂无新输出（长思考属正常）'}"><span class="dot"></span><span class="pid">${pidLabel}</span><span class="st">${st}</span></span>`;
+     }).join('');
+   }catch{ /* ignore */ }
+ }
 setInterval(refreshProcs, 2000);
 
 // ---- SSE 实时 ----
