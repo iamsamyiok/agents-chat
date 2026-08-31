@@ -149,57 +149,6 @@
   #rtBtn { background: #f2f3f5; color: #555; border: none; border-radius: 6px; padding: 0 14px; font-size: 13px; cursor: pointer; white-space: nowrap; }
   #rtBtn:hover { background: #e8eaee; }
   #rtBtn.on { background: #8a6fe8; color: #fff; }
-   /* ==================== 编排看板（分工模式专属界面） ==================== */
-   #divideView { background: #f6f7f9; }
-   .dv-console { background: #fff; border-bottom: 1px solid #e8eaee; padding: 12px 16px 10px; flex-shrink: 0; }
-   .dv-console-main { display: flex; gap: 10px; align-items: stretch; }
-   #dvTaskInput { flex: 1; resize: vertical; min-height: 64px; max-height: 200px; border: 1px solid #dcdfe6; border-radius: 8px; padding: 8px 10px; font-size: 13.5px; font-family: inherit; line-height: 1.55; box-sizing: border-box; }
-   #dvTaskInput:focus { outline: none; border-color: #07c160; }
-   .dv-console-side { display: flex; flex-direction: column; gap: 6px; justify-content: flex-end; }
-   .dv-run { background: #07c160; color: #fff; border: none; border-radius: 8px; padding: 9px 18px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
-   .dv-run:hover { background: #06ad56; }
-   .dv-run:disabled { background: #9ff0c1; cursor: not-allowed; }
-   .dv-stop { background: #fa5151; color: #fff; border: none; border-radius: 8px; padding: 7px 14px; font-size: 13px; cursor: pointer; white-space: nowrap; }
-   .dv-meta { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-   .dv-roster { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; flex: 1; }
-   .dv-roster .dv-chip { display: inline-flex; align-items: center; gap: 4px; background: #eef7f0; border: 1px solid #bfe6cd; color: #1a7a42; border-radius: 12px; padding: 2px 8px; }
-   .dv-roster .dv-chip b { font-weight: 600; }
-   .dv-roster .dv-chip.working { background: #e8f3ff; border-color: #a8ccf0; color: #1a5fa8; }
-   .dv-roster .dv-chip .dv-x { cursor: pointer; color: #999; font-size: 13px; line-height: 1; padding: 0 1px; }
-   .dv-roster .dv-chip .dv-x:hover { color: #fa5151; }
-   .dv-roster .dv-add { border: 1px dashed #bbb; background: #fff; color: #666; border-radius: 12px; padding: 2px 8px; font-size: 12px; cursor: pointer; }
-   .dv-roster .dv-label { color: #999; }
-   .dv-sess { color: #999; font-size: 11.5px; white-space: nowrap; }
-   .dv-body { flex: 1; min-height: 0; display: flex; }
-   .dv-board { flex: 1; min-width: 0; overflow-y: auto; padding: 14px; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; align-content: start; }
-   .dv-empty { grid-column: 1 / -1; text-align: center; color: #aaa; padding: 60px 0; font-size: 13px; }
-   .dv-card { background: #fff; border: 1px solid #e8eaee; border-radius: 10px; display: flex; flex-direction: column; min-height: 220px; max-height: 420px; overflow: hidden; }
-   .dv-card.working { border-color: #a8ccf0; box-shadow: 0 0 0 2px rgba(64, 128, 255, 0.08); }
-   .dv-card.delivered { border-color: #bfe6cd; }
-   .dv-card.error { border-color: #f3c1c1; }
-   .dv-card-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid #f0f1f3; font-size: 13px; flex-shrink: 0; }
-   .dv-card-head b { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-   .dv-badge { font-size: 11px; border-radius: 9px; padding: 1px 8px; white-space: nowrap; }
-   .dv-badge.idle { background: #f2f3f5; color: #999; }
-   .dv-badge.working { background: #e8f3ff; color: #1a5fa8; animation: dvPulse 1.2s ease-in-out infinite; }
-   .dv-badge.delivered { background: #eef7f0; color: #1a7a42; }
-   .dv-badge.error { background: #fdecec; color: #c53030; }
-   @keyframes dvPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
-   .dv-card-out { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: #333; }
-   .dv-card-out .dv-seg { border-top: 1px dashed #eee; margin-top: 6px; padding-top: 6px; }
-   .dv-card-out .dv-seg:first-child { border-top: none; margin-top: 0; padding-top: 0; }
-   .dv-card-out .dv-seg-label { display: block; color: #1a5fa8; font-size: 11px; margin-bottom: 2px; }
-   .dv-card-saved { flex-shrink: 0; border-top: 1px solid #f0f1f3; padding: 6px 10px; font-size: 11.5px; color: #1a7a42; display: none; }
-   .dv-card-saved.show { display: block; }
-   .dv-timeline-wrap { width: 300px; flex-shrink: 0; border-left: 1px solid #e8eaee; background: #fff; display: flex; flex-direction: column; min-height: 0; }
-   .dv-tl-head { padding: 10px 14px; border-bottom: 1px solid #f0f1f3; font-size: 13px; font-weight: 600; flex-shrink: 0; }
-   .dv-timeline { flex: 1; overflow-y: auto; padding: 10px 14px; font-size: 12px; line-height: 1.65; }
-   .dv-timeline .tl-item { position: relative; padding: 0 0 10px 16px; color: #555; word-break: break-word; }
-   .dv-timeline .tl-item::before { content: ''; position: absolute; left: 3px; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: #c8c9cc; }
-   .dv-timeline .tl-item.tl-run::before { background: #07c160; }
-   .dv-timeline .tl-item.tl-err::before { background: #fa5151; }
-   .dv-timeline .tl-item.tl-stop::before { background: #e6a23c; }
-   @media (max-width: 900px) { .dv-timeline-wrap { display: none; } }
   #sendBtn:disabled, #soloSendBtn:disabled { background: #9ff0c1; cursor: not-allowed; }
   #sendBtn.stop, #soloSendBtn.stop, .run-all.stop { background: #fa5151; color: #fff; }
   #sendBtn.stop:hover, #soloSendBtn.stop:hover, .run-all.stop:hover { background: #e04840; }
@@ -429,18 +378,25 @@
    .side-header .side-actions .mini-btn { flex: 1; padding: 4px 0; text-align: center; }
    .ttab .badge { margin-left: 4px; vertical-align: 1px; }
 
-   /* ---------- 编排模式：全页按编排功能排布，侧栏只留三标签 ---------- */
-   body.mode-divide #sidebar { width: auto; }
-   body.mode-divide .side-header { border-bottom: none; padding: 14px 12px; }
-   body.mode-divide #sidebar .side-actions,
-   body.mode-divide #sidebar .side-mid,
-   body.mode-divide #sidebar .side-footer { display: none; }
-   body.mode-divide #menuBtn { display: none !important; } /* 侧栏无列表内容，隐藏抽屉入口 */
-   body.mode-divide #newSessBtn,
-   body.mode-divide #histBtn,
-   body.mode-divide #flowEntryBtn { display: none !important; } /* 聊天相关按钮不进编排页 */
-   /* 编排任务台：归属会话下拉 */
-   #dvSessSel { border: 1px solid #dcdfe6; border-radius: 6px; font-size: 11.5px; padding: 2px 6px; color: #555; background: #fff; max-width: 220px; cursor: pointer; }
+   /* ---------- 多任务编排模式：侧栏只留四标签，控制台占满 ---------- */
+   body.mode-cards #sidebar { width: auto; }
+   body.mode-cards .side-header { border-bottom: none; padding: 14px 12px; }
+   body.mode-cards #sidebar .side-actions,
+   body.mode-cards #sidebar .side-mid,
+   body.mode-cards #sidebar .side-footer { display: none; }
+   body.mode-cards #menuBtn { display: none !important; }
+   body.mode-cards #newSessBtn,
+   body.mode-cards #histBtn,
+   body.mode-cards #flowEntryBtn { display: none !important; }
+   /* ---------- 分工模式：composer 顶部参与名单条 ---------- */
+   #dvRosterBar { display: none; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; font-size: 12px; }
+   #dvRosterBar.show { display: flex; }
+   #dvRosterBar .dv-chip { display: inline-flex; align-items: center; gap: 4px; background: #eef7f0; border: 1px solid #bfe6cd; color: #1a7a42; border-radius: 12px; padding: 2px 8px; }
+   #dvRosterBar .dv-chip b { font-weight: 600; }
+   #dvRosterBar .dv-chip .dv-x { cursor: pointer; color: #999; font-size: 13px; line-height: 1; padding: 0 1px; }
+   #dvRosterBar .dv-chip .dv-x:hover { color: #fa5151; }
+   #dvRosterBar .dv-add { border: 1px dashed #bbb; background: #fff; color: #666; border-radius: 12px; padding: 2px 8px; font-size: 12px; cursor: pointer; }
+   #dvRosterBar .dv-label { color: #999; }
 
   /* ---------- 单聊工作台（OpenCode）：模型输入框 / 过程块 ---------- */
   #soloView { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #f7f7f7; }
@@ -515,7 +471,8 @@
       <div class="mode-switch" id="modeSwitch">
         <button id="modeSoloBtn" onclick="setChatMode('solo')">👤 单聊<span class="tab-prog" id="soloProg"></span><span class="tab-dot" id="soloDot"></span></button>
         <button id="modeGroupBtn" class="active" onclick="setChatMode('group')">👥 群聊<span class="tab-prog" id="groupProg"></span><span class="tab-dot" id="groupDot"></span></button>
-        <button id="modeDivideBtn" onclick="setChatMode('divide')">🎯 编排<span class="tab-prog" id="divideProg"></span><span class="tab-dot" id="divideDot"></span></button>
+        <button id="modeDivideBtn" onclick="setChatMode('divide')">🤝 分工<span class="tab-prog" id="divideProg"></span><span class="tab-dot" id="divideDot"></span></button>
+        <button id="modeCardsBtn" onclick="setChatMode('cards')">🗂️ 多任务编排<span class="tab-prog" id="cardsProg"></span><span class="tab-dot" id="cardsDot"></span></button>
       </div>
       <div class="side-actions">
         <button class="mini-btn" onclick="openImport()">导入任务</button>
@@ -557,7 +514,6 @@
         <button class="cfg-btn" id="histBtn" onclick="openHistory()">🕘 历史</button>
         <button class="cfg-btn" id="flowEntryBtn" onclick="openFlow()">🔭 流转</button>
         <button class="cfg-btn" id="agentsCfgBtn" onclick="openAgents()">⚙ 智能体配置</button>
-        <button class="cfg-btn" id="cardsNavBtn" onclick="openCards()" title="多任务编排 · 卡牌：把任务写成卡牌，Agent 干完一件自动注入下一件">🗂️ 多任务编排</button>
         <span class="runner-tag" id="runnerTag" style="display:none"></span>
         <span class="ver-chip" id="verChip" title="当前版本" style="font-size:11px;color:#999;border:1px solid #e2e2e2;border-radius:10px;padding:2px 8px;white-space:nowrap"></span>
         <button class="cfg-btn" id="notifyBtn" onclick="toggleSysNotify()" title="系统通知：页面在后台时任务完成弹系统级通知（浏览器授权后生效）">🔔 通知</button>
@@ -568,6 +524,7 @@
       <div id="messages"></div>
       <button id="jumpBtn" onclick="jumpBottom()" title="有新消息了，点击回到最新">↓ 新消息</button>
       <footer class="composer" id="groupComposer">
+        <div id="dvRosterBar"></div>
         <div class="input-row">
           <button id="rtBtn" onclick="toggleRoundtable()" title="圆桌讨论模式：所有被 @ 的智能体（未 @ 则全体）围绕主题轮流发言、互相反驳，管家当主持人控制轮数并总结共识与分歧">💬 圆桌</button>
           <input id="input" placeholder="输入消息，@ 可点名智能体…" autocomplete="off">
@@ -587,27 +544,11 @@
         </footer>
       </div>
     </div>
-    <!-- 编排看板：多任务分工编排（与聊天完全不同的组织——任务指令台 + 成员工作卡片 + 传导时间线） -->
-    <div id="divideView" style="flex:1;min-height:0;display:none;flex-direction:column">
-      <div class="dv-console">
-        <div class="dv-console-main">
-          <textarea id="dvTaskInput" rows="3" placeholder="🎯 描述要编排的任务：名单内成员自动分工并行执行，工作中可 @ 同事请求输入或指派任务，反馈到齐后继续推进，各自交付成果；Ctrl+Enter 开始编排"></textarea>
-          <div class="dv-console-side">
-            <button id="dvRunBtn" class="dv-run" onclick="dvRun()">▶ 开始编排</button>
-            <button id="dvStopBtn" class="dv-stop" onclick="dvStop()" style="display:none">■ 停止编排</button>
-          </div>
-        </div>
-        <div class="dv-meta">
-          <div class="dv-roster" id="dvRoster"></div>
-          <select id="dvSessSel" title="编排成果归档到哪个会话（历史可在群聊模式回看）" onchange="switchSession(this.value)"></select>
-        </div>
-      </div>
-      <div class="dv-body">
-        <div class="dv-board" id="dvBoard"><div class="dv-empty" id="dvEmpty">🎯 在上方任务台下达指令，成员工作卡片将在此实时展开</div></div>
-        <div class="dv-timeline-wrap">
-          <div class="dv-tl-head">📡 传导时间线<span id="dvTlCount" style="color:#bbb;font-weight:400"></span></div>
-          <div class="dv-timeline" id="dvTimeline"></div>
-        </div>
+    <!-- 多任务编排控制台：内嵌 iframe（懒加载，?embed=1 隐藏返回群聊按钮） -->
+    <div id="cardsView" style="flex:1;min-height:0;display:none;flex-direction:column;position:relative">
+      <iframe id="cardsFrame" title="多任务编排控制台" style="flex:1;width:100%;border:0;display:block"></iframe>
+      <div id="cardsFallback" style="display:none;padding:40px;text-align:center;color:#888">
+        控制台加载失败。<button class="mini-btn" onclick="window.open('/cards','_blank')">在新标签打开</button>
       </div>
     </div>
   </main>
@@ -895,7 +836,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.37.1'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.38.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -907,7 +848,8 @@ let taskBusy = false;          // 任务批量执行进行中（执行按钮变�
 let stopAsked = false;         // 本次流中已请求过停止，避免重复点击
 let curTaskId = '';            // '' = 主会话；否则为任务会话
 let roundtableOn = false;      // 圆桌讨论模式开关（输入栏 💬 按钮）
-let dvList = [];               // 编排参与名单（智能体 id 数组，进入编排视图默认全体成员）
+let dvList = [];               // 分工参与名单（智能体 id 数组，进入分工模式默认全体成员）
+let dvRunning = false;         // 分工执行进行中（切走时标签绿点提醒）
 let runnerState = { kind: '', label: '', cmd: '', kernels: [] }; // 内核状态（帮助弹窗/配置页展示）
 let globalCwd = '';            // 全局统一工作目录
 let configKernel = 'auto';     // 配置的执行内核
@@ -1012,7 +954,7 @@ async function init() {
   // 恢复上次所在模式标签（单聊/群聊/编排），并拉一次编排统计驱动角标
   try {
     const saved = localStorage.getItem(MODE_STORE_KEY);
-    if (saved === 'solo' || saved === 'divide') setChatMode(saved);
+    if (saved === 'solo' || saved === 'divide' || saved === 'cards') setChatMode(saved);
   } catch { /* localStorage 不可用时保持群聊 */ }
   refreshCardsStats();
 
@@ -1061,12 +1003,6 @@ async function init() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); soloSend(); }
   });
 
-  // 编排任务台：Ctrl/Cmd+Enter 开始编排
-  const dvt = document.getElementById('dvTaskInput');
-  dvt.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); dvRun(); }
-  });
-
   // 单聊模型输入框：点击自动刷新列表；仅 change（选择/修改）生效——不绑 blur，
   // 否则用户只是点开看一眼，自动挑的免费模型就会被写进 localStorage，观感像被锁死
   const om = document.getElementById('ocModelInput');
@@ -1101,20 +1037,38 @@ let groupMsgUnread = 0;              // 非群聊模式下主会话收到的未�
 const unreadSess = new Set();        // 会话 key 集合：有未查看的完成消息（声明提前，供上方角标计算引用）
 
 function setChatMode(mode) {
-  chatMode = ['solo', 'divide'].includes(mode) ? mode : 'group';
+  chatMode = ['solo', 'divide', 'cards'].includes(mode) ? mode : 'group';
   try { localStorage.setItem(MODE_STORE_KEY, chatMode); } catch { /* ignore */ }
-  if (chatMode === 'group') groupMsgUnread = 0; // 回到群聊即视为已读主会话
-  document.body.classList.toggle('mode-divide', chatMode === 'divide'); // 编排模式：全页按编排功能排布
+  if (chatMode === 'group' || chatMode === 'divide') groupMsgUnread = 0; // 回到聊天视图即视为已读主会话
+  document.body.classList.toggle('mode-cards', chatMode === 'cards'); // 多任务编排：侧栏只留标签
   document.getElementById('modeSoloBtn').classList.toggle('active', chatMode === 'solo');
   document.getElementById('modeGroupBtn').classList.toggle('active', chatMode === 'group');
   document.getElementById('modeDivideBtn').classList.toggle('active', chatMode === 'divide');
-  document.getElementById('groupView').style.display = chatMode === 'group' ? 'flex' : 'none';
+  document.getElementById('modeCardsBtn').classList.toggle('active', chatMode === 'cards');
+  // 分工与群聊共用聊天视图（微信式消息流），仅输入栏与发送模式不同
+  document.getElementById('groupView').style.display = (chatMode === 'group' || chatMode === 'divide') ? 'flex' : 'none';
   document.getElementById('soloView').style.display = chatMode === 'solo' ? 'flex' : 'none';
-  document.getElementById('divideView').style.display = chatMode === 'divide' ? 'flex' : 'none';
+  document.getElementById('cardsView').style.display = chatMode === 'cards' ? 'flex' : 'none';
+  const rtBtn = document.getElementById('rtBtn');
+  const rosterBar = document.getElementById('dvRosterBar');
   if (chatMode === 'divide') {
     renderDvRoster();
-    renderDvSessSel();
-    setTimeout(() => { try { document.getElementById('dvTaskInput').focus(); } catch {} }, 100);
+    rosterBar.classList.add('show');
+    rtBtn.style.display = 'none'; // 分工模式无圆桌
+    document.getElementById('input').placeholder = '分工模式：描述任务，名单内成员自动分工并行执行，可 @ 点名…';
+  } else {
+    rosterBar.classList.remove('show');
+    rtBtn.style.display = '';
+    if (chatMode === 'group') document.getElementById('input').placeholder = '输入消息，@ 可点名智能体…';
+  }
+  if (chatMode === 'cards') {
+    // 控制台懒加载：首次才注入 src，切回不重载（保留看板状态）；?embed=1 隐藏返回群聊按钮
+    const fr = document.getElementById('cardsFrame');
+    if (!fr.getAttribute('src')) {
+      fr.src = '/cards?embed=1';
+      fr.onerror = () => { fr.style.display = 'none'; document.getElementById('cardsFallback').style.display = 'block'; };
+    }
+    markCardsSeen(); // 控制台可见即视为已查看：清未读、记当前完成数
   }
   renderSidebar();
   renderHeader();
@@ -1127,12 +1081,13 @@ function setChatMode(mode) {
   }
 }
 
-// ---------- 三标签角标：完成进度（✓d/t）+ 未读绿点数字 ----------
+// ---------- 四标签角标：完成进度（✓d/t）+ 未读绿点数字 ----------
 async function refreshCardsStats() {
   try {
     const r = await api('/api/cards/stats');
     cardsStatsCache = r.success ? r.stats : null;
   } catch { cardsStatsCache = null; }
+  if (chatMode === 'cards') markCardsSeen();
   updateModeBadges();
 }
 
@@ -1166,35 +1121,18 @@ function updateModeBadges() {
     if (chatMode !== 'group') groupUnread += groupMsgUnread; // 非群聊时主会话新消息也提醒
     dot('soloDot', chatMode === 'solo' ? 0 : unreadOf(soloTasks));
     dot('groupDot', groupUnread);
-    // 编排标签：运行中显示进行卡片数（working 卡片），完成显示 ✓交付/总数
-    if (typeof dvBusy === 'boolean') {
-      let working = 0, delivered = 0, total = 0;
-      for (const c of dvCards.values()) {
-        total++;
-        if (c.status === 'working') working++;
-        if (c.status === 'delivered') delivered++;
-      }
-      prog('divideProg', dvBusy || total ? delivered : 0, dvBusy || total ? total : 0);
-      dot('divideDot', (!dvBusy || chatMode === 'divide') ? 0 : working);
-    }
-    // 侧栏卡牌编排入口：未读角标（stats 接口 + localStorage 差值）
+    // 分工标签：进行中且已切走时显示绿点提醒
+    dot('divideDot', (typeof dvRunning === 'boolean' && dvRunning && chatMode !== 'divide') ? 1 : 0);
+    // 多任务编排：stats 接口 + localStorage 差值
     const st = cardsStatsCache;
-    const navBtn = document.getElementById('cardsNavBtn');
-    if (navBtn && st) {
+    prog('cardsProg', st ? st.done : 0, st ? st.total : 0);
+    let cardsUnread = 0;
+    if (st && chatMode !== 'cards') {
       let seen = 0;
       try { seen = parseInt(localStorage.getItem('acCardsLastSeenDone'), 10) || 0; } catch { /* ignore */ }
-      const unread = Math.max(0, st.done - seen);
-      let badge = navBtn.querySelector('.nav-dot');
-      if (unread > 0) {
-        if (!badge) {
-          badge = document.createElement('span');
-          badge.className = 'nav-dot';
-          badge.style.cssText = 'margin-left:auto;background:#07c160;color:#fff;border-radius:9px;font-size:10.5px;min-width:18px;height:18px;line-height:18px;text-align:center;padding:0 5px';
-          navBtn.appendChild(badge);
-        }
-        badge.textContent = unread > 99 ? '99+' : String(unread);
-      } else if (badge) badge.remove();
+      cardsUnread = Math.max(0, st.done - seen);
     }
+    dot('cardsDot', cardsUnread);
   } catch { /* 数据未就绪时静默跳过（init 早期） */ }
 }
 
@@ -1625,8 +1563,7 @@ async function loadTasks(silent) {
   tasks = data.tasks || [];
   detectBackgroundDone();
   renderSidebar();
-  if (chatMode === 'divide') renderDvSessSel(); // 编排归属会话下拉随任务列表同步
-  updateModeBadges(); // 三标签角标随任务状态同步
+  updateModeBadges(); // 四标签角标随任务状态同步
 }
 
 // ---------- 后台完成检测：定时任务由服务端调度执行，前端轮询感知状态变化 ----------
@@ -1892,14 +1829,12 @@ async function delTask(id) {
 }
 
 function switchSession(taskId) {
-  // 编排模式下点会话：只切换编排归属会话，不跳走看板
   if (chatMode === 'solo') setChatMode('group'); // 任务会话属于群聊模式，点击自动切回
   curTaskId = taskId || '';
   const wasUnread = unreadSess.has(curKey());
   unreadSess.delete(curKey()); // 切到该会话 = 已读，清除绿点
   renderSidebar();
   renderHeader();
-  if (chatMode === 'divide') renderDvSessSel();
   updateModeBadges(); // 已读清除后角标即时更新
   // 有未读（后台完成过）或本地空但任务已结束（定时调度后台跑完）：从服务端拉最新消息
   const t = curTaskId ? tasks.find(x => x.id === curTaskId) : null;
@@ -1977,7 +1912,7 @@ function renderHeader() {
   // 顶栏按钮按模式显隐：单聊=模型输入框+新会话+历史+帮助（配置/流转属群聊功能）
   document.getElementById('ocModelBox').style.display = chatMode === 'solo' ? '' : 'none';
   document.getElementById('flowEntryBtn').style.display = chatMode === 'group' ? '' : 'none';
-  document.getElementById('agentsCfgBtn').style.display = chatMode === 'group' ? '' : 'none';
+  document.getElementById('agentsCfgBtn').style.display = (chatMode === 'group' || chatMode === 'divide') ? '' : 'none';
   if (chatMode === 'solo') {
     const s = ocSessions.find(x => x.id === curOcId);
     const t = curOcId ? tasks.find(x => x.id === curOcId && x.runner === 'solo') : null;
@@ -1990,10 +1925,17 @@ function renderHeader() {
     return;
   }
   if (chatMode === 'divide') {
+    // 分工：微信式聊天界面，标题随会话，成员说明固定
+    const t = curTaskId ? tasks.find(x => x.id === curTaskId) : null;
+    document.getElementById('chatTitle').textContent = t ? `${t.title || '任务会话'} · 分工` : '分工协作';
+    document.getElementById('members').innerHTML = `<span style="font-size:11px;color:#b2b2b2">名单内成员按需参与 · 并行执行 · @ 协作传导</span>`;
+    document.getElementById('newSessBtn').style.display = curTaskId ? 'none' : '';
+    document.getElementById('histBtn').style.display = curTaskId ? 'none' : '';
+    return;
+  }
+  if (chatMode === 'cards') {
     document.getElementById('chatTitle').textContent = '多任务编排';
-    document.getElementById('members').innerHTML = `<span style="font-size:11px;color:#b2b2b2">成员自动分工并行 · @ 协作传导 · ${dvList.length || agents.length} 名成员待命</span>`;
-    document.getElementById('newSessBtn').style.display = '';
-    document.getElementById('histBtn').style.display = '';
+    document.getElementById('members').innerHTML = '';
     return;
   }
   document.getElementById('chatTitle').textContent = curTaskId
@@ -2484,188 +2426,26 @@ function toggleRoundtableOff() {
   btn.textContent = '💬 圆桌';
 }
 
-// ==================== 编排看板（分工模式专属界面）：任务指令台 + 成员工作卡片 + 传导时间线 ====================
-let dvBusy = false;            // 编排进行中（运行/停止按钮切换、角标）
-let dvTlCount = 0;             // 时间线条数（标题计数）
-const dvCards = new Map();     // agentId -> { root, outEl, badge, savedEl, segEl, segBody, status }
-
-// 参与名单编辑：chips（可删，编排中锁定）+ 下拉加人
+// ==================== 分工模式：参与名单（微信式聊天界面，名单内成员按需参与交互） ====================
+// 名单编辑条（输入栏上方）：chips（可删）+ 下拉加人
 function renderDvRoster() {
-  const box = document.getElementById('dvRoster');
+  const box = document.getElementById('dvRosterBar');
   if (!box) return;
   if (!dvList.length) dvList = agents.map(a => a.id); // 默认全体成员（含管家，作为普通成员）
   const inList = dvList.map(id => agents.find(a => a.id === id)).filter(Boolean);
   const rest = agents.filter(a => !dvList.includes(a.id));
-  const chips = inList.map(a => {
-    const c = dvCards.get(a.id);
-    const cls = c && c.status === 'working' ? 'dv-chip working' : 'dv-chip';
-    const x = dvBusy ? '' : `<span class="dv-x" title="移出名单" onclick="dvRemove('${escAttr(a.id)}')">×</span>`;
-    return `<span class="${cls}" id="dvchip-${escAttr(a.id)}">${esc(a.icon || '🤖')}<b>${esc(a.name)}</b>${x}</span>`;
-  }).join('');
-  const add = rest.length && !dvBusy
+  const chips = inList.map(a =>
+    `<span class="dv-chip">${esc(a.icon || '🤖')}<b>${esc(a.name)}</b><span class="dv-x" title="移出名单" onclick="dvRemove('${escAttr(a.id)}')">×</span></span>`
+  ).join('');
+  const add = rest.length
     ? `<select class="dv-add" onchange="dvAdd(this.value)"><option value="">+ 添加成员</option>${rest.map(a => `<option value="${escAttr(a.id)}">${esc(a.icon || '🤖')} ${esc(a.name)}</option>`).join('')}</select>`
     : '';
   box.innerHTML = `<span class="dv-label">参与名单（${inList.length}）：</span>${chips}${add}`;
+  box.classList.toggle('show', chatMode === 'divide');
 }
 
-function dvRemove(id) { if (dvBusy) return; dvList = dvList.filter(x => x !== id); renderDvRoster(); }
-function dvAdd(id) { if (!dvBusy && id && !dvList.includes(id)) { dvList.push(id); renderDvRoster(); } }
-
-// 编排归属会话下拉（侧栏在编排模式已收起，归属选择进任务台；历史在群聊模式回看）
-function renderDvSessSel() {
-  const sel = document.getElementById('dvSessSel');
-  if (!sel) return;
-  const groupTasks = tasks.filter(t => t.runner !== 'solo');
-  const opts = [`<option value="">主会话（默认）</option>`]
-    .concat(groupTasks.map(t => `<option value="${escAttr(t.id)}"${t.id === curTaskId ? ' selected' : ''}>${esc((t.title || '未命名').slice(0, 18))}</option>`));
-  sel.innerHTML = opts.join('');
-  if (!groupTasks.find(t => t.id === curTaskId)) sel.value = '';
-}
-
-const DV_STATUS = { idle: '待命', working: '工作中', delivered: '已交付', error: '出错' };
-const DV_SEG_LABEL = { divide: '初始任务', respond: '响应 @ 请求', wakeup: '唤醒续作', final: '收尾交付' };
-
-// 按名单建卡片（开一次编排重建一次；名单 chips 同步状态样式）
-function dvInitBoard() {
-  const board = document.getElementById('dvBoard');
-  board.innerHTML = '';
-  dvCards.clear();
-  for (const id of dvList) {
-    const a = agents.find(x => x.id === id);
-    if (!a) continue;
-    const card = document.createElement('div');
-    card.className = 'dv-card';
-    card.innerHTML = `
-      <div class="dv-card-head">${esc(a.icon || '🤖')}<b title="${escAttr(a.name)}">${esc(a.name)}</b><span class="dv-badge idle">待命</span></div>
-      <div class="dv-card-out"></div>
-      <div class="dv-card-saved"></div>`;
-    board.appendChild(card);
-    dvCards.set(id, { root: card, outEl: card.querySelector('.dv-card-out'), badge: card.querySelector('.dv-badge'), savedEl: card.querySelector('.dv-card-saved'), segEl: null, segBody: null, status: 'idle' });
-  }
-  document.getElementById('dvTimeline').innerHTML = '';
-  dvTlCount = 0;
-  updateDvTlCount();
-}
-
-function dvSetStatus(agentId, status) {
-  const c = dvCards.get(agentId);
-  if (!c) return;
-  c.status = status;
-  c.root.className = 'dv-card ' + status;
-  c.badge.className = 'dv-badge ' + status;
-  c.badge.textContent = DV_STATUS[status] || status;
-  const chip = document.getElementById('dvchip-' + agentId);
-  if (chip) chip.classList.toggle('working', status === 'working');
-}
-
-// 成员开始新一轮工作：状态置工作中，输出区开新段落（含段落标签）
-function dvStartSeg(agentId, phase) {
-  const c = dvCards.get(agentId);
-  if (!c) return;
-  dvSetStatus(agentId, 'working');
-  const seg = document.createElement('div');
-  seg.className = 'dv-seg';
-  const label = DV_SEG_LABEL[phase] || '';
-  if (label) {
-    const lb = document.createElement('span');
-    lb.className = 'dv-seg-label';
-    lb.textContent = '— ' + label + ' —';
-    seg.appendChild(lb);
-  }
-  const body = document.createElement('span');
-  seg.appendChild(body);
-  c.outEl.appendChild(seg);
-  c.segEl = seg;
-  c.segBody = body;
-  c.outEl.scrollTop = c.outEl.scrollHeight;
-}
-
-function dvAppendText(agentId, chunk) {
-  const c = dvCards.get(agentId);
-  if (!c) return;
-  if (!c.segEl) dvStartSeg(agentId, '');
-  c.segBody.appendChild(document.createTextNode(chunk));
-  c.outEl.scrollTop = c.outEl.scrollHeight; // 跟底
-}
-
-function dvMarkSaved(agentId, path) {
-  const c = dvCards.get(agentId);
-  if (!c) return;
-  dvSetStatus(agentId, 'delivered');
-  c.savedEl.innerHTML = `📄 产出：${esc(path)}`;
-  c.savedEl.classList.add('show');
-}
-
-function dvTl(text, cls) {
-  const box = document.getElementById('dvTimeline');
-  const item = document.createElement('div');
-  item.className = 'tl-item' + (cls ? ' ' + cls : '');
-  item.textContent = text;
-  box.appendChild(item);
-  box.scrollTop = box.scrollHeight;
-  dvTlCount++;
-  updateDvTlCount();
-}
-function updateDvTlCount() {
-  const el = document.getElementById('dvTlCount');
-  if (el) el.textContent = dvTlCount ? ` · ${dvTlCount}` : '';
-}
-
-// 编排 SSE 事件分流：成员维度进卡片，全局调度进时间线
-function dvOnEvent(e) {
-  if (e.type === 'stage') {
-    dvStartSeg(e.agentId, e.phase);
-  } else if (e.type === 'text') {
-    dvAppendText(e.agentId, e.content);
-  } else if (e.type === 'saved') {
-    dvMarkSaved(e.agentId, e.path);
-  } else if (e.type === 'notice') {
-    dvTl(e.content);
-  } else if (e.type === 'error') {
-    if (e.agentId && dvCards.has(e.agentId)) { dvAppendText(e.agentId, '\n[执行出错] ' + e.content + '\n'); dvSetStatus(e.agentId, 'error'); }
-    dvTl('执行出错: ' + e.content, 'tl-err');
-  }
-}
-
-async function dvRun() {
-  const ta = document.getElementById('dvTaskInput');
-  const text = ta.value.trim();
-  if (!text || dvBusy) return;
-  if (!dvList.length) { toast('请先在名单中添加成员'); return; }
-  if (!agents.length) { toast('没有可用的 Agent，请先配置'); return; }
-  dvBusy = true;
-  const runBtn = document.getElementById('dvRunBtn'), stopBtn = document.getElementById('dvStopBtn');
-  runBtn.disabled = true;
-  stopBtn.style.display = '';
-  renderDvRoster(); // 编排中锁定名单编辑
-  dvInitBoard();
-  dvTl(`编排开始：${dvList.length} 名成员 · 任务指令已下达`, 'tl-run');
-  try {
-    ta.value = '';
-    await streamSSE('/api/chat', { message: text, taskId: curTaskId, mode: 'divide', participants: dvList }, (e) => dvOnEvent(e));
-    dvTl('编排结束', 'tl-run');
-  } catch (err) {
-    dvTl('处理异常：' + (err && err.message || err), 'tl-err');
-  } finally {
-    // 收口：收尾成功（仍 working）视为已交付；未上场的保持待命
-    for (const id of dvCards.keys()) {
-      const c = dvCards.get(id);
-      if (c.status === 'working') dvSetStatus(id, 'delivered');
-    }
-    dvBusy = false;
-    runBtn.disabled = false;
-    stopBtn.style.display = 'none';
-    renderDvRoster();
-    updateModeBadges();
-    loadTasks(); // 会话列表/角标刷新（编排消息已归档到会话）
-  }
-}
-
-async function dvStop() {
-  if (!dvBusy) return;
-  try { await api('/api/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'chat' }) }); } catch { /* ignore */ }
-  dvTl('已请求停止，等待成员收口…', 'tl-stop');
-}
+function dvRemove(id) { dvList = dvList.filter(x => x !== id); renderDvRoster(); }
+function dvAdd(id) { if (id && !dvList.includes(id)) { dvList.push(id); renderDvRoster(); } }
 
 async function stopRun(scope) {
   stopAsked = true;
@@ -2695,7 +2475,9 @@ async function send() {
     pushUser(text);
     typing = addSys('智能体处理中…');
 
-    await streamSSE('/api/chat', { message: text, taskId: curTaskId, mode: roundtableOn ? 'roundtable' : '' }, (e) => {
+    const isDivide = chatMode === 'divide';
+    if (isDivide) { dvRunning = true; updateModeBadges(); }
+    await streamSSE('/api/chat', { message: text, taskId: curTaskId, mode: roundtableOn ? 'roundtable' : (isDivide ? 'divide' : ''), participants: isDivide ? dvList : [] }, (e) => {
       if (typing) { removeMsg(typing); typing = null; }
       handleStreamEvent(e);
     });
@@ -2705,7 +2487,9 @@ async function send() {
     if (typing) removeMsg(typing);
     chatBusy = false;
     stopAsked = false;
+    dvRunning = false;
     setSendBtn();
+    updateModeBadges();
   }
 }
 
@@ -4215,13 +3999,6 @@ function kernelBanner() {
     return `<div class="help-kernel missing">❌ <b>未检测到可用内核</b>，任务将无法真实执行。本机检测：${avail}。任选其一安装后重启本程序：<br><code>${lines.join('<br>')}</code></div>`;
   }
   return `<div class="help-kernel ok">✅ 运行内核：<b>${esc(runnerState.label)}</b> 真实执行${runnerState.cmd ? `（${esc(runnerState.cmd)}）` : ''}，智能体具备读写文件、执行命令、联网检索等真实能力。本机可用：${esc(avail || '仅当前内核')}，可在「⚙ 智能体配置」中切换</div>`;
-}
-
-function openCards() {
-  // 多任务编排（卡牌）控制台：独立页面，新标签打开以免丢失当前聊天上下文
-  markCardsSeen();
-  updateModeBadges();
-  window.open('/cards', '_blank');
 }
 
 // 版本徽标与更新提示条（health 下发；无新版静默）

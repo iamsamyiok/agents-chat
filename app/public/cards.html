@@ -420,6 +420,12 @@ const post = (url, body) => api(url, {method:'POST', headers:{'Content-Type':'ap
 function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML.replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 
+// 内嵌主界面标签页（/cards?embed=1）时隐藏「返回群聊」按钮——已在主界面内，返回无意义
+if (new URLSearchParams(location.search).has('embed')) {
+  const bl = document.querySelector('.backlink');
+  if (bl) bl.style.display = 'none';
+}
+
 let CARDS = [];
 let OPEN_ID = null;
 let FOLLOWUP_IDS = [];   // 追加聊天进行中的卡 id
