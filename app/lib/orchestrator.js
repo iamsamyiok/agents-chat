@@ -1236,7 +1236,7 @@ ${history ? `\n【近期聊天背景】\n${String(history).slice(0, 2000)}` : ''
 3. 只输出 JSON 数组，禁止任何其他文字：[{"id":"成员id","task":"任务描述"}]
 名单内每个成员必须且只能出现一次。`;
   const plannerMod = require('./planner');
-  const { content, error } = plannerMod.runOnce(prompt, dividePlanTimeout(), 'divide-plan');
+  const { content, error } = await plannerMod.runOnce(prompt, dividePlanTimeout(), 'divide-plan');
   if (error && !content) throw new Error(error);
   if (!content) throw new Error('分工调用无输出');
   const { extractJSONArray } = require('./teamgen');

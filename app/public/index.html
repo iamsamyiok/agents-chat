@@ -26,6 +26,16 @@
   /* 键盘导航焦点环：统一品牌绿描边 */
   button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid rgba(7,193,96,.55); outline-offset: 1px; }
   #app { display: flex; height: 100vh; max-width: 1240px; margin: 0 auto; background: #fff; box-shadow: 0 0 24px rgba(0,0,0,.08); }
+  #topTabs { height: 46px; flex-shrink: 0; background: #fff; border-bottom: 1px solid #e7e7e7; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0 16px; z-index: 60; position: relative; }
+  #topTabs button { border: 1px solid #ddd; background: #fff; color: #555; border-radius: 8px; padding: 6px 18px; font-size: 13.5px; cursor: pointer; transition: all .15s; position: relative; }
+  #topTabs button:hover { background: #f7f9f7; border-color: #07c160; color: #1a7a42; }
+  #topTabs button.active { background: #07c160; color: #fff; border-color: #07c160; font-weight: 600; }
+  #topTabs button .tab-prog { font-size: 10.5px; color: rgba(120,120,120,.8); margin-left: 4px; font-weight: 400; }
+  #topTabs button.active .tab-prog { color: rgba(255,255,255,.85); }
+  #topTabs button .tab-dot { display: none; position: absolute; top: -5px; right: 6px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: #fa5151; color: #fff; font-size: 10px; line-height: 15px; text-align: center; font-weight: 600; }
+  #topTabs button .tab-dot.show { display: block; }
+  #topTabs button .tab-dot::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #07c160; margin-right: 2px; vertical-align: 1px; }
+  #appBody { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 
   /* ---------- 左侧：会话列表（微信风格：主会话 + 任务会话） ---------- */
   #sidebar { width: 290px; flex-shrink: 0; background: #fff; border-right: 1px solid #e7e7e7; display: flex; flex-direction: column; }
@@ -356,29 +366,20 @@
     .side-actions { gap: 6px; }
   }
 
-  /* ---------- 侧栏顶部：单聊/群聊开关 + 任务操作按钮 ---------- */
-  .side-header { padding: 12px 12px 10px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid #f0f0f0; }
-  .mode-switch { display: inline-flex; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
-  .mode-switch button { border: none; background: #fff; font-size: 12.5px; padding: 5px 0; min-width: 0; cursor: pointer; color: #666; flex: 1 1 0; white-space: nowrap; position: relative; }
+   /* ---------- 侧栏顶部：单聊/群聊开关 + 任务操作按钮 ---------- */
+   .side-header { padding: 12px 12px 10px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid #f0f0f0; }
 
-  /* ---------- 侧栏中部：会话区（上，约5条）+ 任务区（下）各占一半，总高固定 ---------- */
-  .side-mid { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-  #sessArea { flex: 0 0 50%; min-height: 0; max-height: 348px; overflow-y: auto; border-bottom: 1px solid #f0f0f0; }
-  .task-area { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-  #taskList { flex: 1; min-height: 0; overflow-y: auto; }
-  .mode-switch button + button { border-left: 1px solid #ddd; }
-  .mode-switch button.active { background: #07c160; color: #fff; font-weight: 600; }
-  /* 三模式标签角标：完成进度（✓d/t）+ 未读绿点红数字 */
-  .mode-switch .tab-prog { font-size: 10.5px; color: #999; margin-left: 3px; }
-  .mode-switch button.active .tab-prog { color: rgba(255,255,255,.85); }
-  .mode-switch .tab-dot { display: none; position: absolute; top: -5px; right: 4px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: #fa5151; color: #fff; font-size: 10px; line-height: 15px; text-align: center; font-weight: 600; }
-  .mode-switch .tab-dot.show { display: block; }
-  .mode-switch .tab-dot::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #07c160; margin-right: 2px; vertical-align: 1px; }
+   /* ---------- 侧栏中部：会话区（上，约5条）+ 任务区（下）各占一半，总高固定 ---------- */
+   .side-mid { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+   #sessArea { flex: 0 0 50%; min-height: 0; max-height: 348px; overflow-y: auto; border-bottom: 1px solid #f0f0f0; }
+   .task-area { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+   #taskList { flex: 1; min-height: 0; overflow-y: auto; }
    .side-header .side-actions { display: flex; gap: 6px; width: 100%; }
    .side-header .side-actions .mini-btn { flex: 1; padding: 4px 0; text-align: center; }
    .ttab .badge { margin-left: 4px; vertical-align: 1px; }
 
    /* ---------- 多任务编排模式：侧栏只留四标签，控制台占满 ---------- */
+   body.mode-cards #appBody { flex-direction: row-reverse; }
    body.mode-cards #sidebar { width: auto; }
    body.mode-cards .side-header { border-bottom: none; padding: 14px 12px; }
    body.mode-cards #sidebar .side-actions,
@@ -466,14 +467,15 @@
 </head>
 <body>
 <div id="app">
+  <div id="topTabs">
+    <button id="modeSoloBtn" onclick="setChatMode('solo')">👤 单聊<span class="tab-prog" id="soloProg"></span><span class="tab-dot" id="soloDot"></span></button>
+    <button id="modeGroupBtn" class="active" onclick="setChatMode('group')">👥 群聊<span class="tab-prog" id="groupProg"></span><span class="tab-dot" id="groupDot"></span></button>
+    <button id="modeDivideBtn" onclick="setChatMode('divide')">🤝 分工<span class="tab-prog" id="divideProg"></span><span class="tab-dot" id="divideDot"></span></button>
+    <button id="modeCardsBtn" onclick="setChatMode('cards')">🗂️ 多任务编排<span class="tab-prog" id="cardsProg"></span><span class="tab-dot" id="cardsDot"></span></button>
+  </div>
+  <div id="appBody">
   <aside id="sidebar">
     <div class="side-header">
-      <div class="mode-switch" id="modeSwitch">
-        <button id="modeSoloBtn" onclick="setChatMode('solo')">👤 单聊<span class="tab-prog" id="soloProg"></span><span class="tab-dot" id="soloDot"></span></button>
-        <button id="modeGroupBtn" class="active" onclick="setChatMode('group')">👥 群聊<span class="tab-prog" id="groupProg"></span><span class="tab-dot" id="groupDot"></span></button>
-        <button id="modeDivideBtn" onclick="setChatMode('divide')">🤝 分工<span class="tab-prog" id="divideProg"></span><span class="tab-dot" id="divideDot"></span></button>
-        <button id="modeCardsBtn" onclick="setChatMode('cards')">🗂️ 多任务编排<span class="tab-prog" id="cardsProg"></span><span class="tab-dot" id="cardsDot"></span></button>
-      </div>
       <div class="side-actions">
         <button class="mini-btn" onclick="openImport()">导入任务</button>
         <button class="mini-btn gray" onclick="openBatchMgr()" title="批量管理全部顺序任务与定时任务（删除/执行）">批量管理</button>
@@ -552,6 +554,7 @@
       </div>
     </div>
   </main>
+  </div>
 </div>
 
 <!-- 批量管理任务弹窗 -->
@@ -836,7 +839,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.38.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.38.1'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
