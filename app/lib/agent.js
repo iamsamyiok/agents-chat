@@ -128,12 +128,15 @@ function missingHint(runner) {
 }
 
 // ---------- 各内核：命令行参数构造 ----------
-function buildKernelArgs(kernelId, agent) {
+// sessionId：opencode 会话续聊（-s ses_xxx）；群聊多段工作复用同一会话保持工作记忆
+const OC_SESSION_RE = /^[A-Za-z0-9_-]{1,128}$/; // 与 oc.js 保持一致（会话 ID 安全字符）
+function buildKernelArgs(kernelId, agent, sessionId) {
   const model = agent.model || process.env.AGENTS_CHAT_MODEL || '';
 
   if (kernelId === 'opencode') {
     const args = ['run', '--format', 'json'];
     if (model && MODEL_RE.test(model)) args.push('-m', model);
+    if (sessionId && OC_SESSION_RE.test(sessionId)) args.push('-s', sessionId);
     // 非交互模式下 opencode 对权限请求默认自动拒绝，会导致无法真实干活；
     // 因此默认加 --auto，.env 可用 AGENTS_CHAT_AUTO_APPROVE=0 关闭
     if (process.env.AGENTS_CHAT_AUTO_APPROVE !== '0') args.push('--auto');
@@ -193,7 +196,7 @@ function describeTool(part) {
 
 // ---------- 各内核：单行事件解析（统一映射为 onChunk/errEvents） ----------
 function parseKernelEvent(kernelId, ev, onChunk, errEvents) {
-  // ---- OpenCode：text / tool_use / error ----
+  // ---- OpenCode：text / tool_use / error / session ----
   if (kernelId === 'opencode') {
     if (ev.type === 'text' && ev.part && typeof ev.part.text === 'string') {
       if (ev.part.text.trim()) onChunk({ content: ev.part.text, done: false });
@@ -210,6 +213,12 @@ function parseKernelEvent(kernelId, ev, onChunk, errEvents) {
       else if (e && e.name) msg = String(e.name);
       else msg = JSON.stringify(e).slice(0, 500);
       if (msg) errEvents.push(msg);
+      return;
+    }
+    // 会话 ID 捕获：非内容事件（step_start 等）携带 sessionID 即回传（-s 续聊锚点）。
+    // 注意必须放在 text/tool_use 之后——text 事件顶层同样带 sessionID，先命中会吞掉正文
+    if (ev.sessionID && OC_SESSION_RE.test(String(ev.sessionID))) {
+      onChunk({ session: String(ev.sessionID), done: false });
     }
     return; // step_start / step_finish / reasoning 等事件对聊天界面是噪音，忽略
   }
@@ -317,7 +326,7 @@ function stopAllChildren() {
 }
 
 // 运行一次 agent，流式回调 onChunk({content, done, error})；scope 用于停止定位
-function runAgent(agent, prompt, onChunk, scope) {
+function runAgent(agent, prompt, onChunk, scope, sessionId) {
   const runner = resolveRunner();
 
   if (runner.kind === 'missing') {
@@ -334,7 +343,7 @@ function runAgent(agent, prompt, onChunk, scope) {
     return spawnMock([MOCK_SCRIPT, prompt], agent, env, onChunk, scope);
   }
 
-  const args = buildKernelArgs(runner.kind, agent);
+  const args = buildKernelArgs(runner.kind, agent, sessionId);
   if (!args) {
     onChunk({ content: '', done: true, error: `内核 ${runner.kind} 暂不支持` });
     return null;
@@ -489,4 +498,4 @@ function spawnMock(args, agent, env, onChunk, scope) {
   return child;
 }
 
-module.exports = { runAgent, resolveRunner, detectKernels, resetDetectCache, KERNEL_DEFS, missingHint, describeTool, stopScope, stopAllChildren, resolveCwd, registerChild };
+module.exports = { runAgent, resolveRunner, detectKernels, resetDetectCache, KERNEL_DEFS, missingHint, describeTool, stopScope, stopAllChildren, resolveCwd, registerChild, buildKernelArgs };

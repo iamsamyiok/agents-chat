@@ -794,6 +794,43 @@ function deleteOcSession(id) {
   try { fs.unlinkSync(msgShardPath(id)); } catch { /* 分片不存在 */ }
 }
 
+// ---------- 分工模式 opencode 会话（成员工作记忆） ----------
+// 同一聊天会话（taskId，主会话为 'main'）内每个成员复用同一 opencode 会话：
+// 多段工作（初始/响应/唤醒）与跨消息轮次都续用，成员保持完整工作记忆
+const DIVIDE_SESSIONS_PATH = path.join(DATA_DIR, 'divide-sessions.json');
+
+function getDivideSessions() {
+  const d = readJson(DIVIDE_SESSIONS_PATH, null);
+  const map = d && typeof d.sessions === 'object' && !Array.isArray(d.sessions) ? d.sessions : {};
+  return map;
+}
+
+// taskKey：taskId 或 'main'；返回 { agentId: ocSessionId }（损坏/缺失返回空对象）
+function getDivideSessionMap(taskKey) {
+  const all = getDivideSessions();
+  const m = all[taskKey];
+  return m && typeof m === 'object' && !Array.isArray(m) ? m : {};
+}
+
+// 增量合并写入（只更新出现的键；sessionId 为空删除该键），原子落盘
+function saveDivideSessions(taskKey, agentSessions) {
+  const all = getDivideSessions();
+  const cur = all[taskKey] && typeof all[taskKey] === 'object' && !Array.isArray(all[taskKey]) ? all[taskKey] : {};
+  for (const [agentId, ses] of Object.entries(agentSessions || {})) {
+    if (ses) cur[agentId] = String(ses); else delete cur[agentId];
+  }
+  all[taskKey] = cur;
+  writeJson(DIVIDE_SESSIONS_PATH, { sessions: all });
+}
+
+// 清空某个聊天会话的分工会话记录（会话删除时联动）
+function clearDivideSessions(taskKey) {
+  const all = getDivideSessions();
+  if (!(taskKey in all)) return;
+  delete all[taskKey];
+  writeJson(DIVIDE_SESSIONS_PATH, { sessions: all });
+}
+
 // ---------- 管家长期记忆（跨会话偏好与教训，读写由 memory.js 负责） ----------
 function getMemoryData() {
   const d = readJson(MEMORY_PATH, null);
@@ -923,6 +960,9 @@ module.exports = {
   upsertOcSession,
   getOcSession,
   deleteOcSession,
+  getDivideSessionMap,
+  saveDivideSessions,
+  clearDivideSessions,
   pruneOldData,
   getCorruptedFiles: () => safejson.corruptedFiles()
 };

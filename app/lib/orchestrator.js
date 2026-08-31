@@ -156,12 +156,14 @@ function saveOutput(sessionDir, agentName, phase, text) {
 // ---------- 基础：运行单个 agent 一轮，流式回调 ----------
 // 错误绝不静默：出错时把错误文本作为消息流入聊天流，用户必须能看到
 // 正式产出落盘后通过 saved 事件告知前端完整文件路径
-function runAgentOnce(agent, prompt, emit, phase, role, taskId, sessionDir, scope) {
+function runAgentOnce(agent, prompt, emit, phase, role, taskId, sessionDir, scope, sessionId) {
   return new Promise((resolve) => {
     let output = '';
     let error = undefined;
+    let ocSession = sessionId || '';
     emit({ type: 'stage', phase, role, agentId: agent.id, agentName: agent.name, taskId: taskId || '' });
     runAgent(agent, prompt, (chunk) => {
+      if (chunk.session) { ocSession = chunk.session; return; } // opencode 会话 ID 回传（续聊锚点）
       if (chunk.content) {
         output += chunk.content;
         emit({ type: 'text', content: chunk.content, phase, role, agentId: agent.id, agentName: agent.name, taskId: taskId || '' });
@@ -173,9 +175,9 @@ function runAgentOnce(agent, prompt, emit, phase, role, taskId, sessionDir, scop
         }
         const outputPath = error ? '' : saveOutput(sessionDir, agent.name, phase, output);
         if (outputPath) emit({ type: 'saved', path: outputPath, agentId: agent.id, agentName: agent.name, phase, taskId: taskId || '' });
-        resolve({ output, error, outputPath });
+        resolve({ output, error, outputPath, sessionId: ocSession });
       }
-    }, scope);
+    }, scope, sessionId);
   });
 }
 
@@ -327,14 +329,21 @@ function parseHandoff(output) {
 const HANDOFF_DELEGATE_ASK = `\n\n【中途委派】若你判断这个任务更适合名单中的另一位智能体完成（职责错配、你缺乏相应能力或信息），且你尚未开展实质工作，可以只输出一行 JSON 放弃接手：{"handoff":"目标智能体名称","reason":"简要原因"}；管家会把任务连同你的说明转交给对方。能胜任时严禁使用。`;
 
 // 带防循环上限的委派执行：返回最终执行的 {agent, res, delegated}；链上限 2 次（A→B→C 封顶）
-async function runWithHandoff(agent, prompt, roster, opts, emit, phase, role, taskId, sessionDir, scope, isStopped) {
+// ocSessions：Map(agentId → ses_xxx)，同一成员多段工作（初始/响应/唤醒/委派接手）复用同一 opencode
+// 会话，保持完整工作记忆；handoff 转交后接手者用自己的会话继续
+async function runWithHandoff(agent, prompt, roster, opts, emit, phase, role, taskId, sessionDir, scope, isStopped, ocSessions) {
   let current = agent;
   let p = prompt + HANDOFF_DELEGATE_ASK;
   let chain = 0;
   let res;
   const trail = [];
+  const sessions = ocSessions instanceof Map ? ocSessions : null;
   while (true) {
-    res = await runAgentOnce(current, p, emit, phase, role, taskId, sessionDir, scope);
+    const ses = sessions ? (sessions.get(current.id) || '') : '';
+    // 续聊时提示已保留工作记忆，避免重做已完成的部分
+    const finalPrompt = ses ? `（你的工作记忆已保留：此前本会话中你已完成的工作无需重做，以下任务说明供对照，直接继续。）\n\n${p}` : p;
+    res = await runAgentOnce(current, finalPrompt, emit, phase, role, taskId, sessionDir, scope, ses);
+    if (sessions && res.sessionId) sessions.set(current.id, res.sessionId);
     const ho = chain < 2 && !isStopped() ? parseHandoff(res.output) : null;
     if (!ho) break;
     const target = roster.find(a => (a.name === ho.to || a.id === ho.to) && a.id !== current.id);
@@ -392,7 +401,11 @@ function appendWorkContext(prompt, results, history) {
 
 // ---------- 流转事件记录（供流转视图绘制，失败静默不影响主流程） ----------
 let storeFlow = null;
-try { storeFlow = require('./store'); } catch { storeFlow = null; }
+let storeRef = null;
+try {
+  storeFlow = require('./store');
+  storeRef = storeFlow;
+} catch { storeFlow = null; }
 function logFlow(ev) {
   try { if (storeFlow) storeFlow.addFlowEvent(ev); } catch { /* 忽略 */ }
 }
@@ -1245,14 +1258,15 @@ ${history ? `\n【近期聊天背景】\n${String(history).slice(0, 2000)}` : ''
 
 // ---------- 分工各轮 prompt 组装（内核 --no-session 单轮执行，每段工作必须自包含背景） ----------
 
-// 初始轮：任务 + 协作协议（告知可用 @ 请求同事支持，否则传导无从发生）
+// 初始轮：任务 + 协作协议（可请求输入也可指派任务，由成员按情况自主调度协作）
 function divideWorkCtx(task) {
   return `${task}
 
 【协作协议】
-- 你与名单内其他成员并行工作，各自负责分工表中的任务
-- 执行中若确需某位同事提供输入（数据/结论/评审），在产出末尾另起一行写：@同事名：需要对方提供什么。系统会请其响应并把结果带回给你，你将在收到后继续完成工作
-- 请求要具体明确（对方无需猜测）；除必要协作外请独立完成并给出结论`;
+- 你与名单内其他成员并行工作，各自负责分工表任务
+- 执行中可向任何一位同事发起协作，在产出末尾另起一行写：@同事名：协作请求。系统会转达给对方，其回应会带回给你，你将在收到后继续完成工作
+- 协作请求分两类：①请求输入——请对方提供数据/结论/评审；②指派任务——请对方完成某项具体工作并交付结果（写清任务内容、要求与交付形式）
+- 由你根据工作需要自主决定找谁、协作什么；请求要具体明确（对方无需猜测）。除必要协作外请独立完成并给出结论`;
 }
 
 // 唤醒轮：初始任务 + 上轮产出 + 同事反馈（反馈到齐或因上限无反馈后的继续）
@@ -1262,17 +1276,20 @@ function divideWakeupCtx(task, parentOutput, collected, forced) {
   if (forced) {
     return base + `【协作状态】\n你此前 @ 的同事因参与上限无法再响应。\n\n请基于已有信息直接给出最终回答，不要再 @ 同事。`;
   }
-  return base + `【同事的反馈】\n${collected.map(c => `【${c.name}】\n${c.output}`).join('\n\n')}\n\n请基于以上反馈继续完成你的任务并给出结论；若确需其他同事支持，可在产出末尾另起一行 @同事名 提出请求。`;
+  return base + `【同事的反馈】\n${collected.map(c => `【${c.name}】\n${c.output}`).join('\n\n')}\n\n请基于以上反馈继续完成你的任务并给出结论；若确需其他同事支持（要数据或指派新任务），可在产出末尾另起一行 @同事名 提出请求。`;
 }
 
-// 响应轮：同事请求汇总 + 自己最近产出（供引用），要求逐条回应
+// 响应轮：同事协作请求汇总 + 自己最近产出（供引用）；请求输入直接给、指派任务完整执行
 function divideResponseCtx(requests, ownLastOutput) {
   const reqs = requests.map(r => `【${r.name} 的请求背景与产出】\n${String(r.text || '').slice(0, 2000)}`).join('\n\n');
-  return `以下同事在分工协作中请求你支持：
+  return `以下同事在分工协作中向你发起协作请求：
 
 ${reqs}
 ${ownLastOutput ? `\n【你最近的工作产出（可直接引用其中内容）】\n${String(ownLastOutput).slice(0, 2000)}\n` : ''}
-请针对上述请求逐条给出回应：直接提供对方所需的数据、结论或建议，简明扼要；若确实无法提供，说明原因并给出替代建议。不要重复执行对方的全量任务，只回应其请求的部分。`;
+请按请求性质逐条处理：
+- 请求输入的：直接提供对方所需的数据、结论或建议
+- 指派任务的：完整执行该项工作并交付结果（可使用工具、产出文件，把成果讲清楚）
+若确实无法完成，说明原因并给出替代建议。不要重复执行对方的全量任务，只处理其请求的部分。`;
 }
 
 // 调度核心（execFn 注入便于单测）：初始任务并行 → @ 传导 → 结果回灌唤醒 → 上限止停
@@ -1443,6 +1460,11 @@ async function runDivide(participants, message, opts, emit, onMessage) {
     plan = participants.map(a => ({ agent: a, task: message }));
   }
   const isStopped = opts.isStopped || (() => false);
+  // 成员 opencode 会话（工作记忆）：同一聊天会话内跨轮次续用，成员记得自己此前所有工作
+  const taskKey = taskId || 'main';
+  let prevSessions = {};
+  try { prevSessions = storeRef.getDivideSessionMap(taskKey) || {}; } catch { prevSessions = {}; }
+  const ocSessions = new Map(Object.entries(prevSessions));
   const execFn = async (item) => {
     const sessionDir = sessionOutDir(taskId);
     const agent = Object.assign({}, item.agent, { model: '' }); // 分工模式统一默认模型
@@ -1451,7 +1473,7 @@ async function runDivide(participants, message, opts, emit, onMessage) {
       : item.context;
     const { agent: finalAgent, res } = await runWithHandoff(
       agent, prompt, participants, opts, emit, 'divide',
-      item.agent.id === 'butler' ? 'butler' : 'worker', taskId, sessionDir, opts.scope || 'chat', isStopped
+      item.agent.id === 'butler' ? 'butler' : 'worker', taskId, sessionDir, opts.scope || 'chat', isStopped, ocSessions
     );
     return {
       agent: finalAgent, output: res.output, error: res.error, outputPath: res.outputPath,
@@ -1459,6 +1481,10 @@ async function runDivide(participants, message, opts, emit, onMessage) {
     };
   };
   const r = await runDivideCore(plan, Object.assign({}, opts, { participants }), emit, onMessage, execFn);
+  // 会话落盘：即使中途停止也保留已建立的会话，下条消息继续时工作记忆仍在
+  try {
+    if (ocSessions.size) storeRef.saveDivideSessions(taskKey, Object.fromEntries(ocSessions));
+  } catch { /* 落盘失败不影响编排结果 */ }
   logFlow({
     run: runId, type: 'finish', from: '分工',
     summary: (r.ok ? '完成' : '无产出') + (r.stopped ? '（手动停止）' : ''),
