@@ -507,6 +507,72 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // ---------- 分工职工：独立角色库（与群聊智能体不通用） ----------
+  if (p === '/api/divide/staff' && req.method === 'GET') {
+    json(res, 200, { success: true, staff: store.getStaff() });
+    return;
+  }
+  if (p === '/api/divide/staff' && req.method === 'POST') {
+    const body = await readBody(req);
+    if (body.action === 'delete') {
+      store.deleteStaff(String(body.id || ''));
+      json(res, 200, { success: true, staff: store.getStaff() });
+      return;
+    }
+    const entry = store.upsertStaff(body);
+    if (!entry) { json(res, 400, { success: false, error: '职工名称不能为空' }); return; }
+    json(res, 200, { success: true, staff: store.getStaff(), entry });
+    return;
+  }
+  if (p === '/api/divide/staff/generate' && req.method === 'POST') {
+    // AI 生成职工：按需求描述生成专职角色定义（财务/销售/研发/文案等），返回候选供确认入库
+    const body = await readBody(req);
+    const need = String(body.need || '').trim().slice(0, 2000);
+    if (!need) { json(res, 400, { success: false, error: '请描述需要的职工角色' }); return; }
+    const count = Math.min(Math.max(Number(body.count) || 3, 1), 8);
+    const prompt = `你是团队组建顾问。根据用户需求，为分工协作生成 ${count} 名专职职工的角色定义。
+
+【用户需求】
+${need}
+
+【参考角色类型】财务、销售、研发、文案、调研员、程序员、架构师、产品经理、运营、法务、设计等专门职业（按需求自由组合，也可创造更细分的职业）
+
+要求：
+1. 每名职工职责单一明确，互补不重叠，组合起来能覆盖用户需求
+2. desc 写清该职工负责什么、擅长什么、产出什么（100 字内，具体可直接开工）
+3. icon 用一个贴切的 emoji
+4. 只输出 JSON 数组，禁止任何其他文字：[{"name":"职工名","icon":"emoji","role":"角色类别","desc":"职责描述"}]
+职工名用 2-6 字中文（如：财务专员、前端程序员、市场调研员）。`;
+    try {
+      if (process.env.AGENTS_CHAT_MOCK === '1') {
+        // 演示模式：返回固定示例（不落库，用户确认后入库）
+        const demo = [
+          { name: '市场调研员', icon: '🔍', role: '调研', desc: '【演示生成】检索行业与竞品信息，输出结构化调研报告供团队决策' },
+          { name: '内容文案', icon: '✍️', role: '文案', desc: '【演示生成】把调研与研发成果改写为面向目标平台的内容，风格适配渠道' },
+          { name: '项目协调员', icon: '🗂️', role: '协调', desc: '【演示生成】跟进各职工进度，汇总产出并向用户汇报' }
+        ].slice(0, count);
+        json(res, 200, { success: true, candidates: demo });
+        return;
+      }
+      const { content, error } = await planner.runOnce(prompt, 90000, `staff-gen-${Date.now()}`);
+      if (error && !content) throw new Error(error);
+      if (!content) throw new Error('生成无输出');
+      const { extractJSONArray } = require('./lib/teamgen');
+      const arr = extractJSONArray(content);
+      if (!Array.isArray(arr)) throw new Error('生成结果解析失败');
+      const candidates = arr.slice(0, count).map((x, i) => ({
+        name: String(x && x.name || `职工${i + 1}`).slice(0, 40),
+        icon: String(x && x.icon || '🧑‍💼').slice(0, 8),
+        role: String(x && x.role || '职工').slice(0, 20),
+        desc: String(x && x.desc || '').slice(0, 500)
+      })).filter(x => x.name);
+      json(res, 200, { success: true, candidates });
+    } catch (e) {
+      json(res, 500, { success: false, error: '生成失败：' + (e && e.message || e) });
+    }
+    return;
+  }
+
   if (p === '/api/sched' && req.method === 'GET') {
     // 定时任务调度总开关状态（侧栏「启动/关闭定时任务」按钮）
     json(res, 200, { success: true, enabled: store.getSchedEnabled() });
@@ -908,15 +974,18 @@ const server = http.createServer(async (req, res) => {
     // 分工模式名单先行计算：空名单需在 SSE 响应头发出前返回 400
     let divideParticipants = null;
     if (body.mode === 'divide') {
+      // 分工职工独立成库（与群聊智能体不通用）：名单传职工 id
+      const staff = store.getStaff();
       const listIds = Array.isArray(body.participants) ? body.participants.map(String) : [];
-      divideParticipants = agents.filter(a => listIds.includes(a.id));
-      // 消息中 @ 命中者自动并入本轮名单（显式意愿优先；管家降为普通成员）
-      for (const ag of mentionAgents) {
-        if (!divideParticipants.find(p => p.id === ag.id)) divideParticipants.push(ag);
+      divideParticipants = staff.filter(s => listIds.includes(s.id));
+      // 消息中 @ 命中职工自动并入本轮名单（显式意愿优先）
+      const mentionStaff = resolveMentions(message, staff);
+      for (const st of mentionStaff) {
+        if (!divideParticipants.find(p => p.id === st.id)) divideParticipants.push(st);
       }
       if (!divideParticipants.length) {
         runLocks.chat = false;
-        json(res, 400, { success: false, error: '分工模式需要至少一名参与者，请先在名单中添加成员' });
+        json(res, 400, { success: false, error: '分工模式需要至少一名参与者，请先在职工名单中添加职工' });
         return;
       }
     }

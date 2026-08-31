@@ -254,11 +254,17 @@ test('分工模式路由：空名单 400 / demo 正常路径 / 409 互斥', asyn
   });
   assert.strictEqual(empty.status, 400);
 
-  // 2) demo 正常路径：SSE 流含分工表与成员产出（mock 演示分工 + mock 执行通道）
-  const { body: ag } = await get('/api/agents');
-  assert.ok(ag.success && ag.agents.length > 0);
-  const ids = ag.agents.filter(a => a.id !== 'butler').slice(0, 3).map(a => a.id);
-  assert.ok(ids.length >= 2, '默认团队应有可用子智能体');
+  // 2) demo 正常路径：职工库默认仅调研员，先补一名保证双人分工（含串行依赖链演示）
+  const { body: st0 } = await get('/api/divide/staff');
+  assert.ok(st0.success && Array.isArray(st0.staff) && st0.staff.length >= 1, '职工库应默认含调研员');
+  const add = await fetch(BASE + '/api/divide/staff', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '演示文案', icon: '✍️', role: '文案', desc: '把调研结果整理成稿' })
+  });
+  assert.strictEqual(add.status, 200);
+  const { body: st1 } = await get('/api/divide/staff');
+  const ids = st1.staff.map(s => s.id);
+  assert.ok(ids.length >= 2, '职工库应有至少两名职工');
   const r1 = await fetch(BASE + '/api/chat', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ message: '制定季度经营计划', mode: 'divide', participants: ids })
@@ -276,6 +282,7 @@ test('分工模式路由：空名单 400 / demo 正常路径 / 409 互斥', asyn
   const text = await r1.text(); // 等待编排自然结束
   assert.ok(text.includes('分工表'));
   assert.ok(text.includes('演示分工')); // mock 演示分工任务文案
+  assert.ok(text.includes('依赖链')); // mock 第二名职工依赖第一名：串行层级调度提示
 });
 
 test('LLM 默认模型路由（demo 模式：GET 标注不支持 / POST 400）', async () => {

@@ -1213,11 +1213,13 @@ function divideMentions(text, agents) {
 // 返回 [{agent, task}]；mock 模式返回确定性演示分工；内核调用失败抛错（由调用方降级）
 async function dividePlan(participants, message, history) {
   if (process.env.AGENTS_CHAT_MOCK === '1') {
+    // 演示串行链：第 2 名成员依赖第 1 名（层级调度可见：先调研后产出）
     return participants.map((a, i) => ({
       agent: a,
       task: i < Math.min(2, participants.length)
         ? `【演示分工】围绕「${String(message).slice(0, 30)}」完成${a.name}职责范围内的部分并给出结论。`
-        : ''
+        : '',
+      deps: (i === 1 && participants.length > 1) ? [participants[0].name] : []
     }));
   }
   const roster = participants.map(a => `- ${a.name}（id: ${a.id}）：${a.desc || a.name}`).join('\n');
@@ -1234,7 +1236,9 @@ ${history ? `\n【近期聊天背景】\n${String(history).slice(0, 2000)}` : ''
 1. 只给与消息相关的成员分配具体任务；无关成员 task 留空字符串（本轮旁听，不发言不干活）
 2. 任务描述具体到该成员能直接开工，明确各自负责的部分、边界与期望产出
 3. 数组按执行先后顺序排列：产出被他人依赖的成员排在前，依赖他人产出的排在后（如：先调研 → 再实现 → 后成稿）
-4. 只输出 JSON 数组，禁止任何其他文字：[{"id":"成员id","task":"任务描述"}]
+4. 依赖标注（决定串行/并行）：某成员必须拿到另一成员的产出才能开工时，在其 deps 里列出所依赖成员的名字；互相独立、可同时开工的任务 deps 留空数组（系统将并行执行同批无依赖任务，串行链按依赖顺序逐级执行）
+5. 用户明确要求「先…再…」「按步骤」「串行」或后一步用到前一步结果时，必须用 deps 串成依赖链
+6. 只输出 JSON 数组，禁止任何其他文字：[{"id":"成员id","task":"任务描述","deps":["依赖的成员名"]}]
 名单内每个成员必须且只能出现一次。`;
   const plannerMod = require('./planner');
   const { content, error } = await plannerMod.runOnce(prompt, dividePlanTimeout(), 'divide-plan');
@@ -1245,16 +1249,43 @@ ${history ? `\n【近期聊天背景】\n${String(history).slice(0, 2000)}` : ''
   if (!Array.isArray(arr)) throw new Error('分工结果解析失败');
   const byKey = new Map();
   for (const a of participants) { byKey.set(a.id, a); byKey.set(a.name, a); }
-  const plan = participants.map(a => ({ agent: a, task: '' }));
+  const plan = participants.map(a => ({ agent: a, task: '', deps: [] }));
   const seen = new Set();
   for (const it of arr) {
     const ag = byKey.get(String(it && it.id || '').trim());
     if (ag && !seen.has(ag.id)) {
       seen.add(ag.id);
-      plan.find(p => p.agent.id === ag.id).task = String(it.task || '').slice(0, 4000);
+      const p = plan.find(x => x.agent.id === ag.id);
+      p.task = String(it.task || '').slice(0, 4000);
+      p.deps = (Array.isArray(it.deps) ? it.deps : []).map(String).slice(0, 10);
     }
   }
   return plan;
+}
+
+// 依赖分层：deps 全部落在已完成层的成员构成下一层（层内并行，层间串行）；环或未知引用视作无依赖
+function planLevels(plan) {
+  const byKey = new Map();
+  for (const p of plan) if (p.task) { byKey.set(p.agent.id, p); byKey.set(p.agent.name, p); }
+  const entries = plan.filter(p => p.task).map(p => ({ p, deps: [] }));
+  const entryOf = new Map(entries.map(e => [e.p, e]));
+  for (const e of entries) {
+    for (const d of (e.p.deps || [])) {
+      const dep = entryOf.get(byKey.get(String(d).trim()));
+      if (dep && dep !== e && !e.deps.includes(dep)) e.deps.push(dep);
+    }
+  }
+  const levels = [];
+  const done = new Set();
+  let rest = entries.slice();
+  while (rest.length) {
+    const level = rest.filter(e => e.deps.every(d => done.has(d)));
+    if (!level.length) { levels.push(rest); break; } // 依赖成环：剩余并为最后一层并行兜底
+    levels.push(level);
+    for (const e of level) done.add(e);
+    rest = rest.filter(x => !done.has(x));
+  }
+  return levels;
 }
 
 // ---------- 分工各轮 prompt 组装（内核 --no-session 单轮执行，每段工作必须自包含背景） ----------
@@ -1264,7 +1295,7 @@ function divideWorkCtx(task) {
   return `${task}
 
 【协作协议】
-- 你与名单内其他成员并行工作，各自负责分工表任务
+- 你按分工顺序工作：若上文提供了前置产出，说明同事已完成依赖步骤，请直接引用其结论继续你的部分；否则你与其他成员同批开工
 - 执行中可向任何一位同事发起协作，在产出末尾另起一行写：@同事名：协作请求。系统会转达给对方，其回应会带回给你，你将在收到后继续完成工作
 - 协作请求分两类：①请求输入——请对方提供数据/结论/评审；②指派任务——请对方完成某项具体工作并交付结果（写清任务内容、要求与交付形式）
 - 由你根据工作需要自主决定找谁、协作什么；请求要具体明确（对方无需猜测）。除必要协作外请独立完成并给出结论`;
@@ -1355,14 +1386,20 @@ async function runDivideCore(plan, opts, emit, onMessage, execFn) {
     if (!enq) emit({ type: 'notice', content: `⚠ ${agent.name} 因参与上限未能完成收尾`, taskId });
   };
   let initialCapped = false;
-  for (const p of plan) {
-    if (!p.task) continue;
-    if (total >= DIVIDE_MAX_WORK) { initialCapped = true; break; }
-    queue.push({ agent: p.agent, context: divideWorkCtx(p.task), hop: 0, wakeUp: '', final: false });
-    inflight.add(p.agent.id);
-    total++;
-  }
-  if (initialCapped) capNotice();
+  // 依赖分层调度：串行依赖链逐级执行（级内并行）；上一级产出自动注入下一级上下文
+  const levels = planLevels(plan);
+  if (levels.length > 1) emit({ type: 'notice', content: `🔗 检测到 ${levels.length} 级依赖链：按依赖顺序逐级执行，无依赖的任务同批并行`, taskId });
+  const priorOutputs = []; // 已完成级别的成员产出 [{name, output}]
+  for (let li = 0; li < levels.length; li++) {
+    const priorText = priorOutputs.length
+      ? `【前置产出（同事已完成，可直接引用其结论与文件）】\n${priorOutputs.map(o => `【${o.name} 的产出】\n${String(o.output).slice(0, 1500)}`).join('\n\n')}\n\n`
+      : '';
+    for (const e of levels[li]) {
+      if (total >= DIVIDE_MAX_WORK) { initialCapped = true; break; }
+      queue.push({ agent: e.p.agent, context: priorText + divideWorkCtx(e.p.task), hop: 0, wakeUp: '', final: false });
+      inflight.add(e.p.agent.id);
+      total++;
+    }
   while (queue.length) {
     if (isStopped()) break;
     const batch = queue.splice(0);
@@ -1433,6 +1470,14 @@ async function runDivideCore(plan, opts, emit, onMessage, execFn) {
       }
     }
   }
+    // 本级队列跑干（含 @ 传导与响应）：初始任务产出归档，供下一级引用
+    if (isStopped()) break;
+    for (const e of levels[li]) {
+      const out = lastOutput.get(e.p.agent.id);
+      if (out) priorOutputs.push({ name: e.p.agent.name, output: out });
+    }
+  }
+  if (initialCapped) capNotice();
   if (isStopped()) emit({ type: 'notice', content: '已手动停止，分工编排终止', taskId });
   for (const [id, st] of waiters) {
     const a = memberAgent(id);

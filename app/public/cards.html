@@ -243,9 +243,7 @@
 <body>
 <header>
   <a class="backlink" href="/" title="返回 Agents Chat 群聊">← 群聊</a>
-  <h1>🗂️ 多任务编排</h1>
   <span class="status-pill" id="statusPill">空闲</span>
-  <span class="kernel-chip" id="kernelChip" style="display:none"></span>
   <div class="filter-box" title="按标题或内容即时过滤看板">
     🔍 <input id="cardFilter" placeholder="搜索任务…" autocomplete="off" />
   </div>
@@ -260,13 +258,12 @@
       <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option>
     </select>
   </div>
-   <button class="btn" id="btnNew">＋ 新建任务</button>
+   <button class="btn" id="btnNew">＋ 任务</button>
    <button class="btn" id="btnPlanner" title="与 AI 聊天式编排：描述目标，AI 澄清后一键生成任务编排">🪄 AI 编排</button>
-   <button class="btn primary" id="btnRun" title="按依赖与优先级调度全部待执行任务">▶ 开始编排</button>
+   <button class="btn primary" id="btnRun" title="按依赖与优先级调度全部待执行任务">▶ 启动</button>
   <button class="btn danger" id="btnStop" disabled title="停止编排：进行中的任务复位为待执行（不影响追加聊天），未开始的任务保留">⏹ 停止</button>
   <button class="btn" id="btnClear">清空</button>
   <button class="btn" id="btnHelp" title="多任务编排使用帮助">❓ 帮助</button>
-  <span class="ver-chip" id="verChip" title="当前版本"></span>
 </header>
 
 <div class="kernel-banner" id="kernelBanner"></div>
@@ -301,7 +298,7 @@
     <div class="col"><h2><span class="dot" style="background:var(--pending)"></span>待执行 <span id="cntPending" class="badge"></span></h2><div id="colPending" class="drop-zone"></div></div>
     <div class="col"><h2><span class="dot" style="background:var(--running)"></span>执行中 <span id="cntRunning" class="badge"></span></h2><div id="colRunning" class="drop-zone"></div></div>
     <div class="col"><h2><span class="dot" style="background:var(--done)"></span>已完成 <span id="cntDone" class="badge"></span></h2><div id="colDone" class="drop-zone"></div></div>
-    <div class="col"><h2 class="col-h2"><span class="dot" style="background:var(--failed)"></span>失败 <span id="cntFailed" class="badge"></span><span style="flex:1"></span><button class="mini-act" id="btnRetryFailed" title="把全部失败任务重置为待执行并开始编排">↻ 全部重跑</button></h2><div id="colFailed" class="drop-zone"></div></div>
+    <div class="col"><h2 class="col-h2"><span class="dot" style="background:var(--failed)"></span>失败 <span id="cntFailed" class="badge"></span><span style="flex:1"></span><button class="mini-act" id="btnRetryFailed" title="把全部失败任务重置为待执行并启动">↻ 全部重跑</button></h2><div id="colFailed" class="drop-zone"></div></div>
   </div>
 </main>
 <span id="gpExpand" style="display:none;position:fixed;left:14px;bottom:80px;z-index:41" title="展开依赖图"><button class="btn" id="gpExpandBtn">▶ 依赖图</button></span>
@@ -392,7 +389,7 @@
 <!-- 使用帮助 -->
 <div class="mask" id="helpMask">
   <div class="modal" style="width:min(720px,94vw);max-height:86vh;overflow-y:auto">
-    <h3>❓ 多任务编排使用帮助</h3>
+    <h3>❓ 多任务编排使用帮助 <span id="verInHelp" style="font-size:12px;color:#999;font-weight:400"></span></h3>
     <div id="helpBody"></div>
     <div class="foot"><button class="btn primary" id="helpClose">关闭</button></div>
   </div>
@@ -470,34 +467,26 @@ function fallbackCopy(s){
 // 搜索过滤：输入即时重渲染
 $('#cardFilter').addEventListener('input', render);
 
-// 内核状态展示：正常=头部小徽标；缺失/演示模式/数据保护=醒目横幅
+// 内核状态展示：缺失/演示模式/数据保护=醒目横幅
 function renderKernelBanner(){
-  const chip=$('#kernelChip'), banner=$('#kernelBanner');
+  const banner=$('#kernelBanner');
   const k = RUNNER_INFO && RUNNER_INFO.kind;
   if (CORRUPTED.length){
-    chip.style.display='none';
     banner.className='kernel-banner show kb-corrupt';
     banner.innerHTML='⚠ <b>数据保护已触发</b>：'+CORRUPTED.map(f=>'<code>'+esc(f.split(/[\\/]/).pop())+'</code>').join('、')+' 解析失败（原文件已备份为 .corrupt-*），为防数据丢失写入已暂停。请检查数据目录后恢复备份文件。';
     return;
   }
   if (k === 'missing'){
-    chip.style.display='none';
     banner.className='kernel-banner show kb-missing';
     banner.innerHTML='❌ <b>未检测到执行内核</b>：任务无法真实执行。请安装 opencode（推荐）：终端运行 <code>npm install -g opencode-ai</code>，安装并登录后刷新本页。';
     return;
   }
   if (k === 'demo'){
-    chip.style.display='none';
     banner.className='kernel-banner show kb-demo';
     banner.innerHTML='⚠ <b>演示模式</b>（AGENTS_CHAT_MOCK=1）：输出均为模拟结果，任务执行不可用。删除 .env 中该配置并安装内核后即为真实执行。';
     return;
   }
   banner.className='kernel-banner';
-  if (RUNNER_INFO && RUNNER_INFO.label){
-    chip.style.display='inline-flex';
-    chip.textContent='⚡ '+RUNNER_INFO.label;
-    chip.title='当前执行内核：'+RUNNER_INFO.label;
-  }
 }
 
 function badge(card){
@@ -654,7 +643,7 @@ async function loadExamples(){
   await mk('示例B · 续聊任务', '接续上一个任务的结论：把统计结果整理成一份 markdown 表格。', { priority: 2, mode: 'continue', chainId: a.id, dependsOn: [a.id] });
   await mk('示例C · 并行任务', '查询今日天气概况并给出一句话总结（与示例A/B 互不依赖，可同时执行）。', { priority: 3, mode: 'parallel' });
   await loadCards();
-  toast('已载入 3 个示例任务，点击「开始编排」体验');
+  toast('已载入 3 个示例任务，点击「启动」体验');
 }
 
 // 单卡停止：执行中的任务杀进程并复位为待执行（本轮编排不再自动调度）
@@ -834,7 +823,7 @@ async function plImport(mode){
     const r=await post('/api/cards/batch', { tasks, importMode: mode });
     if (!r.success){ toast(r.error||'导入失败'); return; }
     (r.warnings||[]).forEach(w=>toast(w));
-    toast(`已导入 ${tasks.length} 个任务${mode==='replace'?'（已清空原看板）':''}，点「▶ 开始编排」执行`);
+    toast(`已导入 ${tasks.length} 个任务${mode==='replace'?'（已清空原看板）':''}，点「▶ 启动」执行`);
     plDraft=[]; $('#plPlanBox').style.display='none';
     $('#plDrawer').classList.remove('open');
     await loadCards();
@@ -865,7 +854,7 @@ $('#btnEditSave').onclick=async()=>{
   $('#maskEdit').classList.remove('show');
   await loadCards();
   // 编排状态联动提示：编排进行中=新卡自动加入调度；空闲=明确告知需手动开始
-  if(!EDIT_ID) toast($('#btnRun').disabled ? '已保存，新任务将自动加入本轮调度' : '已保存。当前编排空闲，点「▶ 开始编排」执行');
+  if(!EDIT_ID) toast($('#btnRun').disabled ? '已保存，新任务将自动加入本轮调度' : '已保存。当前编排空闲，点「▶ 启动」执行');
   else toast('已保存');
 };
 async function delCard(id){ if(!confirm('确认删除该任务？将移入垃圾桶（30 天内可还原）。'))return; await api('/api/cards/'+id,{method:'DELETE'}); await loadCards(); toast('已移入垃圾桶'); }
@@ -875,7 +864,7 @@ $('#btnClear').onclick=async()=>{ if(!confirm('清空全部任务？将移入垃
 $('#btnRun').onclick=async()=>{
   // 顺手请求系统通知权限（无侵入，拒绝也不影响）
   try{ if('Notification' in window && Notification.permission==='default') Notification.requestPermission(); }catch{ /* ignore */ }
-  await post('/api/cards/run'); await loadCards(); toast('已开始编排，完成即自动注入下一个任务');
+  await post('/api/cards/run'); await loadCards(); toast('已启动，完成即自动注入下一个任务');
 };
 $('#btnStop').onclick=async()=>{ await post('/api/cards/stop'); await loadCards(); };
 $('#btnRetryFailed').onclick=retryAllFailed;
@@ -1164,7 +1153,7 @@ function openHelp(){
     <ol>
       <li><b>手动建卡</b>：「＋ 新建任务」写标题与内容（描述越具体越好，支持 Markdown），（可选）选「依赖任务」</li>
       <li><b>🪄 AI 编排</b>：点头部「🪄 AI 编排」用自然语言描述目标（AI 会先反问澄清），点「生成编排」得到带依赖与并行的清单，聊天流里改完一键导入看板</li>
-      <li>「▶ 开始编排」：按依赖拓扑 + 优先级自动调度全部待执行卡牌</li>
+      <li>「▶ 启动」：按依赖拓扑 + 优先级自动调度全部待执行卡牌</li>
     </ol>
   </div>
   <div class="help-sec"><h4>⚙ 三种执行模式（新建任务表单）</h4>
@@ -1218,7 +1207,10 @@ $('#helpMask').addEventListener('click',e=>{ if(e.target.id==='helpMask') e.targ
 
 // ---------- 版本徽标与更新提示 ----------
 function renderUpdateInfo(data){
-  if(data.version) $('#verChip').textContent='v'+data.version;
+  if(data.version){
+    // 版本号收进帮助弹窗（头部不再常驻展示）
+    const vh=$('#verInHelp'); if(vh) vh.textContent='当前版本 v'+data.version;
+  }
   if(!data.updateAvailable) return;
   if(document.getElementById('updateBar')) return;
   const bar=document.createElement('div');

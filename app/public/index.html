@@ -236,14 +236,14 @@
   .at-tx i { font-style: normal; color: #999; font-size: 11px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
 
   /* ---------- 弹窗 ---------- */
-  #modalMask, #batchMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask, #memMask, #diffMask, #welcomeMask, #suggestMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
+  #modalMask, #batchMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask, #memMask, #diffMask, #welcomeMask, #suggestMask, #staffMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
   /* 弹窗出现动画：遮罩淡入（含毛玻璃）+ 内容上浮，全站弹窗统一节奏 */
   div[id$="Mask"] { backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
   div[id$="Mask"].show { animation: fade-in .18s ease; }
   .modal, .preview-card { animation: modal-in .24s cubic-bezier(.2,.7,.3,1); }
   @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
   @keyframes modal-in { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
-  #modalMask.show, #batchMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show, #memMask.show, #diffMask.show, #welcomeMask.show, #suggestMask.show { display: flex; }
+  #modalMask.show, #batchMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show, #memMask.show, #diffMask.show, #welcomeMask.show, #suggestMask.show, #staffMask.show { display: flex; }
   /* 团队仓库卡片 */
   .team-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
   .team-card .tc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -310,6 +310,18 @@
   .butler-ro b { color: #8a6fe8; }
   .butler-ro .lock { font-size: 11px; color: #999; background: #f0f0f0; border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
   .ag-card { border: 1px solid #ececec; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+  /* 分工职工卡片：单行紧凑（icon + 名称 + 角色 + 职责 + 操作） */
+  .staff-card { display: flex; align-items: center; gap: 10px; border: 1px solid #ececec; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; }
+  .staff-card .st-ic { font-size: 20px; flex: none; }
+  .staff-card .st-tx { flex: 1; min-width: 0; }
+  .staff-card .st-tx b { font-size: 14px; }
+  .staff-card .st-tx .st-role { display: inline-block; background: #eef4ff; color: #4a6cf7; border-radius: 4px; padding: 0 6px; font-size: 12px; margin-left: 6px; }
+  .staff-card .st-tx .st-desc { display: block; color: #888; font-size: 12px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .staff-card .st-ops { flex: none; display: flex; gap: 6px; }
+  .staff-card .st-ops button { border: 1px solid #ddd; background: #fff; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  .staff-card .st-ops button:hover { border-color: #07c160; color: #07c160; }
+  .staff-card .st-ops button.st-del:hover { border-color: #fa5151; color: #fa5151; }
+  .staff-gen-item { display: flex; align-items: center; gap: 10px; border: 1px dashed #cdd8f8; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; background: #fafbff; }
   .ag-row { display: flex; gap: 8px; margin-bottom: 8px; }
   .ag-row input { flex: 1; min-width: 0; border: 1px solid #ddd; border-radius: 6px; padding: 6px 10px; font-size: 13px; outline: none; }
   .ag-row input:focus { border-color: #07c160; }
@@ -399,6 +411,8 @@
    body.mode-cards .list-sep { display: none; }
    body.mode-divide #taskbar,
    body.mode-cards #taskbar { display: none; }
+   /* 编排模式帮助只留控制台内一个（主界面帮助按钮隐藏） */
+   body.mode-cards #helpBtn { display: none !important; }
    body.mode-cards #newSessBtn,
    body.mode-cards #histBtn,
    body.mode-cards #flowEntryBtn { display: none !important; }
@@ -550,7 +564,6 @@
       <footer class="composer" id="groupComposer">
         <div class="input-row">
           <button id="rtBtn" onclick="toggleRoundtable()" title="圆桌讨论模式：所有被 @ 的智能体（未 @ 则全体）围绕主题轮流发言、互相反驳，管家当主持人控制轮数并总结共识与分歧">💬 圆桌</button>
-          <button id="dvHelpBtn" onclick="toast('分工模式：名单内成员自动分工并行执行，可 @ 点名；输出中 @同事 可发起协作请求')" title="分工模式说明：名单内成员自动分工并行执行；可 @ 点名；执行中成员可互相发起协作请求，系统自动传导与唤醒" style="display:none">❓ 分工</button>
           <input id="input" placeholder="输入消息，@ 可点名智能体…" autocomplete="off">
           <button id="sendBtn" onclick="onSendBtn()">发送</button>
         </div>
@@ -743,6 +756,45 @@
     </div>
   </div>
 </div>
+<!-- 分工职工配置弹窗（独立角色库：与群聊智能体不通用） -->
+<div id="staffMask">
+  <div class="modal wide">
+    <h3>🧑‍💼 分工职工配置</h3>
+    <div class="tip">分工模式专属职工库（与群聊/单聊智能体相互独立）：每名职工一个专门职业（财务、销售、研发、文案、调研员、程序员、架构师…），职责单一互补。聊天页右上角「参与职工」决定每轮由谁参与分工；消息中 @ 职工可点名协作。</div>
+    <div id="staffList"></div>
+    <h3 style="margin-top:14px">➕ 新增 / 编辑职工</h3>
+    <div class="ag-row">
+      <input id="staffIcon" placeholder="图标 emoji" style="width:90px" maxlength="8">
+      <input id="staffName" placeholder="职工名（如：市场调研员）" style="flex:1" maxlength="40">
+      <input id="staffRole" placeholder="角色（如：调研）" style="width:130px" maxlength="20">
+    </div>
+    <div class="ag-row"><textarea id="staffDesc" rows="2" placeholder="职责描述：负责什么、擅长什么、产出什么（分工调度的依据）" maxlength="500"></textarea></div>
+    <div class="ag-row" style="justify-content:flex-end;gap:8px">
+      <button id="staffEditId" style="display:none"></button>
+      <button onclick="staffResetForm()">清空表单</button>
+      <button class="primary" onclick="staffSave()">保存职工</button>
+    </div>
+    <h3 style="margin-top:14px">🪄 AI 生成职工</h3>
+    <div class="tip">描述你要办的事，AI 组建顾问生成一组专职职工（生成后可逐个入库修改）。</div>
+    <div class="ag-row">
+      <textarea id="staffGenNeed" rows="2" placeholder="例如：我要做一款 App 上线：需要市场调研、开发、文案宣传、财务预算" maxlength="2000" style="flex:1"></textarea>
+    </div>
+    <div class="ag-row" style="justify-content:flex-end;gap:8px">
+      <select id="staffGenCount" style="width:110px">
+        <option value="3">生成 3 名</option>
+        <option value="4">生成 4 名</option>
+        <option value="5">生成 5 名</option>
+        <option value="6">生成 6 名</option>
+        <option value="8" selected>生成 8 名</option>
+      </select>
+      <button class="primary" id="staffGenBtn" onclick="staffGenerate()">🪄 生成职工</button>
+    </div>
+    <div id="staffGenResult"></div>
+    <div class="modal-actions">
+      <button class="primary" onclick="closeStaff()">关闭</button>
+    </div>
+  </div>
+</div>
 <!-- 团队仓库弹窗（经典智能体团队预设） -->
 <div id="teamsMask">
   <div class="modal wide">
@@ -864,7 +916,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.39.1'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.40.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -876,7 +928,8 @@ let taskBusy = false;          // 任务批量执行进行中（执行按钮变�
 let stopAsked = false;         // 本次流中已请求过停止，避免重复点击
 let curTaskId = '';            // '' = 主会话；否则为任务会话
 let roundtableOn = false;      // 圆桌讨论模式开关（输入栏 💬 按钮）
-let dvList = [];               // 分工参与名单（智能体 id 数组，进入分工模式默认全体成员）
+let dvList = [];               // 分工参与名单（职工 id 数组，进入分工模式默认全体职工）
+let dvStaff = [];              // 分工职工库（独立于群聊智能体：财务/销售/研发/文案/调研员等专职角色）
 let dvRunning = false;         // 分工执行进行中（切走时标签绿点提醒）
 let runnerState = { kind: '', label: '', cmd: '', kernels: [] }; // 内核状态（帮助弹窗/配置页展示）
 let globalCwd = '';            // 全局统一工作目录
@@ -932,6 +985,8 @@ async function toggleSysNotify() {
 function colorOf(id) { let h = 0; const s = String(id); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_COLORS[h % AV_COLORS.length]; }
 // 智能体显示图标：配置的职业图标 > 名称首字
 function agentIcon(agentId, name) {
+  const st = dvStaff.find(x => x.id === agentId); // 分工职工：优先职工库图标
+  if (st && st.icon) return st.icon;
   const a = agents.find(x => x.id === agentId);
   if (a && a.icon) return a.icon;
   if (agentId === butlerId) return '🎩';
@@ -950,12 +1005,13 @@ function curKey() { return sessKey(curTaskId); }
 
 // ---------- 初始化 ----------
 async function init() {
-  const [health, ag] = await Promise.all([api('/api/health'), api('/api/agents')]);
+  const [health, ag, st] = await Promise.all([api('/api/health'), api('/api/agents'), api('/api/divide/staff')]);
   agents = ag.agents || [];
   butlerId = ag.butlerId || 'butler';
   globalCwd = ag.globalCwd || '';
   configKernel = ag.kernel || 'auto';
   configApproval = ag.approval || 'off';
+  dvStaff = st.staff || [];
   runnerState = { kind: health.runner || '', label: health.kernelLabel || '', cmd: health.kernelCmd || '', kernels: health.kernels || [] };
   // 内核状态：正常不显示标签；演示/未检测到 属于需要用户知情的状态，保留醒目标注
   const tag = document.getElementById('runnerTag');
@@ -1087,14 +1143,19 @@ function setChatMode(mode) {
     renderDvRoster();
     rosterBar.classList.add('show');
     rtBtn.style.display = 'none'; // 分工模式无圆桌
-    const dh = document.getElementById('dvHelpBtn');
-    if (dh) dh.style.display = ''; // 模式说明收进 ❓ 悬浮提示，不占输入区
-    document.getElementById('input').placeholder = '描述任务，名单内成员自动分工执行…';
+    document.getElementById('input').placeholder = '描述任务，名单内职工自动分工执行…';
+    // 分工职工独立配置（与群聊智能体不通用）：配置按钮切换为职工配置
+    const cfgBtn = document.getElementById('agentsCfgBtn');
+    cfgBtn.textContent = '🧑‍💼 职工配置';
+    cfgBtn.title = '分工职工配置：独立于群聊智能体的专职角色（增删改、AI 生成）';
+    cfgBtn.onclick = openStaff;
   } else {
     rosterBar.classList.remove('show');
     rtBtn.style.display = '';
-    const dh = document.getElementById('dvHelpBtn');
-    if (dh) dh.style.display = 'none';
+    const cfgBtn = document.getElementById('agentsCfgBtn');
+    cfgBtn.textContent = '⚙ 智能体配置';
+    cfgBtn.title = '';
+    cfgBtn.onclick = openAgents;
     if (chatMode === 'group') document.getElementById('input').placeholder = '输入消息，@ 可点名智能体…';
   }
   if (chatMode === 'cards') {
@@ -2499,17 +2560,22 @@ function toggleRoundtableOff() {
 function renderDvRoster() {
   const box = document.getElementById('dvRosterBar');
   if (!box) return;
-  dvList = dvList.filter(id => agents.some(a => a.id === id)); // 清理已删除智能体的幽灵 id（chips 数与实际发送保持一致）
-  if (!dvList.length) dvList = agents.map(a => a.id); // 默认全体成员（含管家，作为普通成员）
-  const inList = dvList.map(id => agents.find(a => a.id === id)).filter(Boolean);
-  const rest = agents.filter(a => !dvList.includes(a.id));
-  const chips = inList.map(a =>
-    `<span class="dv-chip">${esc(a.icon || '🤖')}<b>${esc(a.name)}</b><span class="dv-x" title="移出名单" onclick="dvRemove('${escAttr(a.id)}')">×</span></span>`
+  dvList = dvList.filter(id => dvStaff.some(s => s.id === id)); // 清理已删除职工的幽灵 id（chips 数与实际发送保持一致）
+  if (!dvList.length) {
+    // 默认仅调研员参与（用户自行增选；无调研员则取第一名职工）
+    const def = dvStaff.find(s => s.id === 'researcher') || dvStaff[0];
+    dvList = def ? [def.id] : [];
+  }
+  const inList = dvList.map(id => dvStaff.find(s => s.id === id)).filter(Boolean);
+  const rest = dvStaff.filter(s => !dvList.includes(s.id));
+  const chips = inList.map(s =>
+    `<span class="dv-chip">${esc(s.icon || '🧑‍💼')}<b>${esc(s.name)}</b><span class="dv-x" title="移出名单" onclick="dvRemove('${escAttr(s.id)}')">×</span></span>`
   ).join('');
   const add = rest.length
-    ? `<select class="dv-add" onchange="dvAdd(this.value)"><option value="">+ 添加成员</option>${rest.map(a => `<option value="${escAttr(a.id)}">${esc(a.icon || '🤖')} ${esc(a.name)}</option>`).join('')}</select>`
+    ? `<select class="dv-add" onchange="dvAdd(this.value)"><option value="">+ 添加职工</option>${rest.map(s => `<option value="${escAttr(s.id)}">${esc(s.icon || '🧑‍💼')} ${esc(s.name)}</option>`).join('')}</select>`
     : '';
-  box.innerHTML = `<span class="dv-label">👥 参与名单（${inList.length}）</span>${chips}${add}`;
+  const cfg = `<span class="dv-x" style="color:#4a90d9;font-size:12px;cursor:pointer" title="职工配置：增删改职工、AI 生成职工" onclick="openStaff()">⚙ 职工配置</span>`;
+  box.innerHTML = `<span class="dv-label">👥 参与职工（${inList.length}/${dvStaff.length}）</span>${chips}${add}${cfg}`;
   box.classList.toggle('show', chatMode === 'divide');
 }
 
@@ -2546,7 +2612,7 @@ async function send() {
 
     const isDivide = chatMode === 'divide';
     if (isDivide) { dvRunning = true; updateModeBadges(); }
-    await streamSSE('/api/chat', { message: text, taskId: curTaskId, mode: isDivide ? 'divide' : (roundtableOn ? 'roundtable' : ''), participants: isDivide ? dvList.filter(id => agents.some(a => a.id === id)) : [] }, (e) => {
+    await streamSSE('/api/chat', { message: text, taskId: curTaskId, mode: isDivide ? 'divide' : (roundtableOn ? 'roundtable' : ''), participants: isDivide ? dvList.filter(id => dvStaff.some(s => s.id === id)) : [] }, (e) => {
       if (typing) { removeMsg(typing); typing = null; }
       handleStreamEvent(e);
     });
@@ -3522,8 +3588,8 @@ function handleAtInput() {
   const m = before.match(/@([^\s@]*)$/);
   if (!m) { hideAt(); return; }
   const q = m[1].toLowerCase();
-  // 分工模式 @ 只在参与名单内收敛（协作语义限定名单成员）
-  const pool = chatMode === 'divide' ? agents.filter(a => dvList.includes(a.id)) : agents;
+  // 分工模式 @ 只在参与职工内收敛（协作语义限定名单职工）
+  const pool = chatMode === 'divide' ? dvStaff.filter(s => dvList.includes(s.id)) : agents;
   const items = pool.filter(a =>
     !q || a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q) || String(a.desc || '').toLowerCase().includes(q)
   ).slice(0, 8);
@@ -3564,6 +3630,136 @@ function hideAt() {
 
 // ---------- 智能体配置 ----------
 let editing = [];
+
+// ==================== 分工职工配置（独立角色库：与群聊智能体不通用） ====================
+let staffGenCandidates = []; // AI 生成候选 [{name, icon, role, desc, checked}]
+
+function openStaff() {
+  staffResetForm();
+  document.getElementById('staffGenResult').innerHTML = '';
+  staffGenCandidates = [];
+  renderStaffList();
+  document.getElementById('staffMask').classList.add('show');
+}
+function closeStaff() { document.getElementById('staffMask').classList.remove('show'); }
+
+function renderStaffList() {
+  const box = document.getElementById('staffList');
+  if (!dvStaff.length) {
+    box.innerHTML = '<div class="tip" style="color:#b00">职工库为空：请用下方表单新增，或用「AI 生成职工」组建团队。</div>';
+    return;
+  }
+  box.innerHTML = dvStaff.map(s => `
+    <div class="staff-card">
+      <span class="st-ic">${esc(s.icon || '🧑‍💼')}</span>
+      <span class="st-tx"><b>${esc(s.name)}</b><span class="st-role">${esc(s.role || '职工')}</span><span class="st-desc" title="${escAttr(s.desc || '')}">${esc(s.desc || '')}</span></span>
+      <span class="st-ops">
+        <button onclick="staffEdit('${escAttr(s.id)}')" title="载入表单修改">编辑</button>
+        <button class="st-del" onclick="staffDel('${escAttr(s.id)}')" title="删除该职工">删除</button>
+      </span>
+    </div>`).join('');
+}
+
+function staffEdit(id) {
+  const s = dvStaff.find(x => x.id === id);
+  if (!s) return;
+  document.getElementById('staffIcon').value = s.icon || '';
+  document.getElementById('staffName').value = s.name || '';
+  document.getElementById('staffRole').value = s.role || '';
+  document.getElementById('staffDesc').value = s.desc || '';
+  document.getElementById('staffEditId').dataset.id = id;
+  toast('已载入「' + s.name + '」，修改后点保存');
+}
+
+function staffResetForm() {
+  ['staffIcon', 'staffName', 'staffRole', 'staffDesc'].forEach(i => { document.getElementById(i).value = ''; });
+  document.getElementById('staffEditId').dataset.id = '';
+}
+
+async function staffSave() {
+  const item = {
+    id: document.getElementById('staffEditId').dataset.id || '',
+    icon: document.getElementById('staffIcon').value.trim(),
+    name: document.getElementById('staffName').value.trim(),
+    role: document.getElementById('staffRole').value.trim(),
+    desc: document.getElementById('staffDesc').value.trim()
+  };
+  if (!item.name) { toast('职工名称不能为空'); return; }
+  try {
+    const d = await api('/api/divide/staff', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) });
+    if (!d.success) throw new Error(d.error || '保存失败');
+    dvStaff = d.staff;
+    staffResetForm();
+    renderStaffList();
+    renderDvRoster();
+    toast('已保存职工「' + item.name + '」');
+  } catch (e) { toast('保存失败：' + (e.message || e)); }
+}
+
+async function staffDel(id) {
+  const s = dvStaff.find(x => x.id === id);
+  if (!s) return;
+  if (!confirm(`确定删除职工「${s.name}」？`)) return;
+  try {
+    const d = await api('/api/divide/staff', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', id }) });
+    if (!d.success) throw new Error(d.error || '删除失败');
+    dvStaff = d.staff;
+    renderStaffList();
+    renderDvRoster();
+    toast('已删除「' + s.name + '」');
+  } catch (e) { toast('删除失败：' + (e.message || e)); }
+}
+
+async function staffGenerate() {
+  const need = document.getElementById('staffGenNeed').value.trim();
+  if (!need) { toast('请先描述需要什么样的职工团队'); return; }
+  const count = Number(document.getElementById('staffGenCount').value) || 3;
+  const btn = document.getElementById('staffGenBtn');
+  const box = document.getElementById('staffGenResult');
+  btn.disabled = true; btn.textContent = '生成中…';
+  box.innerHTML = '<div class="tip">🪄 AI 正在组建职工团队（约 10-30 秒）…</div>';
+  try {
+    const r = await fetch('/api/divide/staff/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ need, count }) });
+    const d = await r.json();
+    if (!d.success) throw new Error(d.error || '生成失败');
+    staffGenCandidates = (d.candidates || []).map(c => ({ ...c, checked: true }));
+    if (!staffGenCandidates.length) throw new Error('生成结果为空，请换个描述重试');
+    renderStaffGen();
+  } catch (e) {
+    box.innerHTML = `<div class="tip" style="color:#b00">生成失败：${esc(String(e.message || e))}</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = '🪄 生成职工';
+  }
+}
+
+function renderStaffGen() {
+  const box = document.getElementById('staffGenResult');
+  box.innerHTML = staffGenCandidates.map((c, i) => `
+    <div class="staff-gen-item">
+      <input type="checkbox" ${c.checked ? 'checked' : ''} onchange="staffGenToggle(${i}, this.checked)" style="width:auto" title="勾选后入库">
+      <span style="font-size:20px;flex:none">${esc(c.icon || '🧑‍💼')}</span>
+      <span style="flex:1;min-width:0"><b>${esc(c.name)}</b><span class="st-role" style="display:inline-block;background:#eef4ff;color:#4a6cf7;border-radius:4px;padding:0 6px;font-size:12px;margin-left:6px">${esc(c.role || '职工')}</span><span style="display:block;color:#888;font-size:12px;margin-top:2px">${esc(c.desc || '')}</span></span>
+    </div>`).join('')
+    + `<div class="ag-row" style="justify-content:flex-end"><button class="primary" onclick="staffGenApply()">入库所选（${staffGenCandidates.filter(c => c.checked).length}）</button></div>`;
+}
+function staffGenToggle(i, checked) { staffGenCandidates[i].checked = checked; }
+
+async function staffGenApply() {
+  const picked = staffGenCandidates.filter(c => c.checked);
+  if (!picked.length) { toast('请至少勾选一名职工'); return; }
+  try {
+    for (const p of picked) {
+      const d = await api('/api/divide/staff', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ icon: p.icon, name: p.name, role: p.role, desc: p.desc }) });
+      if (!d.success) throw new Error(d.error || '入库失败');
+      dvStaff = d.staff;
+    }
+    staffGenCandidates = [];
+    document.getElementById('staffGenResult').innerHTML = '';
+    renderStaffList();
+    renderDvRoster();
+    toast(`已入库 ${picked.length} 名职工，可在名单中选用`);
+  } catch (e) { toast('入库失败：' + (e.message || e)); }
+}
 
 function openAgents() {
   const butler = agents.find(a => a.id === butlerId) || {};

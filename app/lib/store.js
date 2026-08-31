@@ -922,6 +922,48 @@ function pruneOldData(days) {
   } catch { /* 无目录 */ }
 
   return stat;
+ }
+
+// ---------- 分工职工：独立于群聊智能体的专职角色库（财务/销售/研发/文案/调研员等） ----------
+const STAFF_PATH = path.join(DATA_DIR, 'staff.json');
+// 默认职工：仅一名调研员（用户按需扩充，AI 生成或手动添加）
+const DEFAULT_STAFF = [
+  { id: 'researcher', name: '调研员', icon: '🔍', desc: '负责信息检索、资料收集与事实核查，为团队提供数据与背景支撑', role: '调研' }
+];
+
+function getStaff() {
+  const list = readJson(STAFF_PATH, null);
+  if (Array.isArray(list)) return list.filter(s => s && s.id && s.name);
+  try { writeJson(STAFF_PATH, DEFAULT_STAFF); } catch { /* 损坏保护：本次用默认 */ }
+  return DEFAULT_STAFF.slice();
+}
+
+function saveStaff(list) {
+  writeJson(STAFF_PATH, (Array.isArray(list) ? list : []).filter(s => s && s.id && s.name));
+}
+
+function upsertStaff(item) {
+  const list = getStaff();
+  const id = String(item && item.id || '').trim();
+  const name = String(item && item.name || '').trim().slice(0, 40);
+  if (!name) return null;
+  const found = id ? list.find(s => s.id === id) : null;
+  const entry = {
+    id: found ? found.id : (id || 'staff-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)),
+    name,
+    icon: String(item.icon || '🧑‍💼').slice(0, 8),
+    desc: String(item.desc || '').slice(0, 500),
+    role: String(item.role || '职工').slice(0, 20)
+  };
+  if (found) Object.assign(found, entry);
+  else list.push(entry);
+  saveStaff(list);
+  return entry;
+}
+
+function deleteStaff(id) {
+  saveStaff(getStaff().filter(s => s.id !== id));
+  return true;
 }
 
 module.exports = {
@@ -935,6 +977,10 @@ module.exports = {
   getMemoryData,
   saveMemoryData,
   getAgents,
+  getStaff,
+  saveStaff,
+  upsertStaff,
+  deleteStaff,
   getTeamPresets,
   getTasks,
   saveTasks,
