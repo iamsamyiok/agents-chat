@@ -1,8 +1,8 @@
 {
   "name": "agents-chat-cli",
-  "version": "3.42.0",
+  "version": "3.43.0",
   "description": "多智能体群聊工具 - 支持 OpenCode/Claude Code/Codex/pi 内核，微信风格聊天界面",
-  "main": "lib/start.js",
+  "main": "desktop/main.js",
   "bin": {
     "agents-chat": "./bin/agents-chat.js"
   },
@@ -23,6 +23,7 @@
     "codex"
   ],
   "license": "MIT",
+  "author": "iamsamyiok",
   "engines": {
     "node": ">=18.0.0"
   },
@@ -38,6 +39,12 @@
     "start": "node app/server.js",
     "test": "node --test --test-force-exit \"test/*.test.js\"",
     "build:exe": "node scripts/build-exe.js",
+    "desktop:dev": "electron desktop/main.js",
+    "desktop:build": "node scripts/build-desktop.js",
     "postinstall": "node scripts/postinstall.js"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
   }
 }

@@ -1,0 +1,29 @@
+# Electron 桌面版构建配置（electron-builder）
+# 入口 desktop/main.js（package.json.build.main 指定），构建命令 npm run desktop:build
+appId: io.github.iamsamyiok.agents-chat
+productName: Agents Chat
+executableName: agents-chat
+copyright: MIT License
+
+directories:
+  output: dist-desktop
+  buildResources: build
+
+# 进 asar 的内容：desktop 壳 + app 服务端代码 + package.json（版本号单源）
+# app/public 不进包：页面资源已由 scripts/build-desktop.js 内嵌为 app/lib/embedded-assets.js
+# 本项目零运行时依赖（dependencies 为空），无需打包 node_modules
+files:
+  - desktop/**
+  - app/lib/**
+  - app/server.js
+  - package.json
+  - "!app/public/**"
+asar: true
+
+# Windows 目标：免安装便携版（双击即启，无需安装）
+# NSIS 安装器依赖 wine 交叉工具链，在 CI Windows runner 原生环境下更稳定；当前在 Linux 交叉编译时暂不包含
+win:
+  target: portable
+  icon: build/icon.ico
+portable:
+  artifactName: AgentsChat-Portable-${version}.${ext}

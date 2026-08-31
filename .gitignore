@@ -22,6 +22,10 @@ bin/node.exe.manifest
 dist/
 app/lib/embedded-assets.js
 
+# Electron 桌面版构建产物与图标生成物（scripts/build-desktop.js / gen-icon.js 生成）
+dist-desktop/
+build/
+
 # IDE / OS
 .vscode/
 .idea/

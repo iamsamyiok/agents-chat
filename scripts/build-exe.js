@@ -16,10 +16,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const PUB = path.join(ROOT, 'app', 'public');
-const EMBED = path.join(ROOT, 'app', 'lib', 'embedded-assets.js');
 const DIST = path.join(ROOT, 'dist');
-const PKG = require(path.join(ROOT, 'package.json'));
 
 const ALL_TARGETS = ['windows-x64', 'linux-x64', 'darwin-x64', 'darwin-arm64'];
 const targets = process.argv[2] ? [process.argv[2]] : ALL_TARGETS;
@@ -30,18 +27,8 @@ for (const t of targets) {
   }
 }
 
-// 1. 生成内嵌资源模块（HTML/JSON/SVG → JSON 字符串常量，杜绝转义问题）
-const assets = {};
-for (const f of fs.readdirSync(PUB)) {
-  if (/\.(html|json|svg)$/.test(f)) assets[f] = fs.readFileSync(path.join(PUB, f), 'utf8');
-}
-fs.writeFileSync(EMBED, [
-  '// 本文件由 scripts/build-exe.js 构建时自动生成，勿手工编辑、勿提交仓库',
-  `// 内嵌页面资源（构建于 ${new Date().toISOString()}，v${PKG.version}）`,
-  'module.exports = ' + JSON.stringify(assets, null, 2) + ';',
-  ''
-].join('\n'));
-console.log(`已生成内嵌资源: ${Object.keys(assets).join('、')}`);
+// 1. 生成内嵌资源模块（公共逻辑，桌面版构建共用）
+require('./embed-assets').ensureEmbedded();
 
 // 2. bun compile 各平台
 fs.mkdirSync(DIST, { recursive: true });
@@ -65,7 +52,7 @@ for (const t of targets) {
 }
 
 // 3. 清理中间产物（下次构建重新生成；源码运行不需要它）
-try { fs.unlinkSync(EMBED); } catch { /* ignore */ }
+try { fs.unlinkSync(path.join(ROOT, 'app', 'lib', 'embedded-assets.js')); } catch { /* ignore */ }
 
 if (failed.length) {
   console.error(`失败平台: ${failed.join(', ')}`);

@@ -148,6 +148,7 @@ function readBody(req) {
 let EMBEDDED_ASSETS = null;
 try { EMBEDDED_ASSETS = require('./lib/embedded-assets'); } catch { /* 开发模式 */ }
 const IS_STANDALONE = process.env.AGENTS_CHAT_STANDALONE === '1' || !!process.versions.bun; // 单文件 exe 形态（构建期注入标识）
+const IS_DESKTOP = process.env.AGENTS_CHAT_DESKTOP === '1'; // Electron 桌面形态：内嵌窗口而非系统浏览器
 const RELEASES_URL = 'https://github.com/iamsamyiok/agents-chat/releases/latest';
 
 function serveStatic(res, filePath) {
@@ -210,8 +211,8 @@ function sse(req, res) {
 // 前端页面每 25s 心跳一次；所有页面关闭且无 SSE 连接、无审批等待、无编排执行后，
 // 空闲约 1 分钟自动退出。例外：存在待触发的定时任务时保持存活（睡到任务触发后
 // 再给 10 分钟执行宽限，全部触发完才允许退出），保证无人值守定时任务可靠执行。
-// .env AGENTS_CHAT_AUTOSTOP=0 可完全关闭
-const AUTOSTOP = process.env.AGENTS_CHAT_AUTOSTOP !== '0';
+// .env AGENTS_CHAT_AUTOSTOP=0 可完全关闭；桌面形态由窗口生命周期管理退出，恒关
+const AUTOSTOP = IS_DESKTOP ? false : process.env.AGENTS_CHAT_AUTOSTOP !== '0';
 const AUTOSTOP_IDLE_MS = Number(process.env.AGENTS_CHAT_AUTOSTOP_IDLE_MS) > 0
   ? Number(process.env.AGENTS_CHAT_AUTOSTOP_IDLE_MS)
   : 50 * 1000;
@@ -1707,19 +1708,21 @@ ${need}
 // 优雅退出：停掉全部子进程、把执行中任务复位为待执行，避免残留与假死状态
 // 幂等防重入：信号钩子与 exit 钩子可能先后触发，清理只执行一次
 let shutdownDone = false;
-function shutdown(code) {
-  if (!shutdownDone) {
-    shutdownDone = true;
-    try {
-      if (termProc) { try { termProc.kill(); } catch { /* ignore */ } termProc = null; }
-      const n = stopAllChildren();
-      const m = store.resetRunningTasks();
-      const mc = CardStore.resetRunning();
-      if (n || m || mc) console.log(`退出清理：终止 ${n} 个子进程，复位 ${m} 个执行中任务、${mc} 张卡牌`);
-    } catch (err) {
-      console.error('[shutdown] 清理失败:', err && (err.stack || err));
-    }
+function cleanupOnce() {
+  if (shutdownDone) return;
+  shutdownDone = true;
+  try {
+    if (termProc) { try { termProc.kill(); } catch { /* ignore */ } termProc = null; }
+    const n = stopAllChildren();
+    const m = store.resetRunningTasks();
+    const mc = CardStore.resetRunning();
+    if (n || m || mc) console.log(`退出清理：终止 ${n} 个子进程，复位 ${m} 个执行中任务、${mc} 张卡牌`);
+  } catch (err) {
+    console.error('[shutdown] 清理失败:', err && (err.stack || err));
   }
+}
+function shutdown(code) {
+  cleanupOnce();
   process.exit(code);
 }
 process.on('SIGINT', () => shutdown(0));
@@ -1946,7 +1949,10 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-server.listen(PORT, () => {
+// 桌面形态仅本机窗口访问：绑回环地址，避免 Windows 防火墙弹授权框；其余形态保持全接口（局域网/预览）
+const LISTEN_HOST = IS_DESKTOP ? '127.0.0.1' : undefined;
+server.listen(PORT, LISTEN_HOST, () => {
+  const realPort = (server.address() && server.address().port) || PORT; // PORT=0 随机分配时取实际端口
   const { resolveRunner, detectKernels, KERNEL_DEFS } = require('./lib/agent');
   const runner = resolveRunner();
   const kindText = runner.kind === 'demo'
@@ -1966,7 +1972,7 @@ server.listen(PORT, () => {
   startScheduler();
   startAutoStop();
   startPruneTimer();
-  console.log(`Agents Chat v${APP_VERSION} 已启动: http://localhost:${PORT}`);
+  console.log(`Agents Chat v${APP_VERSION} 已启动: http://localhost:${realPort}`);
   console.log(`运行内核: ${kindText}`);
   console.log('退出提示: 请用 Ctrl+C（或 agents-chat stop）退出，会自动清理执行中的 AI 子进程；直接关闭窗口可能残留正在执行的进程');
   console.log(`本机可用内核: ${avail}（配置页可切换）`);
@@ -1998,10 +2004,18 @@ server.listen(PORT, () => {
   if (IS_STANDALONE && process.env.AGENTS_CHAT_NO_OPEN !== '1') {
     try {
       const { exec } = require('child_process');
-      const url = `http://localhost:${PORT}`;
+      const url = `http://localhost:${realPort}`;
       const cmd = process.platform === 'win32' ? `start "" "${url}"`
         : process.platform === 'darwin' ? `open "${url}"` : `xdg-open "${url}"`;
       setTimeout(() => { try { exec(cmd, () => {}); } catch { /* ignore */ } }, 600);
     } catch { /* ignore */ }
   }
 });
+
+// 桌面形态（Electron 主进程 require 本文件）使用的编程接口：
+// CLI/单文件形态照旧当脚本执行，导出无副作用
+module.exports = {
+  server,
+  getPort: () => (server.address() ? server.address().port : null), // PORT=0 时需轮询等待 listen 完成
+  cleanupOnce, // 同步清理全部子进程并复位执行中状态（不含 process.exit，由调用方控制退出时机）
+};

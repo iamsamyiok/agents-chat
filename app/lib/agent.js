@@ -52,6 +52,44 @@ let detectCache = { ts: 0, map: null };
 // 安装新内核后刷新缓存（否则同进程 10 秒内仍认为未安装）
 function resetDetectCache() { detectCache = { ts: 0, map: null }; }
 
+// 常见安装目录兜底：GUI 形态（Electron 双击启动）继承的 PATH 常缺用户级包管理器目录，
+// where/which 找不到时按平台惯例位置直接探测可执行文件
+function extraCliDirs() {
+  const home = process.env.USERPROFILE || process.env.HOME || '';
+  const dirs = [];
+  if (process.platform === 'win32') {
+    dirs.push(
+      process.env.APPDATA && path.join(process.env.APPDATA, 'npm'),
+      process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'pnpm'),
+      home && path.join(home, '.bun', 'bin'),
+      home && path.join(home, 'scoop', 'shims'),
+      home && path.join(home, '.local', 'bin')
+    );
+  } else {
+    dirs.push(
+      '/usr/local/bin', '/opt/homebrew/bin',
+      home && path.join(home, '.npm-global', 'bin'),
+      home && path.join(home, '.bun', 'bin'),
+      home && path.join(home, '.local', 'bin')
+    );
+  }
+  return dirs.filter(Boolean);
+}
+function findCliInDirs(def) {
+  for (const dir of extraCliDirs()) {
+    const names = process.platform === 'win32'
+      ? [`${def.cmd}.cmd`, `${def.cmd}.exe`, `${def.cmd}.bat`, def.cmd]
+      : [def.cmd];
+    for (const name of names) {
+      const p = path.join(dir, name);
+      if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+        return { cmd: p, shell: /\.(cmd|bat)$/i.test(p) };
+      }
+    }
+  }
+  return null;
+}
+
 function findCli(def) {
   const custom = process.env[`AGENTS_CHAT_${def.id.toUpperCase()}_CMD`];
   if (custom && fs.existsSync(custom)) {
@@ -69,7 +107,7 @@ function findCli(def) {
       return { cmd: first, shell: /\.(cmd|bat)$/i.test(first) };
     }
   } catch { /* 未安装 */ }
-  return null;
+  return findCliInDirs(def); // PATH 无果：常见安装目录兜底
 }
 
 function detectKernels() {
@@ -498,4 +536,4 @@ function spawnMock(args, agent, env, onChunk, scope) {
   return child;
 }
 
-module.exports = { runAgent, resolveRunner, detectKernels, resetDetectCache, KERNEL_DEFS, missingHint, describeTool, stopScope, stopAllChildren, resolveCwd, registerChild, buildKernelArgs };
+module.exports = { runAgent, resolveRunner, detectKernels, resetDetectCache, KERNEL_DEFS, missingHint, describeTool, stopScope, stopAllChildren, resolveCwd, registerChild, buildKernelArgs, findCli, findCliInDirs, extraCliDirs };
