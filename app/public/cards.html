@@ -243,21 +243,16 @@
 <body>
 <header>
   <a class="backlink" href="/" title="返回 Agents Chat 群聊">← 群聊</a>
-  <span class="status-pill" id="statusPill">空闲</span>
   <div class="filter-box" title="按标题或内容即时过滤看板">
     🔍 <input id="cardFilter" placeholder="搜索任务…" autocomplete="off" />
   </div>
   <span class="sp"></span>
-  <div class="ws-box" title="工作区：选定后 Agent 在该目录读写相关文件（可选）">
-    📁 <input id="wsInput" placeholder="工作文件夹（点右侧选择）" />
-    <span class="ws-pick" id="wsPick" title="弹窗选择文件夹">选择</span>
-    <span class="ws-save" id="wsSave">保存</span>
-  </div>
   <div class="ws-box" title="并行执行的最多任务数（1-8，热更新）">
     ⚡ 并行 <select id="parallelSel" style="border:none;outline:none;font-size:12px;background:transparent;width:42px">
       <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option>
     </select>
   </div>
+   <span class="status-pill" id="statusPill" style="margin-right:8px">空闲</span>
    <button class="btn" id="btnNew">＋ 任务</button>
    <button class="btn" id="btnPlanner" title="与 AI 聊天式编排：描述目标，AI 澄清后一键生成任务编排">🪄 AI 编排</button>
    <button class="btn primary" id="btnRun" title="按依赖与优先级调度全部待执行任务">▶ 启动</button>
@@ -405,7 +400,6 @@
 </div>
 
 <div class="trash-fab" id="trashFab" title="垃圾桶">🗑️<span class="cnt" id="trashCnt" style="display:none">0</span></div>
-<input type="file" id="dirPicker" webkitdirectory directory multiple style="display:none" />
 
 <div class="toast" id="toast"></div>
 
@@ -440,7 +434,7 @@ async function loadCards(){
   $('#statusPill').textContent = data.running ? '编排中…' : '空闲';
   $('#btnRun').disabled = data.running;
   $('#btnStop').disabled = !data.running;
-  if(data.config) $('#wsInput').value = data.config.workspace || '';
+  if(data.config) { /* workspace 已移除（统一用全局工作目录） */ }
   if(data.maxParallel) $('#parallelSel').value = String(data.maxParallel);
   renderKernelBanner();
   renderUpdateInfo(data);
@@ -614,15 +608,13 @@ function render(){
   $('#stDoneRate').textContent=`完成率 ${pct}%（${doneN}/${total}）`;
   $('#stDoneBar').style.width=pct+'%';
   $('#stFailed').textContent= failedN? `失败 ${failedN}` : '';
-  // 空看板引导：一个任务都没有时给出上手入口（含示例）
+  // 空看板引导：一个任务都没有时给出上手入口
   if(!CARDS.length){
     cols.pending.innerHTML=`<div class="board-guide">
       还没有任何任务<br/>把要做的事写成一张张卡牌，Agent 会按依赖与优先级自动调度执行
       <div class="bg-actions">
         <button class="btn primary" onclick="openEdit(null)">＋ 新建第一个任务</button>
-        <button class="btn" id="btnExamples">📦 载入示例任务</button>
       </div></div>`;
-    const be=$('#btnExamples'); if(be) be.onclick=loadExamples;
     for(const k of ['running','done','failed']) cols[k].innerHTML='<div class="empty">—</div>';
     return;
   }
@@ -633,16 +625,6 @@ function render(){
     return;
   }
   for(const k in cols){ if(!cols[k].children.length) cols[k].innerHTML='<div class="empty">—</div>'; }
-}
-
-// 载入示例：三张卡展示三种执行模式与依赖关系（可编辑/删除，当作模板随意改造）
-async function loadExamples(){
-  const mk = (title, content, extra) => post('/api/cards', Object.assign({ title, content }, extra||{})).then(r=>r.card);
-  const a = await mk('示例A · 独立任务', '列出当前工作目录下的全部文件，并统计各类型文件的数量。', { priority: 1 });
-  await mk('示例B · 续聊任务', '接续上一个任务的结论：把统计结果整理成一份 markdown 表格。', { priority: 2, mode: 'continue', chainId: a.id, dependsOn: [a.id] });
-  await mk('示例C · 并行任务', '查询今日天气概况并给出一句话总结（与示例A/B 互不依赖，可同时执行）。', { priority: 3, mode: 'parallel' });
-  await loadCards();
-  toast('已载入 3 个示例任务，点击「启动」体验');
 }
 
 // 单卡停止：执行中的任务杀进程并复位为待执行（本轮编排不再自动调度）
@@ -908,22 +890,6 @@ async function retryAllFailed(){
   const r=await post('/api/cards/retry-failed');
   await loadCards(); toast(r.retried?('已重跑 '+r.retried+' 个失败任务'):'重跑失败');
 }
-
-// ---- 工作区（弹窗选择文件夹） ----
-$('#wsPick').onclick=()=>{ $('#dirPicker').value=''; $('#dirPicker').click(); };
-$('#dirPicker').addEventListener('change', ()=>{
-  const f = $('#dirPicker').files && $('#dirPicker').files[0];
-  if(!f) return;
-  // 优先取绝对路径（Electron/桌面环境），否则取顶层文件夹名（标准浏览器）
-  let p = (f.path && typeof f.path === 'string') ? f.path : (f.webkitRelativePath ? f.webkitRelativePath.split('/')[0] : '');
-  $('#wsInput').value = p;
-  if(p) post('/api/cards/config',{workspace:p}).then(()=>toast('工作区已设为：'+p));
-});
-$('#wsSave').onclick=async()=>{
-  const v=$('#wsInput').value.trim();
-  const r=await post('/api/cards/config',{workspace:v});
-  if(r.success){ toast(v?'工作区已设为：'+v:'工作区已清除'); if(r.warning) toast(r.warning); }
-};
 
 // ---- 详情 ----
 function appendLog(el, line, cls){
