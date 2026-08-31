@@ -618,6 +618,14 @@ ${need}
   }
 
   if (p === '/api/session/new' && req.method === 'POST') {
+    const body = await readBody(req).catch(() => ({}));
+    if (body.mode === 'divide') {
+      // 分工模式独立分片：清空即可（不影响群聊主会话 epoch）
+      try { fs.writeFileSync(store.msgShardPathPublic('__divide__'), JSON.stringify([])); } catch { /* ignore */ }
+      store.addMessage({ role: 'sys', content: '── 已开启新分工会话：此前内容不再纳入上下文 ──', taskId: '__divide__', timestamp: new Date().toISOString() });
+      json(res, 200, { success: true });
+      return;
+    }
     // 开启新会话：主会话历史不再纳入上下文（聊天记录仍保留显示）
     const cfg = store.getConfig();
     cfg.mainEpoch = (Number(cfg.mainEpoch) || 0) + 1;
@@ -997,12 +1005,16 @@ ${need}
       }
     }
 
+    // 分工模式是独立会话空间：消息落独立分片 __divide__，与群聊主会话互相隔离
+    // （上下文构建 / AI 消息落库 / SSE 事件 taskId 均随之分流）
+    const storeTaskId = body.mode === 'divide' ? '__divide__' : taskId;
+
     // 先构建历史背景（此时还不含当前消息），再落库当前用户消息
-    const opts = { taskId, history: buildHistoryText(taskId), scope: 'chat', isStopped: () => stopTokens.chat !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval() };
-    store.addMessage({ role: 'user', content: message, taskId, timestamp: new Date().toISOString() });
+    const opts = { taskId: storeTaskId, history: buildHistoryText(storeTaskId), scope: 'chat', isStopped: () => stopTokens.chat !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval() };
+    store.addMessage({ role: 'user', content: message, taskId: storeTaskId, timestamp: new Date().toISOString() });
 
     const send = sse(req, res);
-    const persist = (m) => store.addMessage({ ...m, taskId, timestamp: new Date().toISOString() });
+    const persist = (m) => store.addMessage({ ...m, taskId: storeTaskId, timestamp: new Date().toISOString() });
     try {
       let run;
       if (body.mode === 'divide') {
@@ -1325,10 +1337,11 @@ ${need}
     const fmtTs = (t) => { const d = new Date(t); const p2 = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
     const roleOf = (m) => m.role === 'user' ? '👤 用户' : (m.agentName || '智能体') + (m.phase ? `（${m.phase}）` : '');
     const total = stat.main + Object.values(stat.counts).reduce((a, b) => a + b, 0);
+    const divideArr = store.getMessages('__divide__');
     const lines = [
       '# Agents Chat 会话导出', '',
       `- 导出时间：${fmtTs(Date.now())}`,
-      `- 会话数：${1 + tasksAll.filter(t => (stat.counts[t.id] || 0) > 0).length + ocAll.filter(s => (stat.counts[s.id] || 0) > 0).length}（主会话 + 任务会话 + 单聊会话）`,
+      `- 会话数：${1 + (divideArr.length ? 1 : 0) + tasksAll.filter(t => (stat.counts[t.id] || 0) > 0).length + ocAll.filter(s => (stat.counts[s.id] || 0) > 0).length}（主会话 + 分工会话 + 任务会话 + 单聊会话）`,
       `- 消息总数：${total}`, ''
     ];
     const main = store.getMessages('');
@@ -1338,6 +1351,15 @@ ${need}
       lines.push(String(m.content || '').trim() || '（无内容）');
       if (m.outputPath) lines.push('', `> 过程存档：${m.outputPath}`);
       lines.push('');
+    }
+    if (divideArr.length) {
+      lines.push('---', '', '## 分工会话', '');
+      for (const m of divideArr) {
+        lines.push(`### ${fmtTs(m.timestamp)} · ${roleOf(m)}`, '');
+        lines.push(String(m.content || '').trim() || '（无内容）');
+        if (m.outputPath) lines.push('', `> 过程存档：${m.outputPath}`);
+        lines.push('');
+      }
     }
     for (const t of tasksAll.sort((a, b) => (a.scheduledAt || a.createdAt) - (b.scheduledAt || b.createdAt))) {
       const arr = store.getMessages(t.id);

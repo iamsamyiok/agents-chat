@@ -942,7 +942,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.43.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.43.3'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -1026,8 +1026,13 @@ async function api(path, opts) {
 
 // ---------- 会话模型 ----------
 function sessKey(taskId) { return taskId || 'main'; }
+// 分工会话分片键（与后端 storeTaskId 一致）：分工与群聊是完全独立的会话空间
+const DIVIDE_KEY = '__divide__';
+// 当前渲染桶：分工模式固定分工会话；其余按 curTaskId
+function curKey() { return chatMode === 'divide' ? DIVIDE_KEY : sessKey(curTaskId); }
+// 本地消息默认归属：pushUser/addSys 等未显式传 taskId 时按当前模式落桶
+function localTaskId() { return chatMode === 'divide' ? DIVIDE_KEY : curTaskId; }
 function getSess(key) { if (!sessions.has(key)) sessions.set(key, []); return sessions.get(key); }
-function curKey() { return sessKey(curTaskId); }
 
 // ---------- 初始化 ----------
 async function init() {
@@ -1199,6 +1204,8 @@ function setChatMode(mode) {
   renderHeader();
   updateFooterBtns();
   updateModeBadges();
+  // 群聊↔分工切换：渲染桶从主会话切到分工会话（消息互相隔离）
+  if (chatMode === 'group' || chatMode === 'divide') renderMessages();
   if (chatMode === 'solo') {
     loadOcSessions();
     loadOcModels();
@@ -2099,12 +2106,11 @@ function renderHeader() {
     return;
   }
   if (chatMode === 'divide') {
-    // 分工：微信式聊天界面，标题随会话，成员说明固定
-    const t = curTaskId ? tasks.find(x => x.id === curTaskId) : null;
-    document.getElementById('chatTitle').textContent = t ? `${t.title || '任务会话'} · 分工` : '分工协作';
+    // 分工：独立会话空间（与群聊/任务会话互相隔离），标题与操作固定
+    document.getElementById('chatTitle').textContent = '分工协作';
     document.getElementById('members').innerHTML = `<span style="font-size:11px;color:#b2b2b2">名单内成员按需参与 · 并行执行 · @ 协作传导</span>`;
-    document.getElementById('newSessBtn').style.display = curTaskId ? 'none' : '';
-    document.getElementById('histBtn').style.display = curTaskId ? 'none' : '';
+    document.getElementById('newSessBtn').style.display = '';
+    document.getElementById('histBtn').style.display = '';
     return;
   }
   if (chatMode === 'cards') {
@@ -2400,6 +2406,13 @@ function renderMessages() {
       </div>
     </div>`;
   }
+  // 分工会话空状态：独立会话空间引导
+  if (chatMode === 'divide' && all.length === 0) {
+    box.innerHTML = `<div class="main-welcome">
+      <h4>🤝 分工协作</h4>
+      <p>描述目标，名单内职工自动分工执行；消息 @ 职工可点名协作。<br>分工会话与群聊相互独立，互不干扰。</p>
+    </div>`;
+  }
   scrollBottom();
   requestAnimationFrame(() => requestAnimationFrame(() => box.classList.remove('bulk')));
   const jb = document.getElementById('jumpBtn'); if (jb) jb.style.display = 'none';
@@ -2407,7 +2420,7 @@ function renderMessages() {
 
 // 追加或更新一条流式消息（仅当前会话操作 DOM）
 function ensureMsgDom(m) {
-  const key = sessKey(m.taskId || curTaskId);
+  const key = sessKey(m.taskId !== undefined ? m.taskId : localTaskId());
   if (key !== curKey()) return;
   if (m._dom && document.contains(m._dom)) { if (m._tx) m._tx.textContent = m.content; followScroll(); return; }
   const node = msgNode(m);
@@ -2424,7 +2437,7 @@ function pushMsg(m) {
 }
 
 function addSys(text, taskId, isErr) {
-  return pushMsg({ role: 'sys', content: text, taskId: taskId || curTaskId, ts: Date.now(), err: !!isErr });
+  return pushMsg({ role: 'sys', content: text, taskId: taskId !== undefined ? taskId : localTaskId(), ts: Date.now(), err: !!isErr });
 }
 // 错误提示便捷入口：浅红底强标识，与普通系统提示区分
 function addErr(text, taskId) { return addSys(text, taskId, true); }
@@ -2449,18 +2462,18 @@ async function restoreApprovals() {
     const seen = new Set(getSess(curKey()).filter(m => m.role === 'approval').map(m => m.approvalId));
     for (const a of (r.approvals || [])) {
       if (seen.has(a.id)) continue;
-      pushMsg({ role: 'approval', approvalId: a.id, kind: a.kind, label: a.label, taskId: a.taskId || curTaskId, ts: Date.now() });
+      pushMsg({ role: 'approval', approvalId: a.id, kind: a.kind, label: a.label, taskId: a.taskId || localTaskId(), ts: Date.now() });
     }
   } catch { /* 恢复失败不影响使用 */ }
 }
 
 function pushUser(text, taskId) {
-  return pushMsg({ role: 'user', content: text, taskId: taskId || curTaskId, ts: Date.now() });
+  return pushMsg({ role: 'user', content: text, taskId: taskId !== undefined ? taskId : localTaskId(), ts: Date.now() });
 }
 
 function pushPlan(ev, taskId) {
   return pushMsg({
-    role: 'assistant', phase: 'plan', taskId: taskId || '',
+    role: 'assistant', phase: 'plan', taskId: taskId !== undefined ? taskId : localTaskId(),
     agentId: ev.agentId || butlerId, agentName: ev.agentName || '管家',
     plan: { thought: ev.thought, phases: ev.phases }, content: '',
     ts: Date.now()
@@ -2699,7 +2712,7 @@ function addWorking(ev) {
   if (workingBars.has(key)) return; // 占位已在（divide_plan 预建/同阶段重复 stage）：保持原位不重建，维持分工顺序
   const m = pushMsg({
     role: 'working', content: '', icon: agentIcon(ev.agentId, ev.agentName),
-    agentId: ev.agentId, agentName: ev.agentName, phase: ev.phase, taskId: ev.taskId || '', ts: Date.now()
+    agentId: ev.agentId, agentName: ev.agentName, phase: ev.phase, taskId: ev.taskId !== undefined ? ev.taskId : localTaskId(), ts: Date.now()
   });
   workingBars.set(key, m);
 }
@@ -2740,11 +2753,11 @@ function handleStreamEvent(e) {
     // 结构化分工表（有序）：按分工顺序预建成员「工作中」占位条，产出消息落位与分工表一致
     if (Array.isArray(e.plan)) {
       for (const p of e.plan) {
-        addWorking({ type: 'stage', agentId: p.id, agentName: p.name, phase: 'divide', taskId: e.taskId || '' });
+        addWorking({ type: 'stage', agentId: p.id, agentName: p.name, phase: 'divide', taskId: e.taskId || localTaskId() });
       }
     }
   } else if (e.type === 'approval_required') {
-    pushMsg({ role: 'approval', approvalId: e.approvalId, kind: e.kind, label: e.label, taskId: e.taskId || curTaskId, ts: Date.now() });
+    pushMsg({ role: 'approval', approvalId: e.approvalId, kind: e.kind, label: e.label, taskId: e.taskId || localTaskId(), ts: Date.now() });
   } else if (e.type === 'error') {
     addErr('❌ 执行出错: ' + e.content, e.taskId);
   }
@@ -2838,18 +2851,19 @@ async function execTasks(taskIds) {
 async function newSession() {
   if (chatMode === 'solo') { newOcSession(); return; }
   if (chatBusy) { toast('当前消息处理中，请等待或停止后再开新会话'); return; }
-  const data = await api('/api/session/new', { method: 'POST' });
+  const isDivideSess = chatMode === 'divide';
+  const data = await api('/api/session/new', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: isDivideSess ? 'divide' : '' }) });
   if (data.success) {
-    sessions.set('main', []);
+    sessions.set(isDivideSess ? DIVIDE_KEY : 'main', []);
     renderMessages();
     toast('已开启新会话');
   } else toast(data.error || '操作失败');
 }
 
-// ---------- 聊天历史（主会话全部记录，只读） ----------
+// ---------- 聊天历史（主会话/分工会话全部记录，只读，按当前模式过滤） ----------
 async function openHistory() {
   const data = await api('/api/messages');
-  const msgs = (data.messages || []).filter(m => !m.taskId);
+  const msgs = (data.messages || []).filter(m => chatMode === 'divide' ? m.taskId === DIVIDE_KEY : !m.taskId);
   const el = document.getElementById('historyList');
   if (!msgs.length) {
     el.innerHTML = '<div class="task-empty">暂无历史记录</div>';
@@ -3613,7 +3627,8 @@ async function loadMessages() {
       role: m.role, content: m.content, agentId: m.agentId, agentName: m.agentName,
       phase: m.phase, plan: m.plan, taskId: m.taskId, outputPath: m.outputPath, ts: m.timestamp
     });
-    if (!m.taskId) mainCount++;
+    // 主会话与分工会话共享聊天未读角标（回群聊/分工即清零）
+    if (!m.taskId || m.taskId === DIVIDE_KEY) mainCount++;
   }
   // 非聊天视图（单聊/卡片）下主会话出现新消息：群聊标签计入未读提醒（回群聊/分工即清零）
   if (chatMode !== 'group' && chatMode !== 'divide' && mainCount > lastMainMsgCount && lastMainMsgCount >= 0) {

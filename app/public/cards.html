@@ -47,8 +47,9 @@
   .copy-btn{border:1px solid var(--line);background:transparent;color:var(--dim);font-size:11px;border-radius:4px;padding:1px 8px;cursor:pointer;margin-left:6px}
   .copy-btn:hover{color:var(--acc2);border-color:var(--acc2)}
   .copy-btn.done{color:#2f9e44;border-color:#2f9e44}
-  /* 看板统计条：总览 + 完成率进度 */
+  /* 看板统计条：总览 + 完成率进度 + 右侧进程状态 */
   #boardStats{display:flex;align-items:center;gap:10px;padding:8px 18px;font-size:12px;color:var(--dim);border-bottom:1px solid var(--line);background:var(--panel)}
+  #boardStats .proc-chip{margin-left:auto;flex-shrink:0}
   #boardStats b{color:inherit}
   .done-bar{flex:1;height:6px;border-radius:3px;background:var(--line);overflow:hidden;max-width:360px}
   .done-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc2),#2f9e44);border-radius:3px;transition:width .4s}
@@ -259,7 +260,6 @@
   <button class="btn danger" id="btnStop" disabled title="停止编排：进行中的任务复位为待执行（不影响追加聊天），未开始的任务保留">⏹ 停止</button>
   <button class="btn" id="btnClear">清空</button>
   <button class="btn" id="btnHelp" title="多任务编排使用帮助">❓ 帮助</button>
-  <span class="proc-chip" id="procBar" title="OpenCode 执行进程状态"><span class="dot"></span><span class="st">等待中</span></span>
 </header>
 
 <div class="kernel-banner" id="kernelBanner"></div>
@@ -269,6 +269,7 @@
   <span id="stDoneRate">完成率 0%</span>
   <div class="done-bar"><i id="stDoneBar" style="width:0%"></i></div>
   <span id="stFailed" style="color:#c92a2a"></span>
+  <span class="proc-chip" id="procBar" title="OpenCode 执行进程状态"><span class="dot"></span><span class="st">等待中</span></span>
 </div>
 
 <main>

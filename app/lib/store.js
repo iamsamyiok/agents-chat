@@ -951,7 +951,8 @@ function pruneOldData(days) {
   }
 
   // 3. 消息（分片）：孤儿会话分片整文件删除；主会话分片按 timestamp 过滤
-  const validIds = new Set([...keptTasks.map(t => t.id), ...keptSess.map(s => s.id)]);
+  // __divide__ 为分工会话专属分片（无对应任务/单聊实体），始终视为有效保留
+  const validIds = new Set(['__divide__', ...keptTasks.map(t => t.id), ...keptSess.map(s => s.id)]);
   try {
     for (const name of fs.readdirSync(MSG_DIR)) {
       if (!name.endsWith('.json') || name.startsWith('.')) continue;
@@ -1089,5 +1090,6 @@ module.exports = {
   saveDivideSessions,
   clearDivideSessions,
   pruneOldData,
-  getCorruptedFiles: () => safejson.corruptedFiles()
+  getCorruptedFiles: () => safejson.corruptedFiles(),
+  msgShardPathPublic: msgShardPath
 };
