@@ -26,7 +26,7 @@
   /* 键盘导航焦点环：统一品牌绿描边 */
   button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid rgba(7,193,96,.55); outline-offset: 1px; }
   #app { display: flex; height: 100vh; max-width: 1240px; margin: 0 auto; background: #fff; box-shadow: 0 0 24px rgba(0,0,0,.08); }
-  #topTabs { height: 46px; flex-shrink: 0; background: #fff; border-bottom: 1px solid #e7e7e7; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0 16px; z-index: 60; position: relative; }
+  #topTabs { height: 46px; flex-shrink: 0; background: #fff; border-bottom: 1px solid #e7e7e7; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 16px; z-index: 60; position: relative; }
   #topTabs button { border: 1px solid #ddd; background: #fff; color: #555; border-radius: 8px; padding: 6px 18px; font-size: 13.5px; cursor: pointer; transition: all .15s; position: relative; }
   #topTabs button:hover { background: #f7f9f7; border-color: #07c160; color: #1a7a42; }
   #topTabs button.active { background: #07c160; color: #fff; border-color: #07c160; font-weight: 600; }
@@ -839,7 +839,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.38.2'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.38.3'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
