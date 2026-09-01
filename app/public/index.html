@@ -126,6 +126,8 @@
   .approval-card .ap-ok { background: #07c160; color: #fff; }
   .approval-card .ap-no { background: #fa5151; color: #fff; }
   .approval-card .ap-done { font-size: 12px; color: #888; text-align: center; padding: 2px 0; }
+  .approval-card.ap-interrupted { background: #f4f6fa; border-color: #8a97ab; }
+  .approval-card.ap-interrupted .ap-title-int { color: #4a5568; }
   .sys-tip span { font-size: 12px; color: #9e9e9e; background: #e8e8e8; border-radius: 8px; padding: 3px 10px; display: inline-block; max-width: 80%; animation: msg-in .18s ease; white-space: pre-wrap; text-align: left; }
   #messages.bulk .sys-tip span { animation: none; }
   .msg-row { display: flex; gap: 10px; margin: 14px 0; align-items: flex-start; animation: msg-in .18s ease; }
@@ -991,7 +993,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.43.6'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.44.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -1688,7 +1690,7 @@ async function soloSend() {
   const atts = soloAttachments.slice();
   pushSoloMsg(curOcId, { role: 'user', content: text || '（见附件）', ts: Date.now() });
   try {
-    const chatBody = { sessionId: curOcId, message: text, model: curOcModel };
+    const chatBody = { sessionId: curOcId, message: text, model: curOcModel, clientSubmitId: genCid() };
     if (atts.length) chatBody.attachments = atts;
     await streamSSE('/api/oc/chat', chatBody, (e) => {
       if (e.type === 'text') {
@@ -2360,15 +2362,26 @@ function msgNode(m) {
   if (m.role === 'approval') {
     // 人工审批卡片：等待用户放行/否决（刷新后经 /api/approvals 恢复）
     const d = document.createElement('div');
-    d.className = 'approval-card';
+    d.className = 'approval-card' + (m.interrupted ? ' ap-interrupted' : '');
     d.dataset.aid = m.approvalId;
-    d.innerHTML = `
+    if (m.interrupted) {
+      // 上次进程重启遗留的中断审批：编排已终止无法续接，引导断点重跑或忽略
+      d.innerHTML = `
+      <div class="ap-title ap-title-int">⏸ 审批已中断（服务重启，编排已终止）</div>
+      <div class="ap-label">${esc(m.label || '')}</div>
+      <div class="ap-btns">
+        <button class="ap-ok" onclick="rerunInterrupted('${escAttr(m.runId || '')}', this)">↻ 断点重跑</button>
+        <button class="ap-no" onclick="discardApproval('${escAttr(m.approvalId)}', this)">✕ 忽略</button>
+      </div>`;
+    } else {
+      d.innerHTML = `
       <div class="ap-title">⏸ 人工审批（${m.kind === 'plan' ? '调度方案' : '交付确认'}）</div>
       <div class="ap-label">${esc(m.label || '')}</div>
       <div class="ap-btns">
         <button class="ap-ok" onclick="approveCard('${escAttr(m.approvalId)}', true, this)">✔ 同意，继续</button>
         <button class="ap-no" onclick="approveCard('${escAttr(m.approvalId)}', false, this)">✘ 否决，终止</button>
       </div>`;
+    }
     return d;
   }
   if (m.role === 'working') {
@@ -2514,14 +2527,43 @@ async function approveCard(id, approved, btn) {
   }
 }
 
-// 断线/刷新恢复：把服务端仍在等待的审批卡片补回对应会话（同 ID 去重）
+// 忽略中断审批：仅清除记录（编排已随服务重启终止，本就不可裁决）
+async function discardApproval(id, btn) {
+  try {
+    const r = await api('/api/approval', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, discard: true }) });
+    if (!r.success) throw new Error(r.error || '已处理');
+    document.querySelectorAll(`.approval-card[data-aid="${CSS.escape(id)}"] .ap-btns`).forEach(el => {
+      el.outerHTML = '<div class="ap-done">已忽略</div>';
+    });
+  } catch (e) {
+    toast('操作失败：' + e.message);
+  }
+}
+
+// 中断审批的断点重跑：从第 1 阶段重新执行原编排（前置产出自动复用）
+async function rerunInterrupted(runId, btn) {
+  if (!runId) { toast('该审批无关联的编排记录，无法重跑'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = '重跑中…'; }
+  try {
+    await streamSSE('/api/flow/rerun', { run: runId, fromStage: 1, clientSubmitId: genCid() }, (e) => handleStreamEvent(e));
+    document.querySelectorAll('.approval-card .ap-btns').forEach(el => {
+      const card = el.closest('.approval-card');
+      if (card && card.dataset.aid && card.classList.contains('ap-interrupted')) el.outerHTML = '<div class="ap-done">↻ 已发起断点重跑</div>';
+    });
+  } catch (e) {
+    toast('重跑失败：' + (e && e.message || e));
+    if (btn) { btn.disabled = false; btn.textContent = '↻ 断点重跑'; }
+  }
+}
+
+// 断线/刷新恢复：把服务端仍在等待的审批卡片补回对应会话（同 ID 去重）；中断审批同样恢复（引导断点重跑）
 async function restoreApprovals() {
   try {
     const r = await api('/api/approvals');
     const seen = new Set(getSess(curKey()).filter(m => m.role === 'approval').map(m => m.approvalId));
     for (const a of (r.approvals || [])) {
       if (seen.has(a.id)) continue;
-      pushMsg({ role: 'approval', approvalId: a.id, kind: a.kind, label: a.label, taskId: a.taskId || localTaskId(), ts: Date.now() });
+      pushMsg({ role: 'approval', approvalId: a.id, kind: a.kind, label: a.label, taskId: a.taskId || localTaskId(), runId: a.runId || '', interrupted: a.status === 'interrupted', ts: Date.now() });
     }
   } catch { /* 恢复失败不影响使用 */ }
 }
@@ -2619,7 +2661,8 @@ function removeMsg(m) {
 
 // ---------- SSE 流 ----------
 // onError：网络/HTTP 层错误回调（缺省写入群聊会话）；单聊路径必须传入，否则报错对用户不可见
-async function streamSSE(path, body, onEvent, onError) {
+// 带 clientSubmitId 的请求在网络层失败时自动用同一 ID 重试一次（服务端幂等去重，不会重复执行）
+async function streamSSE(path, body, onEvent, onError, retried) {
   const fail = (msg) => { (typeof onError === 'function' ? onError : addSys)(msg); };
   let resp;
   try {
@@ -2627,12 +2670,29 @@ async function streamSSE(path, body, onEvent, onError) {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
     });
   } catch (err) {
+    if (!retried && body && body.clientSubmitId) {
+      await new Promise(r => setTimeout(r, 1200));
+      return streamSSE(path, body, onEvent, onError, true); // 同一 clientSubmitId 重试：服务端去重
+    }
     fail('请求失败：' + (err && err.message || err));
     return;
   }
   if (!resp.ok) {
     const data = await resp.json().catch(() => ({}));
     fail('错误: ' + (data.error || resp.status));
+    return;
+  }
+  const ct = resp.headers.get('content-type') || '';
+  if (ct.includes('application/json')) {
+    // 幂等重放：该提交此前已完成/失败（或正在执行被拒），服务端不重复派发
+    const data = await resp.json().catch(() => ({}));
+    if (data.replayed) {
+      const tid = body && body.taskId;
+      if (data.success) addSys('↻ 该提交此前已执行完成（幂等去重，未重复执行）', tid);
+      else addErr('↻ 该提交此前已失败：' + (data.error || '未知错误'), tid);
+    } else {
+      fail(data.error || '请求被拒绝');
+    }
     return;
   }
   const reader = resp.body.getReader();
@@ -2853,6 +2913,12 @@ function renderSoloAttChips() {
   });
 }
 
+// ---------- 幂等提交标识：每次执行类提交生成唯一 ID，网络失败重试沿用同一 ID（服务端去重，不重复执行） ----------
+function genCid() {
+  try { return 'c-' + crypto.randomUUID(); } catch { /* 旧环境兜底 */ }
+  return 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
 async function send() {
   const text = input.value.trim();
   if ((!text && pendingAttachments.length === 0) || chatBusy) return;
@@ -2873,7 +2939,7 @@ async function send() {
     const isDivide = chatMode === 'divide';
     if (isDivide) { dvRunning = true; updateModeBadges(); }
     const atts = pendingAttachments.slice();
-    const chatBody = { message: text, taskId: curTaskId, mode: isDivide ? 'divide' : (roundtableOn ? 'roundtable' : ''), participants: isDivide ? dvList.filter(id => dvStaff.some(s => s.id === id)) : [] };
+    const chatBody = { message: text, taskId: curTaskId, mode: isDivide ? 'divide' : (roundtableOn ? 'roundtable' : ''), participants: isDivide ? dvList.filter(id => dvStaff.some(s => s.id === id)) : [], clientSubmitId: genCid() };
     if (atts.length) chatBody.attachments = atts;
     await streamSSE('/api/chat', chatBody, (e) => {
       if (typing) { removeMsg(typing); typing = null; }
@@ -2946,7 +3012,7 @@ function handleStreamEvent(e) {
       }
     }
   } else if (e.type === 'approval_required') {
-    pushMsg({ role: 'approval', approvalId: e.approvalId, kind: e.kind, label: e.label, taskId: e.taskId || localTaskId(), ts: Date.now() });
+    pushMsg({ role: 'approval', approvalId: e.approvalId, kind: e.kind, label: e.label, taskId: e.taskId || localTaskId(), runId: e.runId || '', interrupted: false, ts: Date.now() });
   } else if (e.type === 'error') {
     addErr('❌ 执行出错: ' + e.content, e.taskId);
   }

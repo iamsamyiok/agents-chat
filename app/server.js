@@ -105,15 +105,23 @@ const memoryMod = require('./lib/memory');
 const { CardStore, runner: cardRunner, sseSubscribe, MAX_PARALLEL, wouldCycle } = require('./lib/cards');
 
 // ---------- 人工审批关卡：orchestrator 暂停等待用户放行（方案/交付），SSE 断线后可经 /api/approvals 恢复 ----------
-const pendingApprovals = new Map(); // approvalId -> {kind,label,taskId,resolve,timer}
+// 落盘持久化（.data/pending-approvals.json）：进程重启后未决审批标记中断，前端引导断点重跑（借鉴 tutti ADR 0006）
+const pendingApprovals = new Map(); // approvalId -> {kind,label,taskId,runId,resolve,timer,createdAt}
+const interruptedApprovals = new Map(); // approvalId -> 落盘记录（上次进程中断遗留，仅展示与引导，不阻塞自动退出）
 const APPROVAL_TIMEOUT_MS = Number(process.env.AGENTS_CHAT_APPROVAL_TIMEOUT_MS) > 0
   ? Number(process.env.AGENTS_CHAT_APPROVAL_TIMEOUT_MS) : 600000; // 默认 10 分钟未审批视为拒绝
 
-function makeRequestApproval() {
-  return (kind, label, taskId) => new Promise((resolve) => {
+// emitFn：延迟取当前 SSE 发射器（审批触发时流已建立）；requestApproval(kind,label,taskId,runId)
+function makeRequestApproval(emitFn) {
+  return (kind, label, taskId, runId) => new Promise((resolve) => {
     const id = 'apr-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
+    const createdAt = new Date().toISOString();
     const timer = setTimeout(() => finishApproval(id, false, true), APPROVAL_TIMEOUT_MS);
-    pendingApprovals.set(id, { kind, label, taskId: taskId || '', resolve, timer, createdAt: new Date().toISOString() });
+    pendingApprovals.set(id, { kind, label, taskId: taskId || '', runId: runId || '', resolve, timer, createdAt });
+    try {
+      store.savePendingApproval(id, { kind, label, taskId: taskId || '', runId: runId || '', createdAt, deadline: new Date(Date.now() + APPROVAL_TIMEOUT_MS).toISOString(), status: 'pending' });
+    } catch (e) { console.error('[approval] 落盘失败:', e && e.message); }
+    try { if (typeof emitFn === 'function') emitFn()({ type: 'approval_required', approvalId: id, kind, label, taskId: taskId || '', runId: runId || '' }); } catch { /* SSE 已断开：刷新后经 /api/approvals 恢复 */ }
   });
 }
 function finishApproval(id, approved, timedOut) {
@@ -121,9 +129,57 @@ function finishApproval(id, approved, timedOut) {
   if (!a) return null;
   clearTimeout(a.timer);
   pendingApprovals.delete(id);
+  try { store.removePendingApproval(id); } catch { /* ignore */ }
   a.resolve(!!approved);
   return { ...a, timedOut: !!timedOut };
 }
+// 启动恢复：上次进程未决审批 → 标记中断（编排已随进程终止无法续接，引导断点重跑）；超时项直接清除
+(function restoreApprovalsOnBoot() {
+  try {
+    const saved = store.getPendingApprovals();
+    const now = Date.now();
+    let n = 0;
+    for (const [id, rec] of Object.entries(saved)) {
+      if (rec && rec.status === 'interrupted') { interruptedApprovals.set(id, rec); continue; }
+      if (rec && rec.deadline && Date.parse(rec.deadline) <= now) {
+        try { store.removePendingApproval(id); } catch { /* ignore */ }
+        continue;
+      }
+      const interruptedAt = new Date().toISOString();
+      const rec2 = { ...(rec || {}), status: 'interrupted', interruptedAt };
+      interruptedApprovals.set(id, rec2);
+      try { store.markApprovalInterrupted(id, interruptedAt); } catch { /* ignore */ }
+      n++;
+    }
+    if (n) console.log(`[approval] ${n} 条上次未决审批已标记中断（审批面板可断点重跑或忽略）`);
+  } catch (e) { console.error('[approval] 启动恢复失败:', e && (e.message || e)); }
+})();
+
+// ---------- 幂等提交：执行类 API 带 clientSubmitId 时先落 claim，响应丢失后重试不重复派发（借鉴 tutti SubmitClaim） ----------
+// pending → 409（在途不二派）；done/failed → 返回原结果（replayed，不重复执行）；interrupted（上次进程重启遗留）→ 清除后放行重发
+function claimIdempotency(body, scope) {
+  const cid = String((body && body.clientSubmitId) || '').slice(0, 80);
+  if (!cid) return { cid: '', ok: true };
+  const existing = store.getClaims()[cid];
+  if (existing) {
+    if (existing.status === 'pending') {
+      return { cid, ok: false, resp: { code: 409, data: { success: false, error: '该提交正在执行中（幂等去重，未重复派发）', claimStatus: 'pending' } } };
+    }
+    if (existing.status === 'done' || existing.status === 'failed') {
+      const result = existing.result || {};
+      return { cid, ok: false, resp: { code: 200, data: { success: existing.status === 'done', replayed: true, result, ...(existing.status === 'failed' ? { error: String(result.error || '上次执行失败') } : {}) } } };
+    }
+    store.deleteClaim(cid); // interrupted：上次进程重启遗留，允许重新发起
+  }
+  store.upsertClaim(cid, { scope, status: 'pending', createdAt: new Date().toISOString() });
+  return { cid, ok: true };
+}
+function settleClaim(cid, ok, result) {
+  if (!cid) return;
+  store.upsertClaim(cid, { status: ok ? 'done' : 'failed', result: result || {} });
+}
+function settleClaimFail(cid, error) { settleClaim(cid, false, { error: String(error || '执行失败') }); }
+
 // 审批模式：'off' | 'plan'（方案后）| 'verify'（交付前）| 'all'；config.approval 优先，其次 env 默认
 function approvalSetting() {
   const v = String(store.getConfig().approval || process.env.AGENTS_CHAT_APPROVAL || 'off').toLowerCase();
@@ -443,18 +499,28 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/approvals' && req.method === 'GET') {
-    // 当前等待中的审批（前端刷新/断线重连后恢复审批卡片）
+    // 当前等待中的审批（前端刷新/断线重连后恢复审批卡片）+ 上次进程中断的审批（引导断点重跑）
     json(res, 200, {
       success: true,
-      approvals: [...pendingApprovals.entries()].map(([id, a]) => ({ id, kind: a.kind, label: a.label, taskId: a.taskId, createdAt: a.createdAt }))
+      approvals: [
+        ...[...pendingApprovals.entries()].map(([id, a]) => ({ id, kind: a.kind, label: a.label, taskId: a.taskId, runId: a.runId || '', createdAt: a.createdAt, status: 'pending' })),
+        ...[...interruptedApprovals.entries()].map(([id, a]) => ({ id, kind: a.kind || 'plan', label: a.label || '', taskId: a.taskId || '', runId: a.runId || '', createdAt: a.createdAt || '', interruptedAt: a.interruptedAt || '', status: 'interrupted' }))
+      ]
     });
     return;
   }
 
   if (p === '/api/approval' && req.method === 'POST') {
-    // 审批裁决：approved=true 放行继续编排；false 终止编排
+    // 审批裁决：approved=true 放行继续编排；false 终止编排；discard=true 忽略中断审批记录（仅清除展示）
     const body = await readBody(req);
     const id = String(body.id || '');
+    if (body.discard) {
+      if (!interruptedApprovals.has(id)) { json(res, 404, { success: false, error: '中断审批不存在' }); return; }
+      interruptedApprovals.delete(id);
+      try { store.removePendingApproval(id); } catch { /* ignore */ }
+      json(res, 200, { success: true, id, discarded: true });
+      return;
+    }
     const a = pendingApprovals.get(id);
     if (!a) { json(res, 404, { success: false, error: '审批不存在或已处理' }); return; }
     finishApproval(id, !!body.approved, false);
@@ -479,19 +545,23 @@ const server = http.createServer(async (req, res) => {
     // 断点重跑：从历史编排的某个阶段重新执行（前置阶段产出复用）
     // 走 chat 作用域锁（与聊天互斥）；消息写回原会话；SSE 实时回传全过程
     const body = await readBody(req);
+    const idem = claimIdempotency(body, 'rerun');
+    if (!idem.ok) { json(res, idem.resp.code, idem.resp.data); return; }
     const runId = String(body.run || '').slice(0, 60);
     const fromStage = Number(body.fromStage) || 1;
     const events = runId ? store.getFlow(runId) : [];
-    if (!events.length) { json(res, 404, { success: false, error: '编排记录不存在' }); return; }
+    if (!events.length) { settleClaimFail(idem.cid, '编排记录不存在'); json(res, 404, { success: false, error: '编排记录不存在' }); return; }
     let prepared;
     try {
       const agentsAll = store.getAgents();
       prepared = prepareRerun(events, fromStage, agentsAll.filter(a => a.id !== 'butler'));
     } catch (err) {
+      settleClaimFail(idem.cid, err && err.message || String(err));
       json(res, 400, { success: false, error: err && err.message || String(err) });
       return;
     }
     if (runLocks.chat) {
+      settleClaimFail(idem.cid, '当前有编排进行中');
       json(res, 409, { success: false, error: '当前有编排进行中，请等待完成或先停止' });
       return;
     }
@@ -504,7 +574,7 @@ const server = http.createServer(async (req, res) => {
     const opts = {
       taskId, history: buildHistoryText(taskId), scope: 'chat',
       isStopped: () => stopTokens.chat !== myToken,
-      approval: approvalSetting(), requestApproval: makeRequestApproval(),
+      approval: approvalSetting(), requestApproval: makeRequestApproval(() => send),
       resume: { phases: prepared.phases, priorResults: prepared.priorResults, fromStage: prepared.fromStage, baseRun: runId }
     };
     const send = sse(req, res);
@@ -512,9 +582,11 @@ const server = http.createServer(async (req, res) => {
     try {
       send({ type: 'notice', content: `↻ 断点重跑：从第 ${prepared.fromStage} 阶段开始（前序 ${prepared.priorResults.length} 份产出复用）${prepared.dropped.length ? `；注意：智能体 ${prepared.dropped.join('、')} 已不存在，相关步骤被跳过` : ''}`, taskId });
       await runButler(butler, subAgents, prepared.message, opts, send, persist);
+      settleClaim(idem.cid, true, { run: runId, fromStage: prepared.fromStage });
     } catch (err) {
       console.error('[flow/rerun] 编排异常:', err && (err.stack || err));
       send({ type: 'error', content: `重跑异常：${err && err.message || err}` });
+      settleClaimFail(idem.cid, err && err.message || String(err));
     } finally {
       runLocks.chat = false;
       try { res.end(); } catch { /* closed */ }
@@ -935,11 +1007,14 @@ ${need}
     // 顺序执行任务：scope='solo' 时由 OpenCode 单体逐个执行（每个任务独立一次性对话）；
     // 默认（群聊）每个任务 = 独立会话 + 一次完整管家调度
     // 未指定 ids 时仅执行顺序待办（未到点的定时任务不在此列，由定时调度器负责）
+    const body = await readBody(req); // 先读完请求体（异常连接不占用任何状态）
+    const idem = claimIdempotency(body, 'tasks');
+    if (!idem.ok) { json(res, idem.resp.code, idem.resp.data); return; }
     if (runLocks.tasks) {
+      settleClaimFail(idem.cid, '已有一批任务正在执行');
       json(res, 409, { success: false, error: '已有一批任务正在执行，请等待完成或先停止' });
       return;
     }
-    const body = await readBody(req); // 先读完请求体再加锁：异常连接不会永久占用运行锁
     runLocks.tasks = true;
     const myToken = stopTokens.tasks; // 执行期间令牌变化 = 用户请求了停止
     const soloScope = body.scope === 'solo';
@@ -951,6 +1026,7 @@ ${need}
         && (soloScope ? t.runner === 'solo' : t.runner !== 'solo'));
     if (selected.length === 0) {
       runLocks.tasks = false;
+      settleClaimFail(idem.cid, '没有可执行的任务');
       json(res, 400, { success: false, error: '没有可执行的任务' });
       return;
     }
@@ -962,11 +1038,13 @@ ${need}
       } else {
         await executeTaskBatch(selected, send, myToken);
       }
+      settleClaim(idem.cid, true, { count: selected.length, scope: soloScope ? 'solo' : 'chat', titles: selected.map(t => t.title).join('、').slice(0, 2000) });
       // 群聊批次整体完成通知（单任务通知由 orchestrator 消息流承担，批次级聚合在此）
       notifyDone({ kind: 'batch', title: `${soloScope ? '单聊' : '群聊'}任务批次（${selected.length} 个）`, status: 'done', snippet: selected.map(t => t.title).join('、') });
     } catch (err) {
       console.error('[tasks/run] 编排异常:', err && (err.stack || err));
       send({ type: 'error', content: `任务编排异常：${err && err.message || err}` });
+      settleClaimFail(idem.cid, err && err.message || String(err));
     } finally {
       runLocks.tasks = false;
       try { res.end(); } catch { /* closed */ }
@@ -1012,11 +1090,14 @@ ${need}
     // 聊天：@点名 → 点名智能体串行流水线；未点名 → 管家调度
     // taskId 非空时为任务会话内聊天（携带该会话历史背景）
     // 任务批量执行中仍可聊天（互不阻塞），但同时只允许一个聊天编排
+    const body = await readBody(req); // 先读完请求体（异常连接不占用任何状态）
+    const idem = claimIdempotency(body, 'chat');
+    if (!idem.ok) { json(res, idem.resp.code, idem.resp.data); return; }
     if (runLocks.chat) {
+      settleClaimFail(idem.cid, '上一条消息还在处理中');
       json(res, 409, { success: false, error: '上一条消息还在处理中，请等待完成或点「停止」' });
       return;
     }
-    const body = await readBody(req); // 先读完请求体再加锁：异常连接不会永久占用运行锁
     runLocks.chat = true;
     const myToken = stopTokens.chat;
     const message = String(body.message || '').trim();
@@ -1024,12 +1105,14 @@ ${need}
     const hasAttach = Array.isArray(body.attachments) && body.attachments.length > 0;
     if (!message && !hasAttach) {
       runLocks.chat = false;
+      settleClaimFail(idem.cid, 'message 不能为空');
       json(res, 400, { success: false, error: 'message 不能为空' });
       return;
     }
     const agents = store.getAgents();
     if (agents.length === 0) {
       runLocks.chat = false;
+      settleClaimFail(idem.cid, '没有可用的 Agent');
       json(res, 400, { success: false, error: '没有可用的 Agent，请先配置' });
       return;
     }
@@ -1037,6 +1120,7 @@ ${need}
     const subAgents = agents.filter(a => a.id !== 'butler');
     if (!butler) {
       runLocks.chat = false;
+      settleClaimFail(idem.cid, '管家智能体缺失');
       json(res, 400, { success: false, error: '管家智能体缺失，配置异常' });
       return;
     }
@@ -1070,6 +1154,7 @@ ${need}
       }
       if (!divideParticipants.length) {
         runLocks.chat = false;
+        settleClaimFail(idem.cid, '分工模式缺少参与者');
         json(res, 400, { success: false, error: '分工模式需要至少一名参与者，请先在职工名单中添加职工' });
         return;
       }
@@ -1084,7 +1169,7 @@ ${need}
     const historyText = body.mode === 'divide'
       ? await buildDivideHistory(storeTaskId)
       : buildHistoryText(taskId);
-    const opts = { taskId: storeTaskId, history: historyText, scope: 'chat', isStopped: () => stopTokens.chat !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval() };
+    const opts = { taskId: storeTaskId, history: historyText, scope: 'chat', isStopped: () => stopTokens.chat !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval(() => send) };
     store.addMessage({ role: 'user', content: message || '（见附件）', taskId: storeTaskId, timestamp: new Date().toISOString() });
 
     const send = sse(req, res);
@@ -1105,9 +1190,11 @@ ${need}
           : runButler(butler, subAgents, clean, opts, send, persist);
       }
       await run;
+      settleClaim(idem.cid, true, { taskId: storeTaskId, mode: body.mode || 'chat', summary: String((run && run.finalText) || '').slice(0, 2000) });
     } catch (err) {
       console.error('[chat] 编排异常:', err && (err.stack || err));
       send({ type: 'error', content: `编排异常：${err && err.message || err}` });
+      settleClaimFail(idem.cid, err && err.message || String(err));
     } finally {
       runLocks.chat = false;
       try { res.end(); } catch { /* closed */ }
@@ -1144,11 +1231,19 @@ ${need}
     const body = await readBody(req);
     const data = String(body.data || '');
     if (!data.trim()) { json(res, 200, { success: true }); return; }
+    // 幂等提交：响应丢失后重试不会把命令重复写进 stdin（命令重复执行有副作用）
+    const idem = claimIdempotency(body, 'term');
+    if (!idem.ok) {
+      if (idem.resp.code === 409) { json(res, 409, idem.resp.data); return; }
+      json(res, 200, { ...idem.resp.data }); // replayed：命令已写入过，不重复执行
+      return;
+    }
     const proc = termShell();
     if (proc) {
       // 输入回显由前端负责（提示符 + 命令），这里只写 stdin
       try { proc.stdin.write(data + '\n'); } catch { termShell() && termProc.stdin.write(data + '\n'); }
     }
+    settleClaim(idem.cid, true, { bytes: data.length });
     json(res, 200, { success: true });
     return;
   }
@@ -1293,20 +1388,24 @@ ${need}
 
   if (p === '/api/oc/chat' && req.method === 'POST') {
     // 单聊对话：opencode run（-s 续聊），SSE 转发快照事件
+    const body = await readBody(req); // 先读完请求体（异常连接不占用任何状态）
+    const idem = claimIdempotency(body, 'oc-chat');
+    if (!idem.ok) { json(res, idem.resp.code, idem.resp.data); return; }
     if (runLocks.solo) {
+      settleClaimFail(idem.cid, '上一条消息还在处理中');
       json(res, 409, { success: false, error: '上一条消息还在处理中，请等待完成或点「停止」' });
       return;
     }
-    const body = await readBody(req);
     const sessionId = String(body.sessionId || '');
     const message = String(body.message || '').trim();
     const model = String(body.model || '');
     const rec = store.getOcSession(sessionId);
-    if (!rec) { json(res, 404, { success: false, error: '会话不存在，请先新建' }); return; }
+    if (!rec) { settleClaimFail(idem.cid, '会话不存在'); json(res, 404, { success: false, error: '会话不存在，请先新建' }); return; }
 
     const { resolveRunner, missingHint } = require('./lib/agent');
     const runner = resolveRunner();
     if (runner.kind === 'missing') {
+      settleClaimFail(idem.cid, '内核不可用');
       json(res, 400, { success: false, error: missingHint(runner) });
       return;
     }
@@ -1391,10 +1490,12 @@ ${need}
         store.addMessage({ role: 'assistant', agentId: 'solo', agentName: 'OpenCode', phase: 'work', taskId: sessionId, content: finalText, timestamp: new Date().toISOString() });
       }
       store.upsertOcSession(sessionId, {}); // 刷新 updatedAt（侧栏排序）
+      settleClaim(idem.cid, true, { sessionId, summary: finalText.slice(0, 2000) });
     } catch (err) {
       console.error('[oc/chat] 单聊异常:', err && (err.stack || err));
       send({ type: 'error', content: `单聊异常：${err && err.message || err}` });
       send({ type: 'done', sessionId, error: '内部异常' });
+      settleClaimFail(idem.cid, err && err.message || String(err));
     } finally {
       runLocks.solo = false;
       try { res.end(); } catch { /* closed */ }
@@ -1685,7 +1786,11 @@ ${need}
   }
 
   if (p === '/api/cards/run' && req.method === 'POST') {
+    const body = await readBody(req);
+    const idem = claimIdempotency(body, 'cards');
+    if (!idem.ok) { json(res, idem.resp.code, idem.resp.data); return; }
     cardRunner.start();
+    settleClaim(idem.cid, true, { running: true });
     json(res, 200, { success: true, running: true });
     return;
   }
@@ -1897,7 +2002,7 @@ async function executeTaskBatch(selected, send, myToken) {
   const persist = (m) => store.addMessage({ ...m, timestamp: new Date().toISOString() });
   await runTasks(
     selected, butler, subAgents,
-    { getHistory: (tid) => buildHistoryText(tid), resolveAssign, scope: 'tasks', isStopped: () => stopTokens.tasks !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval(), taskCwd: (task) => (task.worktree && task.worktree.dir) || '' },
+    { getHistory: (tid) => buildHistoryText(tid), resolveAssign, scope: 'tasks', isStopped: () => stopTokens.tasks !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval(() => send), taskCwd: (task) => (task.worktree && task.worktree.dir) || '' },
     send, persist,
     // 任务会话首条消息：任务本身（用户视角）
     (task) => {

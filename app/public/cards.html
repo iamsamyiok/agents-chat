@@ -837,10 +837,13 @@ async function delCard(id){ if(!confirm('确认删除该任务？将移入垃圾
 $('#btnClear').onclick=async()=>{ if(!confirm('清空全部任务？将移入垃圾桶（30 天内可还原）。'))return; await post('/api/cards/clear'); await loadCards(); };
 
 // ---- 执行控制 ----
+// 幂等提交：网络失败重试沿用同一 clientSubmitId（服务端去重，不重复启动）
+const genCid = () => { try { return 'c-' + crypto.randomUUID(); } catch { /* 旧环境兜底 */ }
+  return 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); };
 $('#btnRun').onclick=async()=>{
   // 顺手请求系统通知权限（无侵入，拒绝也不影响）
   try{ if('Notification' in window && Notification.permission==='default') Notification.requestPermission(); }catch{ /* ignore */ }
-  await post('/api/cards/run'); await loadCards(); toast('已启动，完成即自动注入下一个任务');
+  await post('/api/cards/run', { clientSubmitId: genCid() }); await loadCards(); toast('已启动，完成即自动注入下一个任务');
 };
 $('#btnStop').onclick=async()=>{ await post('/api/cards/stop'); await loadCards(); };
 $('#btnRetryFailed').onclick=retryAllFailed;

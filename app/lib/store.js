@@ -1044,8 +1044,79 @@ function deleteStaff(id) {
   return true;
 }
 
+// ---------- 幂等提交 claim：执行类 API 的 clientSubmitId → 状态（响应丢失后重试不重复派发，借鉴 tutti SubmitClaim） ----------
+const CLAIMS_PATH = path.join(DATA_DIR, 'submit-claims.json');
+const CLAIM_MAX = 500; // 上限淘汰最旧（按 updatedAt），防无限增长
+
+function getClaims() {
+  const d = readJson(CLAIMS_PATH, null);
+  return d && d.claims && typeof d.claims === 'object' ? d.claims : {};
+}
+function upsertClaim(id, patch) {
+  const cid = String(id || '').slice(0, 80);
+  if (!cid) return;
+  const claims = getClaims();
+  const prev = claims[cid] || {};
+  claims[cid] = { ...prev, ...patch, updatedAt: patch.updatedAt || new Date().toISOString() };
+  const keys = Object.keys(claims);
+  if (keys.length > CLAIM_MAX) {
+    keys.sort((a, b) => String(claims[a].updatedAt || '').localeCompare(String(claims[b].updatedAt || '')));
+    for (const k of keys.slice(0, keys.length - CLAIM_MAX)) delete claims[k];
+  }
+  writeJson(CLAIMS_PATH, { claims });
+}
+function deleteClaim(id) {
+  const cid = String(id || '');
+  const claims = getClaims();
+  if (claims[cid]) {
+    delete claims[cid];
+    writeJson(CLAIMS_PATH, { claims });
+  }
+}
+
+// ---------- 审批持久化：pendingApprovals 落盘（进程重启后标记中断，前端引导断点重跑，借鉴 tutti ADR 0006） ----------
+const PAPPR_PATH = path.join(DATA_DIR, 'pending-approvals.json');
+
+function loadPappr() {
+  const d = readJson(PAPPR_PATH, null);
+  return d && d.approvals && typeof d.approvals === 'object' ? d : { approvals: {} };
+}
+function getPendingApprovals() {
+  return loadPappr().approvals;
+}
+function savePendingApproval(id, rec) {
+  const aid = String(id || '');
+  if (!aid) return;
+  const d = loadPappr();
+  d.approvals[aid] = rec;
+  writeJson(PAPPR_PATH, d);
+}
+function removePendingApproval(id) {
+  const aid = String(id || '');
+  const d = loadPappr();
+  if (d.approvals[aid]) {
+    delete d.approvals[aid];
+    writeJson(PAPPR_PATH, d);
+  }
+}
+function markApprovalInterrupted(id, interruptedAt) {
+  const aid = String(id || '');
+  const d = loadPappr();
+  if (d.approvals[aid]) {
+    d.approvals[aid] = { ...d.approvals[aid], status: 'interrupted', interruptedAt };
+    writeJson(PAPPR_PATH, d);
+  }
+}
+
 module.exports = {
   DATA_DIR,
+  getClaims,
+  upsertClaim,
+  deleteClaim,
+  getPendingApprovals,
+  savePendingApproval,
+  removePendingApproval,
+  markApprovalInterrupted,
   BUTLER,
   getConfig,
   saveConfig,

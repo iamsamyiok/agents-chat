@@ -175,6 +175,8 @@ function runAgentOnce(agent, prompt, emit, phase, role, taskId, sessionDir, scop
         }
         const outputPath = error ? '' : saveOutput(sessionDir, agent.name, phase, output);
         if (outputPath) emit({ type: 'saved', path: outputPath, agentId: agent.id, agentName: agent.name, phase, taskId: taskId || '' });
+        // 成果清单增量注册：本段产出解析出的成果文件进会话级 ARTIFACTS.md（失败静默，见 registerArtifacts 注释）
+        if (!error && output) registerArtifacts(sessionDir, [{ agent, output }], taskId);
         resolve({ output, error, outputPath, sessionId: ocSession });
       }
     }, scope, sessionId);
@@ -365,7 +367,7 @@ async function runWithHandoff(agent, prompt, roster, opts, emit, phase, role, ta
 
 // ---------- 人工审批关卡：规划后 / 交付前暂停等待用户放行（借鉴 LangGraph interrupt / OpenAI 审批模式） ----------
 // 审批等待期间用户点「停止」或审批超时都视为拒绝；全部走 opts.requestApproval（由 server 注入），orchestrator 不感知 HTTP
-async function approvalGate(kind, label, opts, emit, isStopped, taskId) {
+async function approvalGate(kind, label, opts, emit, isStopped, taskId, runId) {
   const mode = String((opts && opts.approval) || 'off');
   if (mode !== 'all' && mode !== kind) return true;
   if (!opts || typeof opts.requestApproval !== 'function') return true;
@@ -376,7 +378,7 @@ async function approvalGate(kind, label, opts, emit, isStopped, taskId) {
     return false;
   })();
   const approved = await Promise.race([
-    Promise.resolve(opts.requestApproval(kind, label, taskId)),
+    Promise.resolve(opts.requestApproval(kind, label, taskId, runId)),
     stopWatcher
   ]).finally(() => { settled = true; });
   if (approved) {
@@ -387,11 +389,82 @@ async function approvalGate(kind, label, opts, emit, isStopped, taskId) {
   return approved;
 }
 
-function appendWorkContext(prompt, results, history) {
+// ---------- 成果清单：会话级成果文件注册表（惰性引用数据源，借鉴 tutti workspace-reference） ----------
+// 每段产出落盘后增量注册；下游 prompt 不再展开全部成果文件内容，改为给清单句柄，由下游按需读取具体文件
+function artifactsPathOf(sessionDir) {
+  return path.join(sessionDir, 'ARTIFACTS.md');
+}
+
+function registerArtifacts(sessionDir, results, taskId) {
+  try {
+    const list = Array.isArray(results) ? results : [];
+    const ap = artifactsPathOf(sessionDir);
+    const kept = [];
+    if (fs.existsSync(ap)) {
+      for (const line of fs.readFileSync(ap, 'utf8').split(/\r?\n/)) {
+        if (line.startsWith('- ')) kept.push(line);
+      }
+    }
+    const known = new Set(kept.map(l => String(l.split('｜')[0] || '').replace(/^- /, '').trim()).filter(Boolean));
+    let added = 0;
+    for (const r of list) {
+      const who = r && r.agent ? String(r.agent.name || '') : String((r && r.name) || '');
+      for (const f of extractDeliverFiles((r && r.output) || '', resolveCwd())) {
+        if (known.has(f)) continue;
+        let size = 0;
+        let mtime = '';
+        try {
+          const st = fs.statSync(f);
+          size = st.size;
+          mtime = st.mtime.toISOString();
+        } catch { continue; } // 文件已不存在：不进清单
+        kept.push(`- ${f} ｜ ${who || '未知'} ｜ ${size}B ｜ ${mtime}`);
+        known.add(f);
+        added++;
+      }
+    }
+    if (!added && kept.length === 0) return ''; // 本会话尚无任何成果文件：不创建清单
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const head = [
+      '# 成果清单（本会话全部成果文件的完整绝对路径）',
+      `# taskId: ${taskId || ''}`,
+      `# 更新: ${new Date().toISOString()}`,
+      '# 需要文件内容时：先用文件读取工具读本清单，再按需读取具体文件（不要凭空假设文件内容，也不要一次读入全部文件）'
+    ];
+    const tmp = ap + '.tmp';
+    fs.writeFileSync(tmp, head.concat(kept).join('\n') + '\n', 'utf8');
+    fs.renameSync(tmp, ap);
+    return ap;
+  } catch { return ''; }
+}
+
+// 清单存在且有内容时返回路径（供 prompt 注入句柄），否则空串（回退摘要模式）
+function artifactsHandle(taskId) {
+  try {
+    const ap = artifactsPathOf(sessionOutDir(taskId));
+    if (fs.existsSync(ap)) {
+      const body = fs.readFileSync(ap, 'utf8');
+      if (body.includes('\n- ') || body.startsWith('- ')) return ap;
+    }
+  } catch { /* ignore */ }
+  return '';
+}
+
+function appendWorkContext(prompt, results, history, taskId) {
   let p = prompt;
   if (HANDOFF_MODE() === 'full') {
-    const ctx = buildContext(results);
-    if (ctx) p += `\n\n【工作背景：前序智能体的产出摘要（完整版见下方文件）】\n${ctx}`;
+    const artPath = taskId ? artifactsHandle(taskId) : '';
+    if (artPath) {
+      // 惰性引用：不展开全部成果文件，给清单句柄由下游按需读取（R1：上下文体积与成果数解耦）
+      const done = results.filter(r => r.output).map(r => r.agent.name);
+      const failed = results.filter(r => r.error && !r.output).map(r => r.agent.name);
+      const who = [...done.map(n => `${n}（完成）`), ...failed.map(n => `${n}（失败）`)].join('、');
+      if (who) p += `\n\n【工作背景】前序智能体：${who}`;
+      p += `\n【成果清单】${artPath}\n前序全部成果文件的完整绝对路径都在该清单里；需要上游产出内容时，先用文件读取工具读取该清单，再按需读取具体文件（不要凭空假设文件内容，也不要一次读入全部文件）。`;
+    } else {
+      const ctx = buildContext(results);
+      if (ctx) p += `\n\n【工作背景：前序智能体的产出摘要（完整版见下方文件）】\n${ctx}`;
+    }
   } else {
     const docs = results.filter(r => r.output || r.error).map(r => buildHandoffDoc(r)).join('\n\n');
     if (docs) p += `\n\n【交接文档（前序智能体留给你的，含任务进度与成果文件位置）】\n${docs}\n\n请先通过「成果文件」路径读取上游完整产出后再开工，避免仅凭摘要行事。`;
@@ -676,7 +749,7 @@ ${message}
   } // endif 非重跑的规划分支
 
   // 方案审批关卡：规划确定后、动工前等待用户放行（approval=plan/all 时启用）
-  if (phases.length > 0 && !(await approvalGate('plan', `调度方案：${phases.length} 个阶段，涉及 ${[...new Set(phases.flat().map(s => s.agentName || s.agent))].filter(Boolean).join('、')}`, opts, emit, isStopped, taskId))) {
+  if (phases.length > 0 && !(await approvalGate('plan', `调度方案：${phases.length} 个阶段，涉及 ${[...new Set(phases.flat().map(s => s.agentName || s.agent))].filter(Boolean).join('、')}`, opts, emit, isStopped, taskId, runId))) {
     return { ok: false, finalText: '用户否决了调度方案，编排已终止（可修改需求后重新发起）', stopped: true };
   }
 
@@ -715,7 +788,7 @@ ${message}
         const agent = subAgents.find(a => a.id === step.agentId);
         logFlow({ run: runId, type: 'dispatch', from: butler.name, to: agent.name, stage: i + 1, summary: String(step.instruction).replace(/\s+/g, ' ').slice(0, 200) });
         let p = `【来自管家的指派】\n${step.instruction}\n\n【用户原始需求】\n${message}`;
-        p = appendWorkContext(p, results, opts.history);
+        p = appendWorkContext(p, results, opts.history, taskId);
         const boardText = boardRead(sessionDir);
         if (boardText) p += `\n\n【共享看板（本轮任务全体协作者的进展与提醒，含并行同伴的已完成阶段）】\n${boardText}`;
         p += '\n\n请输出你的正式结果。' + deliverAsk() + (handoffDoc ? HANDOFF_ASK : '') + BOARD_ASK;
@@ -851,7 +924,7 @@ ${filesSection}${autoText}
 
   // ---- 4. 汇总：面向用户的正式回答 ----
   // 交付审批关卡：验收通过后、正式交付前等待用户放行（approval=verify/all 时启用）
-  if (!(await approvalGate('verify', `交付确认：${accepted ? '验收通过' : `经 ${reworks} 轮返工仍有残留问题`}`, opts, emit, isStopped, taskId))) {
+  if (!(await approvalGate('verify', `交付确认：${accepted ? '验收通过' : `经 ${reworks} 轮返工仍有残留问题`}`, opts, emit, isStopped, taskId, runId))) {
     return { ok: false, finalText: '用户否决了本次交付，编排已终止（各智能体产出已保存在会话产出目录，可在流转视图中断点重跑）', stopped: true };
   }
   const outs = results.map(r => `【${r.agent.name}】\n${r.output || `（执行失败：${r.error}）`}`).join('\n\n');
@@ -926,7 +999,7 @@ async function runMentioned(mentionAgents, message, opts, emit, onMessage) {
       }
     }
     logFlow({ run: runId, type: 'dispatch', from: i === 0 ? '用户' : mentionAgents[i - 1].name, to: agent.name, stage: i + 1, summary: String(message).replace(/\s+/g, ' ').slice(0, 200) });
-    const p = appendWorkContext(message, results, opts.history) + (handoffDoc && role === 'worker' ? HANDOFF_ASK : '');
+    const p = appendWorkContext(message, results, opts.history, taskId) + (handoffDoc && role === 'worker' ? HANDOFF_ASK : '');
     // 中途委派：@点名流水线同样允许转交给名单内其他智能体（含管家改派子智能体之外的对象）
     const { agent: finalAgent, res, trail } = await runWithHandoff(agent, p, mentionAgents, opts, emit, 'work', role, taskId, sessionDir, scope, isStopped);
     for (const t of trail) logFlow({ run: runId, type: 'handoff', from: t.from, to: t.to, stage: i + 1, summary: `中途委派：${t.reason}`, detail: { delegate: true } });
@@ -1613,7 +1686,7 @@ async function runDivide(participants, message, opts, emit, onMessage) {
     const sessionDir = sessionOutDir(taskId);
     const agent = Object.assign({}, item.agent, { model: '' }); // 分工模式统一默认模型
     const prompt = item.hop === 0
-      ? appendWorkContext(item.context, [], opts.history)
+      ? appendWorkContext(item.context, [], opts.history, taskId)
       : item.context;
     const { agent: finalAgent, res } = await runWithHandoff(
       agent, prompt, participants, opts, emit, 'divide',
@@ -1703,6 +1776,7 @@ module.exports = {
   testBoardInit: boardInit, testBoardAppend: boardAppend, testBoardRead: boardRead,
   testExtractBoardNote: extractBoardNote, testParseHandoff: parseHandoff,
   testApprovalGate: approvalGate,
+  testRegisterArtifacts: registerArtifacts, testAppendWorkContext: appendWorkContext, testArtifactsHandle: artifactsHandle,
   testExtractPlanJSON: extractPlanJSON, testResolveAgentRef: resolveAgentRef,
   testSplitByDependency: splitByDependency, testNormalizePhases: normalizePhases
 };
