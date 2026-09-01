@@ -226,6 +226,9 @@ function chatSolo(runnerKind, runner, opts, onEvent) {
     const args = ['run', '--format', 'json'];
     if (model && MODEL_RE.test(model)) args.push('-m', model);
     if (ocSessionId && OC_SESSION_RE.test(ocSessionId)) args.push('-s', ocSessionId);
+    // 附件：opencode 官方 -f/--file 直传（文本/代码/图片原生可读，图片走视觉）
+    const files = Array.isArray(opts.files) ? opts.files.filter(f => typeof f === 'string' && fs.existsSync(f)) : [];
+    for (const f of files) args.push('-f', f);
     // 非交互模式下 opencode 对权限请求默认自动拒绝，导致无法真实干活；
     // 默认加 --auto，.env 可用 AGENTS_CHAT_AUTO_APPROVE=0 关闭（与群聊一致）
     if (process.env.AGENTS_CHAT_AUTO_APPROVE !== '0') args.push('--auto');

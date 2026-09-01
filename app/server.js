@@ -8,6 +8,29 @@ const fs = require('fs');
 const path = require('path');
 const url = require('url');
 const { spawn } = require('child_process');
+const attachment = require('./lib/attachment');
+const attachmentConfig = require('./lib/attachment-config');
+
+// 从本地持久化配置构建附件解析 opts（前端配置面板写入 .data/attachment-config.json）
+function buildAttOpts() {
+  const o = attachmentConfig.toOpts(attachmentConfig.loadConfig());
+  o.maxFiles = Number(process.env.AGENTS_CHAT_ATT_MAX_FILES) || 5;
+  o.maxBytes = (Number(process.env.AGENTS_CHAT_ATT_MAX_BYTES) || 10) * 1024 * 1024;
+  o.timeoutMs = Number(process.env.AGENTS_CHAT_ATT_TIMEOUT_MS) || 120000;
+  return o;
+}
+
+// 单聊附件分类：opencode 原生可经 -f 直读的扩展名（文本/代码/标记/图片）；
+// 其余（PDF/Word/Excel/PPT 等二进制）需走解析模块转文本注入 prompt
+const NATIVE_ATT_EXT = new Set([
+  'txt', 'text', 'md', 'markdown', 'csv', 'tsv', 'json', 'jsonl', 'xml', 'log', 'yaml', 'yml',
+  'html', 'htm', 'css', 'scss', 'less', 'js', 'jsx', 'mjs', 'cjs', 'ts', 'tsx', 'py', 'java',
+  'c', 'h', 'cpp', 'cc', 'cxx', 'hpp', 'cs', 'go', 'rs', 'rb', 'php', 'swift', 'kt', 'kts',
+  'sh', 'bash', 'zsh', 'ps1', 'sql', 'r', 'lua', 'pl', 'pm', 'scala', 'dart', 'vue', 'svelte',
+  'toml', 'ini', 'cfg', 'conf', 'env', 'gitignore', 'dockerfile', 'makefile', 'cmake',
+  'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'ico', 'tiff', 'tif', 'svg'
+]);
+function isNativeExt(ext) { return NATIVE_ATT_EXT.has(String(ext || '').toLowerCase()); }
 
 // 单文件 exe 无控制台（--windows-hide-console）时 stdout 可能不可写：
 // 把 console.* 重定向到数据目录 agents-chat.log（>2MB 滚动到 .1），出错有迹可循。
@@ -951,6 +974,40 @@ ${need}
     return;
   }
 
+  // 附件模块配置：GET 返回当前配置，POST 保存（持久化到 .data/attachment-config.json，重启不丢）
+  if (p === '/api/attachment/config' && (req.method === 'GET' || req.method === 'POST')) {
+    try {
+      if (req.method === 'POST') {
+        const body = await readBody(req);
+        const patch = {};
+        for (const k of ['mineruBase', 'mineruLang', 'llmBase', 'llmModel', 'llmApiKey']) {
+          if (typeof body[k] === 'string') patch[k] = body[k].trim();
+        }
+        const saved = attachmentConfig.saveConfig(patch);
+        json(res, 200, { success: true, config: saved });
+      } else {
+        json(res, 200, { success: true, config: attachmentConfig.loadConfig() });
+      }
+    } catch (e) {
+      json(res, 500, { success: false, error: String((e && e.message) || e) });
+    }
+    return;
+  }
+
+  // 附件解析（独立端点，便于前端预览或第三方复用）：接收 { attachments:[{name,mime,data(base64)}] }
+  if (p === '/api/attachment' && req.method === 'POST') {
+    const body = await readBody(req);
+    const items = Array.isArray(body.attachments) ? body.attachments : [];
+    if (!items.length) { json(res, 400, { success: false, error: '无附件' }); return; }
+    try {
+      const att = await attachment.parseAttachments(items, buildAttOpts());
+      json(res, 200, { success: true, text: att.text, items: att.items, skipped: att.skipped });
+    } catch (e) {
+      json(res, 500, { success: false, error: String((e && e.message) || e) });
+    }
+    return;
+  }
+
   if (p === '/api/chat' && req.method === 'POST') {
     // 聊天：@点名 → 点名智能体串行流水线；未点名 → 管家调度
     // taskId 非空时为任务会话内聊天（携带该会话历史背景）
@@ -964,7 +1021,8 @@ ${need}
     const myToken = stopTokens.chat;
     const message = String(body.message || '').trim();
     const taskId = String(body.taskId || '');
-    if (!message) {
+    const hasAttach = Array.isArray(body.attachments) && body.attachments.length > 0;
+    if (!message && !hasAttach) {
       runLocks.chat = false;
       json(res, 400, { success: false, error: 'message 不能为空' });
       return;
@@ -984,7 +1042,19 @@ ${need}
     }
 
     const mentionAgents = resolveMentions(message, agents);
-    const clean = stripMentions(message) || message;
+    let clean = stripMentions(message) || message || '（见附件）';
+
+    // 附件解析：在送入内核前把上传文件变为文本（MinerU Flash / Agnes 视觉 / 原生文本）
+    if (hasAttach) {
+      try {
+        const att = await attachment.parseAttachments(body.attachments, buildAttOpts());
+        if (att.text) clean = att.text + '\n\n' + clean;
+        if (att.skipped) console.warn(`[chat] 忽略 ${att.skipped} 个超限附件`);
+        for (const it of att.items) if (it.error) console.warn(`[chat] 附件解析失败 ${it.name}: ${it.error}`);
+      } catch (e) {
+        console.error('[chat] 附件解析异常:', e && (e.stack || e));
+      }
+    }
 
     // 分工模式名单先行计算：空名单需在 SSE 响应头发出前返回 400
     let divideParticipants = null;
@@ -1015,7 +1085,7 @@ ${need}
       ? await buildDivideHistory(storeTaskId)
       : buildHistoryText(taskId);
     const opts = { taskId: storeTaskId, history: historyText, scope: 'chat', isStopped: () => stopTokens.chat !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval() };
-    store.addMessage({ role: 'user', content: message, taskId: storeTaskId, timestamp: new Date().toISOString() });
+    store.addMessage({ role: 'user', content: message || '（见附件）', taskId: storeTaskId, timestamp: new Date().toISOString() });
 
     const send = sse(req, res);
     const persist = (m) => store.addMessage({ ...m, taskId: storeTaskId, timestamp: new Date().toISOString() });
@@ -1233,7 +1303,6 @@ ${need}
     const model = String(body.model || '');
     const rec = store.getOcSession(sessionId);
     if (!rec) { json(res, 404, { success: false, error: '会话不存在，请先新建' }); return; }
-    if (!message) { json(res, 400, { success: false, error: 'message 不能为空' }); return; }
 
     const { resolveRunner, missingHint } = require('./lib/agent');
     const runner = resolveRunner();
@@ -1241,6 +1310,46 @@ ${need}
       json(res, 400, { success: false, error: missingHint(runner) });
       return;
     }
+
+    // 附件处理：单聊上传文件（opencode 官方 -f 直传 + 解析兜底）
+    const attItems = Array.isArray(body.attachments) ? body.attachments : [];
+    const ocFiles = [];
+    let attSuffix = '';
+    if (attItems.length) {
+      const attOpts = buildAttOpts();
+      const isOc = runner.kind === 'opencode';
+      const chunks = [];
+      const UP = path.join(store.DATA_DIR, 'uploads');
+      try { fs.mkdirSync(UP, { recursive: true }); } catch { /* 忽略 */ }
+      for (const it of attItems.slice(0, attOpts.maxFiles || 5)) {
+        try {
+          const buf = Buffer.from(String(it.data || ''), 'base64');
+          if (!buf.length || buf.length > (attOpts.maxBytes || 10 * 1024 * 1024)) continue;
+          const safe = String(it.name || 'file').replace(/[^\w.\-]+/g, '_').slice(0, 80);
+          const fp = path.join(UP, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safe}`);
+          fs.writeFileSync(fp, buf);
+          const ext = (String(it.name || '').toLowerCase().match(/\.([a-z0-9]+)$/) || [])[1] || '';
+          if (isNativeExt(ext)) {
+            ocFiles.push(fp); // opencode 可直接读取（文本/代码/图片）
+            if (!isOc) { // 非 opencode 内核无 -f：改解析文本注入 prompt
+              const r = await attachment.parseAttachment({ name: it.name, mime: it.mime, data: it.data }, attOpts);
+              if (r.text) chunks.push(`【附件：${it.name}】\n${r.text}`);
+            }
+          } else { // 非原生（PDF/Word/Excel/PPT 等）：解析为文本注入 prompt
+            const r = await attachment.parseAttachment({ name: it.name, mime: it.mime, data: it.data }, attOpts);
+            if (r.text) chunks.push(`【附件：${it.name}】\n${r.text}`);
+            else if (r.error) chunks.push(`【附件：${it.name}】⚠ 解析失败：${r.error}`);
+          }
+        } catch (e) { chunks.push(`【附件：${it.name || '?'}】⚠ 处理出错：${e.message}`); }
+      }
+      if (chunks.length) attSuffix = '\n\n【用户附件解析内容】\n' + chunks.join('\n\n');
+    }
+
+    if (!message && ocFiles.length === 0 && !attSuffix) {
+      json(res, 400, { success: false, error: 'message 不能为空' });
+      return;
+    }
+    const finalMessage = message + attSuffix;
 
     runLocks.solo = true;
     store.addMessage({ role: 'user', content: message, taskId: sessionId, timestamp: new Date().toISOString() });
@@ -1257,7 +1366,7 @@ ${need}
     try {
       await new Promise((resolve) => {
         const kind = runner.kind === 'demo' ? 'demo' : (runner.kind === 'opencode' ? 'opencode' : 'fallback');
-        oc.chatSolo(kind, runner, { prompt: message, model, ocSessionId: rec.ocSessionId || '' }, (ev) => {
+        oc.chatSolo(kind, runner, { prompt: finalMessage, model, ocSessionId: rec.ocSessionId || '', files: runner.kind === 'opencode' ? ocFiles : [] }, (ev) => {
           if (ev.type === 'session') {
             // 首个 sessionID 回填：后续轮次经 -s 在同一 opencode 会话续聊
             store.upsertOcSession(sessionId, { ocSessionId: ev.ocSessionId });

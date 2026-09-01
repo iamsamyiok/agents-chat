@@ -255,13 +255,13 @@
   .team-card .tc-usage { font-size: 11px; color: #8a6fe8; margin-bottom: 10px; }
   .team-card .tc-actions { display: flex; gap: 8px; }
   /* 流转视图 */
-  #flowMask .modal.flow { width: min(1100px, 94vw); height: min(760px, 92vh); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+  #flowMask .modal.flow { width: min(1280px, 96vw); height: min(900px, 95vh); max-height: none; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
   .flow-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #eee; flex: none; }
   .flow-bar h3 { margin: 0; font-size: 15px; }
   .flow-bar select { flex: 1; min-width: 0; border: 1px solid #ddd; border-radius: 6px; padding: 5px 8px; font-size: 12px; background: #fff; }
   .flow-legend { display: flex; gap: 10px; padding: 4px 14px 8px; font-size: 11px; color: #666; flex-wrap: wrap; flex: none; }
   .flow-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 3px; vertical-align: -1px; }
-  .flow-canvas { flex: 1; overflow: auto; background: #fbfcfe; }
+  .flow-canvas { flex: 1; min-height: 0; overflow: auto; background: #fbfcfe; }
   .flow-svg .lane-line { stroke: #e3e8f2; stroke-width: 1; }
   .flow-svg .lane-label { font-size: 12px; fill: #333; font-weight: 600; }
   .flow-svg .lane-sub { font-size: 10px; fill: #999; }
@@ -304,6 +304,20 @@
   .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
   .modal-actions button { border-radius: 6px; padding: 8px 20px; font-size: 13px; cursor: pointer; border: 1px solid #ddd; background: #fff; }
   .modal-actions .primary { background: #07c160; color: #fff; border-color: #07c160; }
+  /* 附件：上传图标按钮 / 配置按钮 / 配置表单 */
+  .ic-btn { display: inline-flex; align-items: center; justify-content: center; width: 38px; padding: 0; color: #555; }
+  .ic-btn:hover { color: #07c160; }
+  .cfg-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 7px 10px; border: 1px solid #e2e2e2; background: #fff; border-radius: 8px; font-size: 13px; color: #444; cursor: pointer; }
+  .cfg-btn:hover { background: #f5f5f5; border-color: #07c160; color: #07c160; }
+  .modal-box { background: #fff; border-radius: 12px; padding: 18px 20px; box-shadow: 0 10px 40px rgba(0,0,0,.25); }
+  .form-row { margin-bottom: 10px; }
+  .form-row label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
+  .form-row input { width: 100%; border: 1px solid #ddd; border-radius: 6px; padding: 7px 10px; font-size: 13px; outline: none; box-sizing: border-box; }
+  .form-row input:focus { border-color: #07c160; }
+  /* 统一配置：分区块单列（模型与接入 / 附件识别模型） */
+  .cfg-sec { border: 1px solid #e6e9f0; border-radius: 10px; padding: 12px 14px 14px; margin: 10px 0 4px; background: #fcfdff; }
+  .cfg-sec-h { font-size: 13px; font-weight: 600; color: #2a3550; margin-bottom: 6px; }
+  .cfg-sec .form-row:last-child { margin-bottom: 0; }
 
   /* 智能体配置卡片 */
   .butler-ro { border: 1px solid #e3e3e3; background: #fafafa; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; line-height: 1.6; }
@@ -528,6 +542,10 @@
     <!-- 左栏底部：通知 / 帮助 / 内核标签（每模式通用）+ 任务面板展开收起 -->
     <div id="sideFoot">
       <button id="taskPanelBtn" onclick="toggleTaskbar()" title="收起/展开任务面板">⟩ 任务面板</button>
+      <button id="cfgBtn" class="cfg-btn" onclick="openCfg()" title="统一配置：模型与接入、附件识别模型（本地保存，重启不丢）">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        配置
+      </button>
       <div class="sf-row">
         <span class="runner-tag" id="runnerTag" style="display:none"></span>
         <span style="flex:1"></span>
@@ -536,6 +554,48 @@
       </div>
     </div>
   </aside>
+
+  <!-- 统一配置弹窗（模型与接入 + 附件识别模型，分两区单列） -->
+  <div id="cfgModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:90;align-items:center;justify-content:center">
+    <div class="modal-box" style="width:560px;max-width:94vw">
+      <h3>配置</h3>
+      <p class="tip">统一配置：模型与接入、附件识别模型。保存后写入本地文件，<b>重启项目后仍然有效</b>。</p>
+
+      <!-- 区块一：模型与接入（原「智能体配置」中的默认模型 / 自定义 LLM 接入） -->
+      <div class="cfg-sec">
+        <div class="cfg-sec-h">🤖 模型与接入</div>
+        <div class="tip">AI 组队、AI 编排与未单独指定模型的任务都用这里的默认模型执行；单聊工作台与单张任务卡可临时改用其他模型。列表来自 <code>opencode models</code>，也可直接输入 <code>provider/model</code>；留空 = 用内核默认。</div>
+        <div class="form-row"><label>默认模型（LLM）</label><input id="llmModelInput" list="llmModelList" placeholder="provider/model，留空用内核默认" autocomplete="off"></div>
+        <datalist id="llmModelList"></datalist>
+        <div id="llmAuthTip" class="tip" style="margin-top:2px;color:#999"></div>
+
+        <div class="lbl" style="margin-top:12px">🔌 自定义 LLM 接入（自带 API）</div>
+        <div class="tip">自带 OpenAI 兼容端点：填好 Base URL / API Key / 模型名即注册为「自定义接入」，并自动设为全局默认模型。API Key 只存本机 OpenCode 配置文件，界面永不回显明文。</div>
+        <div class="form-row"><label>Base URL</label><input id="llmCustomUrl" placeholder="https://api.example.com/v1（OpenAI 兼容）" autocomplete="off" spellcheck="false"></div>
+        <div class="form-row"><label>API Key</label><input id="llmCustomKey" type="password" placeholder="选填（已保存过则留空 = 沿用原 Key）" autocomplete="new-password"></div>
+        <div class="form-row"><label>模型名</label><input id="llmCustomModel" placeholder="如 glm-4.6 / deepseek-chat / qwen-max" autocomplete="off" spellcheck="false"></div>
+        <div id="llmCustomTip" class="tip" style="margin-top:2px;color:#999"></div>
+      </div>
+
+      <!-- 区块二：附件识别模型（单列） -->
+      <div class="cfg-sec">
+        <div class="cfg-sec-h">📎 附件识别模型</div>
+        <p class="tip">配置 MinerU（文档解析）与图片理解 LLM 的地址与密钥。</p>
+        <div class="form-row"><label>MinerU 地址（文档解析）</label><input id="cfgMineruBase" placeholder="https://mineru.net/api/v1/agent"></div>
+        <div class="form-row"><label>MinerU 识别语言</label><input id="cfgMineruLang" placeholder="ch / en"></div>
+        <div class="form-row"><label>图片理解 LLM 地址</label><input id="cfgLlmBase" placeholder="https://apihub.agnes-ai.com/v1"></div>
+        <div class="form-row"><label>图片理解 LLM 模型名</label><input id="cfgLlmModel" placeholder="agnes-2.0-flash"></div>
+        <div class="form-row"><label>图片理解 LLM API Key</label><input id="cfgLlmApiKey" type="password" placeholder="选填；不填则图片类附件无法解析"></div>
+      </div>
+
+      <div class="modal-actions">
+        <button onclick="closeCfg()">取消</button>
+        <button class="primary" id="cfgClearCustomBtn" onclick="clearLlmCustom()">清除自定义接入</button>
+        <button class="primary" onclick="saveCfg()">保存</button>
+      </div>
+      <div id="cfgMsg" class="tip" style="margin-top:6px"></div>
+    </div>
+  </div>
 
   <!-- 中栏：任务管理（操作按钮与任务列表同区，就近操作） -->
   <aside id="taskbar">
@@ -568,7 +628,7 @@
       </div>
       <div class="hdr-right">
     <div class="oc-model-box" id="ocModelBox" style="display:none" title="默认模型：点击展开下拉列表选择，或手动输入 provider/model（如：deepseek/deepseek-chat）">
-      <input id="ocModelInput" list="ocModelList" placeholder="默认模型" autocomplete="off" spellcheck="false">
+      <input id="ocModelInput" placeholder="默认模型" autocomplete="off" spellcheck="false">
       <datalist id="ocModelList"></datalist>
       <div id="ocModelMenu" onmousedown="onOcModelMenuMousedown()" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;background:#fff;border:1px solid #ddd;border-top:none;border-radius:0 0 8px 8px;max-height:320px;overflow-y:auto;flex-direction:column;box-shadow:0 4px 12px rgba(0,0,0,.12);cursor:pointer"></div>
     </div>
@@ -587,9 +647,14 @@
       <footer class="composer" id="groupComposer">
         <div class="input-row">
           <button id="rtBtn" onclick="toggleRoundtable()" title="圆桌讨论模式：所有被 @ 的智能体（未 @ 则全体）围绕主题轮流发言、互相反驳，管家当主持人控制轮数并总结共识与分歧">💬 圆桌</button>
-          <input id="input" placeholder="输入消息，@ 可点名智能体…" autocomplete="off">
+          <button id="attBtn" class="ic-btn" onclick="document.getElementById('fileInput').click()" title="上传文件：PDF/Word/Excel/PPT/图片/CSV 等将自动解析为文本后随消息发送">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <input id="fileInput" type="file" multiple style="display:none" onchange="onAttPick(event)">
+          <input id="input" placeholder="输入消息，@ 可点名智能体…（可附文件）" autocomplete="off">
           <button id="sendBtn" onclick="onSendBtn()">发送</button>
         </div>
+        <div id="attChips" style="display:flex;flex-wrap:wrap;gap:6px;padding:2px 8px 6px"></div>
         <div id="atMenu"></div>
       </footer>
     </div>
@@ -598,9 +663,14 @@
         <div id="soloMessages"></div>
         <footer class="composer" id="soloComposer">
           <div class="input-row">
-            <input id="soloInput" placeholder="输入消息，与 AI 单聊（同会话多轮续聊）…" autocomplete="off">
+            <button id="soloAttBtn" class="ic-btn" onclick="document.getElementById('soloFileInput').click()" title="上传文件：文本/代码/图片由 OpenCode 直接读取；PDF/Word/Excel/PPT 等自动解析为文本后随消息发送">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            </button>
+            <input id="soloFileInput" type="file" multiple style="display:none" onchange="onSoloAttPick(event)">
+            <input id="soloInput" placeholder="输入消息，与 AI 单聊（可附文件）…" autocomplete="off">
             <button id="soloSendBtn" onclick="onSoloSendBtn()">发送</button>
           </div>
+          <div id="soloAttChips" style="display:flex;flex-wrap:wrap;gap:6px;padding:2px 8px 6px"></div>
         </footer>
       </div>
     </div>
@@ -704,28 +774,7 @@
       <div class="ag-row">
         <select id="kernelSel"></select>
       </div>
-      <div class="lbl" style="margin-top:10px">🤖 默认模型（LLM）</div>
-      <div class="tip" style="margin:4px 0 6px">AI 组队、AI 编排与未单独指定模型的任务都用这里的默认模型执行；单聊工作台与单张任务卡可在各自界面临时改用其他模型。列表来自 <code>opencode models</code>，也可直接输入 <code>provider/model</code>；留空 = 用内核默认。保存即写入 OpenCode 全局配置。</div>
-      <div class="ag-row">
-        <input id="llmModelInput" list="llmModelList" placeholder="provider/model，留空用内核默认" autocomplete="off">
-        <datalist id="llmModelList"></datalist>
-        <button class="mini-btn" onclick="saveLlmModel()">保存</button>
-      </div>
-      <div class="tip" id="llmAuthTip" style="margin-top:4px;color:#999"></div>
-      <div class="lbl" style="margin-top:14px">🔌 自定义 LLM 接入（自带 API）</div>
-      <div class="tip" style="margin:4px 0 6px">自带 OpenAI 兼容端点：填好 Base URL / API Key / 模型名即注册为「自定义接入」，并自动设为全局默认模型——AI 组队、AI 编排、多任务编排全部直接走它，无需在内核里另配 provider。API Key 只存本机 OpenCode 配置文件，界面永不回显明文。</div>
-      <div class="ag-row">
-        <input id="llmCustomUrl" placeholder="Base URL，如 https://api.example.com/v1（OpenAI 兼容）" autocomplete="off" spellcheck="false">
-      </div>
-      <div class="ag-row">
-        <input id="llmCustomKey" type="password" placeholder="API Key（已保存过则留空 = 沿用原 Key）" autocomplete="new-password">
-      </div>
-      <div class="ag-row">
-        <input id="llmCustomModel" placeholder="模型名，如 glm-4.6 / deepseek-chat / qwen-max" autocomplete="off" spellcheck="false">
-        <button class="mini-btn" onclick="saveLlmCustom()">保存接入</button>
-        <button class="mini-btn" onclick="clearLlmCustom()">清除</button>
-      </div>
-      <div class="tip" id="llmCustomTip" style="margin-top:4px;color:#999"></div>
+      <div class="tip" style="margin:6px 0 2px;color:#888">🤖 默认模型 / 自定义 LLM 接入已移至左下角「⚙ 配置」统一设置。</div>
       <div class="lbl" style="margin-top:10px">📁 产出存档目录（可选）</div>
       <div class="tip" style="margin:4px 0 6px">智能体工作中产生的文档与成果文件都存档到这个本机文件夹（填写文件夹完整路径即可，会自动创建）。可不设置（留空则用程序默认目录）。</div>
       <div class="ag-row">
@@ -1616,11 +1665,12 @@ async function onSoloSendBtn() {
 async function soloSend() {
   const el = document.getElementById('soloInput');
   const text = el.value.trim();
-  if (!text) return;
+  if (!text && soloAttachments.length === 0) return;
   if (!curOcId) {
     // 未选会话时自动以首句为题新建，免手动点「✚ 新会话」
+    const titleSrc = text || (soloAttachments[0] && soloAttachments[0].name) || '附件对话';
     try {
-      const r = await api('/api/oc/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: text.slice(0, 30) }) });
+      const r = await api('/api/oc/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: titleSrc.slice(0, 30) }) });
       if (!r.success) { toast(r.error || '自动新建会话失败'); return; }
       ocSessions.unshift(r.session);
       curOcId = r.session.id;
@@ -1635,9 +1685,12 @@ async function soloSend() {
   soloStopAsked = false;
   updateSoloSendBtn();
   el.value = '';
-  pushSoloMsg(curOcId, { role: 'user', content: text, ts: Date.now() });
+  const atts = soloAttachments.slice();
+  pushSoloMsg(curOcId, { role: 'user', content: text || '（见附件）', ts: Date.now() });
   try {
-    await streamSSE('/api/oc/chat', { sessionId: curOcId, message: text, model: curOcModel }, (e) => {
+    const chatBody = { sessionId: curOcId, message: text, model: curOcModel };
+    if (atts.length) chatBody.attachments = atts;
+    await streamSSE('/api/oc/chat', chatBody, (e) => {
       if (e.type === 'text') {
         soloStreamText({ taskId: e.sessionId, partId: e.partId, text: e.text });
       } else if (e.type === 'reasoning') {
@@ -1662,6 +1715,8 @@ async function soloSend() {
     sealSoloStream(curOcId);
     soloBusy = false;
     soloStopAsked = false;
+    soloAttachments = [];
+    renderSoloAttChips();
     updateSoloSendBtn();
     loadOcSessions(); // 侧栏标题/时间刷新
   }
@@ -2673,9 +2728,134 @@ async function stopRun(scope) {
 }
 
 let lastSentInputs = []; // 输入历史（空输入框按 ↑ 回填最近一条）
+// ---------- 附件上传 ----------
+let pendingAttachments = [];
+let soloAttachments = [];
+let llmCfgSupported = false; // 当前内核是否支持网页端 LLM 配置（由 loadLlmConfig 更新）
+// ---------- 统一配置（模型与接入 + 附件识别模型；持久化到本地） ----------
+async function openCfg() {
+  document.getElementById('cfgModal').style.display = 'flex';
+  document.getElementById('cfgMsg').textContent = '';
+  try {
+    const r = await fetch('/api/attachment/config');
+    const j = await r.json();
+    const c = (j && j.config) || {};
+    document.getElementById('cfgMineruBase').value = c.mineruBase || '';
+    document.getElementById('cfgMineruLang').value = c.mineruLang || '';
+    document.getElementById('cfgLlmBase').value = c.llmBase || '';
+    document.getElementById('cfgLlmModel').value = c.llmModel || '';
+    document.getElementById('cfgLlmApiKey').value = c.llmApiKey || '';
+  } catch (e) { /* 忽略，用占位符 */ }
+  loadLlmConfig();
+}
+function closeCfg() { document.getElementById('cfgModal').style.display = 'none'; }
+async function saveCfg() {
+  const msg = document.getElementById('cfgMsg');
+  msg.style.color = ''; msg.textContent = '保存中…';
+  try {
+    // 1) 附件识别模型
+    const att = {
+      mineruBase: document.getElementById('cfgMineruBase').value.trim(),
+      mineruLang: document.getElementById('cfgMineruLang').value.trim(),
+      llmBase: document.getElementById('cfgLlmBase').value.trim(),
+      llmModel: document.getElementById('cfgLlmModel').value.trim(),
+      llmApiKey: document.getElementById('cfgLlmApiKey').value
+    };
+    if (!att.mineruBase && !att.llmBase) throw new Error('附件识别模型至少填写一个地址（MinerU 或 图片理解 LLM）');
+    let r = await fetch('/api/attachment/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(att) });
+    let j = await r.json();
+    if (!(j && j.success)) throw new Error('附件配置保存失败：' + ((j && j.error) || '未知'));
+    let note = '附件识别模型已保存';
+    // 2) 默认模型 + 3) 自定义接入（仅当前内核支持网页端 LLM 配置时保存）
+    if (llmCfgSupported) {
+      const model = document.getElementById('llmModelInput').value.trim();
+      r = await fetch('/api/llm/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) });
+      j = await r.json();
+      if (!(j && j.success)) throw new Error('默认模型保存失败：' + ((j && j.error) || '未知'));
+      const cUrl = document.getElementById('llmCustomUrl').value.trim();
+      const cModel = document.getElementById('llmCustomModel').value.trim();
+      const cKey = document.getElementById('llmCustomKey').value;
+      if (cUrl && cModel) {
+        r = await fetch('/api/llm/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ custom: { baseURL: cUrl, apiKey: cKey, model: cModel } }) });
+        j = await r.json();
+        if (!(j && j.success)) throw new Error('自定义接入保存失败：' + ((j && j.error) || '未知'));
+      }
+      note = '已全部保存（本地持久化，重启不丢）';
+    }
+    msg.style.color = '#07c160'; msg.textContent = note;
+    loadLlmConfig();
+    setTimeout(closeCfg, 900);
+  } catch (e) {
+    msg.style.color = '#e4393c'; msg.textContent = '保存失败：' + e.message;
+  }
+}
+
+function onAttPick(e) {
+  const files = Array.from(e.target.files || []);
+  for (const f of files) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const b64 = String(reader.result).split(',')[1] || '';
+      pendingAttachments.push({ name: f.name, mime: f.type, data: b64 });
+      renderAttChips();
+    };
+    reader.readAsDataURL(f);
+  }
+  e.target.value = '';
+}
+function removeAtt(i) { pendingAttachments.splice(i, 1); renderAttChips(); }
+function renderAttChips() {
+  const box = document.getElementById('attChips');
+  if (!box) return;
+  box.innerHTML = '';
+  pendingAttachments.forEach((a, i) => {
+    const c = document.createElement('span');
+    c.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#eef7ee;border:1px solid #cfe9cf;border-radius:12px;padding:2px 8px;font-size:12px;color:#1a7a3a';
+    c.textContent = '📄 ' + a.name;
+    const x = document.createElement('span');
+    x.textContent = ' ✕';
+    x.style.cssText = 'cursor:pointer;color:#888';
+    x.onclick = () => removeAtt(i);
+    c.appendChild(x);
+    box.appendChild(c);
+  });
+}
+
+// ---------- 单聊附件（与群聊分离，互不影响） ----------
+function onSoloAttPick(e) {
+  const files = Array.from(e.target.files || []);
+  for (const f of files) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const b64 = String(reader.result).split(',')[1] || '';
+      soloAttachments.push({ name: f.name, mime: f.type, data: b64 });
+      renderSoloAttChips();
+    };
+    reader.readAsDataURL(f);
+  }
+  e.target.value = '';
+}
+function removeSoloAtt(i) { soloAttachments.splice(i, 1); renderSoloAttChips(); }
+function renderSoloAttChips() {
+  const box = document.getElementById('soloAttChips');
+  if (!box) return;
+  box.innerHTML = '';
+  soloAttachments.forEach((a, i) => {
+    const c = document.createElement('span');
+    c.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#eef7ee;border:1px solid #cfe9cf;border-radius:12px;padding:2px 8px;font-size:12px;color:#1a7a3a';
+    c.textContent = '📄 ' + a.name;
+    const x = document.createElement('span');
+    x.textContent = ' ✕';
+    x.style.cssText = 'cursor:pointer;color:#888';
+    x.onclick = () => removeSoloAtt(i);
+    c.appendChild(x);
+    box.appendChild(c);
+  });
+}
+
 async function send() {
   const text = input.value.trim();
-  if (!text || chatBusy) return;
+  if ((!text && pendingAttachments.length === 0) || chatBusy) return;
   chatBusy = true;
   stopAsked = false;
   setSendBtn();
@@ -2687,12 +2867,15 @@ async function send() {
       lastSentInputs.push(text);
       if (lastSentInputs.length > 20) lastSentInputs.shift();
     }
-    pushUser(text);
+    pushUser(text || '（见附件）');
     typing = addSys('智能体处理中…');
 
     const isDivide = chatMode === 'divide';
     if (isDivide) { dvRunning = true; updateModeBadges(); }
-    await streamSSE('/api/chat', { message: text, taskId: curTaskId, mode: isDivide ? 'divide' : (roundtableOn ? 'roundtable' : ''), participants: isDivide ? dvList.filter(id => dvStaff.some(s => s.id === id)) : [] }, (e) => {
+    const atts = pendingAttachments.slice();
+    const chatBody = { message: text, taskId: curTaskId, mode: isDivide ? 'divide' : (roundtableOn ? 'roundtable' : ''), participants: isDivide ? dvList.filter(id => dvStaff.some(s => s.id === id)) : [] };
+    if (atts.length) chatBody.attachments = atts;
+    await streamSSE('/api/chat', chatBody, (e) => {
       if (typing) { removeMsg(typing); typing = null; }
       handleStreamEvent(e);
     });
@@ -2700,6 +2883,8 @@ async function send() {
     addSys('处理异常：' + (err && err.message || err));
   } finally {
     if (typing) removeMsg(typing);
+    pendingAttachments = [];
+    renderAttChips();
     chatBusy = false;
     stopAsked = false;
     dvRunning = false;
@@ -3903,7 +4088,6 @@ function openAgents() {
   document.getElementById('approvalSel').value = configApproval || 'off';
   renderKernelSel();
   renderAgentCards();
-  loadLlmConfig();
   document.getElementById('agentsMask').classList.add('show');
 }
 
@@ -3915,17 +4099,17 @@ async function loadLlmConfig() {
   const cKey = document.getElementById('llmCustomKey');
   const cModel = document.getElementById('llmCustomModel');
   const cTip = document.getElementById('llmCustomTip');
-  const saveBtn = document.querySelector('#agentsMask .global-cwd-box button[onclick="saveLlmCustom()"]');
+  const saveBtn = document.getElementById('cfgClearCustomBtn');
   input.disabled = true;
   tip.textContent = '加载中…';
   try {
     const r = await fetch('/api/llm/config');
     const d = await r.json();
     if (!d.success) throw new Error(d.error || '加载失败');
+    llmCfgSupported = (d.supported === true);
     if (!d.supported) {
       input.value = '';
       input.disabled = true;
-      document.querySelector('#agentsMask .global-cwd-box button[onclick="saveLlmModel()"]').disabled = true;
       tip.textContent = `当前内核（${d.kernel || '非 OpenCode'}）的模型由内核自身配置管理，此处不适用`;
       [cUrl, cKey, cModel].forEach(el => { el.disabled = true; });
       if (saveBtn) saveBtn.disabled = true;
@@ -3970,7 +4154,7 @@ async function saveLlmCustom() {
   const apiKey = document.getElementById('llmCustomKey').value;
   const model = document.getElementById('llmCustomModel').value.trim();
   if (!baseURL || !model) { toast('Base URL 与模型名均需填写'); return; }
-  const btn = document.querySelector('#agentsMask .global-cwd-box button[onclick="saveLlmCustom()"]');
+  const btn = document.getElementById('cfgClearCustomBtn');
   if (btn) btn.disabled = true;
   try {
     const r = await fetch('/api/llm/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ custom: { baseURL, apiKey, model } }) });
@@ -3984,7 +4168,7 @@ async function saveLlmCustom() {
 }
 
 async function clearLlmCustom() {
-  const btn = document.querySelector('#agentsMask .global-cwd-box button[onclick="clearLlmCustom()"]');
+  const btn = document.getElementById('cfgClearCustomBtn');
   if (btn) btn.disabled = true;
   try {
     const r = await fetch('/api/llm/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'clearCustom' }) });
@@ -3999,7 +4183,7 @@ async function clearLlmCustom() {
 
 async function saveLlmModel() {
   const model = document.getElementById('llmModelInput').value.trim();
-  const btn = document.querySelector('#agentsMask .global-cwd-box button[onclick="saveLlmModel()"]');
+  const btn = document.getElementById('cfgClearCustomBtn');
   btn.disabled = true;
   try {
     const r = await fetch('/api/llm/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) });

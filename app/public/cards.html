@@ -248,11 +248,6 @@
     🔍 <input id="cardFilter" placeholder="搜索任务…" autocomplete="off" />
   </div>
   <span class="sp"></span>
-  <div class="ws-box" title="并行执行的最多任务数（1-8，热更新）">
-    ⚡ 并行 <select id="parallelSel" style="border:none;outline:none;font-size:12px;background:transparent;width:42px">
-      <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option>
-    </select>
-  </div>
    <span class="status-pill" id="statusPill" style="margin-right:8px">空闲</span>
    <button class="btn" id="btnNew">＋ 任务</button>
    <button class="btn" id="btnPlanner" title="与 AI 聊天式编排：描述目标，AI 澄清后一键生成任务编排">🪄 AI 编排</button>
@@ -436,7 +431,6 @@ async function loadCards(){
   $('#btnRun').disabled = data.running;
   $('#btnStop').disabled = !data.running;
   if(data.config) { /* workspace 已移除（统一用全局工作目录） */ }
-  if(data.maxParallel) $('#parallelSel').value = String(data.maxParallel);
   renderKernelBanner();
   renderUpdateInfo(data);
   render();
@@ -850,12 +844,6 @@ $('#btnRun').onclick=async()=>{
 };
 $('#btnStop').onclick=async()=>{ await post('/api/cards/stop'); await loadCards(); };
 $('#btnRetryFailed').onclick=retryAllFailed;
-// 并行度热更新（1-8）
-$('#parallelSel').onchange=async()=>{
-  const n=Number($('#parallelSel').value);
-  const r=await post('/api/cards/config',{maxParallel:n});
-  if(r.success) toast('并行数已设为 '+n);
-};
 // 导出当前任务为 Markdown
 $('#dExport').onclick=()=>{ if(!OPEN_ID)return; window.open('/api/cards/'+encodeURIComponent(OPEN_ID)+'/export.md','_blank'); };
 async function runOne(id){
@@ -1129,11 +1117,10 @@ function openHelp(){
       <li><b>并行独立进程（parallel）</b>：与前后卡同时开跑，适合批量同类任务（同时查 5 个城市天气）</li>
     </ul>
   </div>
-  <div class="help-sec"><h4>🔀 依赖、优先级与并行度</h4>
+  <div class="help-sec"><h4>🔀 依赖与优先级</h4>
     <ul>
       <li><b>依赖任务</b>可多选：全部完成后本卡才可执行（失败/跳过的依赖会阻断）</li>
       <li><b>优先级</b>数字越小越先执行；拖拽看板卡到新位置会按新顺序自动重写优先级</li>
-      <li>顶栏 <b>⚡ 并行</b>（1-8）：同时执行的最大任务数，改完即时生效</li>
       <li>左下角「▶ 依赖图」可视化全部依赖关系，可放大查看</li>
     </ul>
   </div>
@@ -1248,7 +1235,6 @@ es.onmessage = (e)=>{
   if(ev.type==='init'){ // 连接建立时的初始状态（含断线重连场景）
     $('#statusPill').textContent = ev.running ? '编排中…' : '空闲';
     $('#btnRun').disabled = !!ev.running; $('#btnStop').disabled = !ev.running;
-    if(ev.maxParallel) $('#parallelSel').value = String(ev.maxParallel);
     return;
   }
   if(ev.type==='notice'){ toast(ev.content); }

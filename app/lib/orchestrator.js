@@ -1225,7 +1225,7 @@ async function dividePlan(participants, message, history) {
       deps: (i === 1 && participants.length > 1) ? [participants[0].name] : []
     }));
   }
-  const roster = participants.map(a => `- ${a.name}（id: ${a.id}）：${a.desc || a.name}`).join('\n');
+  const roster = participants.map(a => `- ${a.name}（id: ${a.id}，职责类别：${a.role || '—'}）：${a.desc || a.name}`).join('\n');
   const prompt = `你是团队分工调度员。根据用户消息，为团队成员分配各自要做的任务。
 
 【团队成员】
@@ -1236,6 +1236,7 @@ ${message}
 ${history ? `\n【近期聊天背景】\n${String(history).slice(0, 2000)}` : ''}
 
 要求：
+【职责铁律】每位成员只做其【职责描述（desc）】范围内的工作，分工必须严格按职责匹配，严禁把 A 的职责派给 B。典型反例：检验/测试/验收类角色只负责测试、把关与质量，绝不能被派去写实现代码；研发/实现类角色只负责实现，不应被派去做测试验收。若一项工作跨越多个角色，按"谁主责就派给谁"切分边界，需要他人产出时用 deps 串联（如：研发先实现 → 检验再验收），而不是让非主责角色越界代劳。
 1. 按需参与：只给与消息相关的成员分配具体任务；没有必要时必须让无关成员 task 留空字符串（本轮旁听，不发言不干活），严禁为了凑数给所有人派活
 2. 任务描述具体到该成员能直接开工，明确各自负责的部分、边界与期望产出
 3. 数组按执行先后顺序排列：产出被他人依赖的成员排在前，依赖他人产出的排在后（如：先调研 → 再实现 → 后成稿）
@@ -1292,7 +1293,7 @@ ${round >= maxRounds ? `\n注意：已达最大轮次上限（${maxRounds} 轮�
 研判要求：
 1. 对照用户目标逐项核对：已交付的部分列出结论与成果文件完整路径；未达成的部分明确缺口
 2. 目标已全部达成或剩余部分价值不大 → done=true，summary 面向用户做最终汇报（结论先行、分成员列出关键产出、包含成果文件完整绝对路径）
-3. 存在必须补救的缺口 → done=false，summary 一句话说明本轮进展与缺口，next 给出下一轮需要继续工作的成员分工（与目标无关的成员 task 留空；数组内只列需要参与/继续的成员）
+3. 存在必须补救的缺口 → done=false，summary 一句话说明本轮进展与缺口，next 给出下一轮需要继续工作的成员分工（与目标无关的成员 task 留空；数组内只列需要参与/继续的成员）。【next 中分配给某成员的任务仍必须落在该成员自身职责（desc）范围内；不得将职责外的工作（如让产品检验者去写实现代码）派给它。若缺口确需某成员职责外的能力，优先让该缺口相关主责成员在自身职责内继续，而非改派检验者去写代码。】
 4. 只输出 JSON，禁止任何其他文字：{"done":true,"summary":"...","next":[]} 或 {"done":false,"summary":"...","next":[{"id":"成员id","task":"任务描述","deps":["依赖的成员名"]}]}`;
   const plannerMod = require('./planner');
   const { content, error } = await plannerMod.runOnce(prompt, dividePlanTimeout(), 'divide-review');
