@@ -62,6 +62,23 @@ function extractTeamJSON(text) {
   return extractJSONArray(text);
 }
 
+// 从可能带杂文的输出中提取 JSON 对象（整体 → 代码块 → 首个 { 到最后一个 }）
+function extractJSONObject(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  try { const v = JSON.parse(raw); if (v && typeof v === 'object' && !Array.isArray(v)) return v; } catch { /* 继续尝试 */ }
+  const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) {
+    try { const v = JSON.parse(fence[1].trim()); if (v && typeof v === 'object' && !Array.isArray(v)) return v; } catch { /* 继续尝试 */ }
+  }
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    try { const v = JSON.parse(raw.slice(start, end + 1)); if (v && typeof v === 'object' && !Array.isArray(v)) return v; } catch { /* 放弃 */ }
+  }
+  return null;
+}
+
 // 清洗生成结果：字段类型归一 + 长度截断 + 空名补名 + 重名后缀 + 数量上限
 // existingNames：现有智能体名（含管家），重名自动加序号，保证 @ 点名无歧义
 function cleanSuggestedTeam(arr, existingNames) {
@@ -140,4 +157,4 @@ async function suggestTeam({ requirements, existingNames, runAgentFn, timeoutMs 
   return { success: true, agents };
 }
 
-module.exports = { buildPrompt, extractTeamJSON, extractJSONArray, cleanSuggestedTeam, suggestTeam, LIMITS, TEAM_MIN, TEAM_MAX, REQ_MAX };
+module.exports = { buildPrompt, extractTeamJSON, extractJSONArray, extractJSONObject, cleanSuggestedTeam, suggestTeam, LIMITS, TEAM_MIN, TEAM_MAX, REQ_MAX };

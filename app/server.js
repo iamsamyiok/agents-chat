@@ -76,7 +76,7 @@ const teamgen = require('./lib/teamgen');
 const planner = require('./lib/planner');
 let suggestInFlight = false; // AI 组队生成互斥：同刻仅一个（内核单次调用，防并发浪费）
 const plannerLocks = new Set(); // AI 编排按会话互斥（每会话同时一个内核调用）
-const { runButler, runMentioned, runRoundtable, runDivide, runTasks, prepareRerun } = require('./lib/orchestrator');
+const { runButler, runMentioned, runRoundtable, runDivide, runTasks, prepareRerun, buildDivideHistory } = require('./lib/orchestrator');
 const oc = require('./lib/oc');
 const memoryMod = require('./lib/memory');
 const { CardStore, runner: cardRunner, sseSubscribe, MAX_PARALLEL, wouldCycle } = require('./lib/cards');
@@ -1010,7 +1010,11 @@ ${need}
     const storeTaskId = body.mode === 'divide' ? '__divide__' : taskId;
 
     // 先构建历史背景（此时还不含当前消息），再落库当前用户消息
-    const opts = { taskId: storeTaskId, history: buildHistoryText(storeTaskId), scope: 'chat', isStopped: () => stopTokens.chat !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval() };
+    // 分工背景：完整正式对话（超长自动压缩，保障群聊式连续性且不超内核输入限制）；其余模式取近期摘要
+    const historyText = body.mode === 'divide'
+      ? await buildDivideHistory(storeTaskId)
+      : buildHistoryText(taskId);
+    const opts = { taskId: storeTaskId, history: historyText, scope: 'chat', isStopped: () => stopTokens.chat !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval() };
     store.addMessage({ role: 'user', content: message, taskId: storeTaskId, timestamp: new Date().toISOString() });
 
     const send = sse(req, res);

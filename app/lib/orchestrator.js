@@ -1236,12 +1236,13 @@ ${message}
 ${history ? `\n【近期聊天背景】\n${String(history).slice(0, 2000)}` : ''}
 
 要求：
-1. 只给与消息相关的成员分配具体任务；无关成员 task 留空字符串（本轮旁听，不发言不干活）
+1. 按需参与：只给与消息相关的成员分配具体任务；没有必要时必须让无关成员 task 留空字符串（本轮旁听，不发言不干活），严禁为了凑数给所有人派活
 2. 任务描述具体到该成员能直接开工，明确各自负责的部分、边界与期望产出
 3. 数组按执行先后顺序排列：产出被他人依赖的成员排在前，依赖他人产出的排在后（如：先调研 → 再实现 → 后成稿）
 4. 依赖标注（决定串行/并行）：某成员必须拿到另一成员的产出才能开工时，在其 deps 里列出所依赖成员的名字；互相独立、可同时开工的任务 deps 留空数组（系统将并行执行同批无依赖任务，串行链按依赖顺序逐级执行）
 5. 用户明确要求「先…再…」「按步骤」「串行」或后一步用到前一步结果时，必须用 deps 串成依赖链
-6. 只输出 JSON 数组，禁止任何其他文字：[{"id":"成员id","task":"任务描述","deps":["依赖的成员名"]}]
+6. 若工作产出包含文件（代码/文档/数据文件等），任务描述中要求成员在结论中列出每个成果文件的完整绝对路径
+7. 只输出 JSON 数组，禁止任何其他文字：[{"id":"成员id","task":"任务描述","deps":["依赖的成员名"]}]
 名单内每个成员必须且只能出现一次。`;
   const plannerMod = require('./planner');
   const { content, error } = await plannerMod.runOnce(prompt, dividePlanTimeout(), 'divide-plan');
@@ -1264,6 +1265,93 @@ ${history ? `\n【近期聊天背景】\n${String(history).slice(0, 2000)}` : ''
     }
   }
   return plan;
+}
+
+// ---------- 轮次研判：全部成员完成后，LLM 结合用户诉求与产出判断是否需要下一轮 ----------
+// 返回 {done, summary, next: [{agent, task, deps}]}；done=true 时 next 为空
+// mock 模式确定性返回：首轮即完成（单轮演示）
+async function divideReview(participants, message, history, outputs, round, maxRounds) {
+  if (process.env.AGENTS_CHAT_MOCK === '1') {
+    return { done: true, summary: `【演示研判】第 ${round} 轮分工已完成用户目标，工作结束。`, next: [] };
+  }
+  const roster = participants.map(a => `- ${a.name}（id: ${a.id}）`).join('\n');
+  const outputsText = outputs.map(o => `【${o.name} 的产出】\n${String(o.output).slice(0, 4000)}`).join('\n\n');
+  const prompt = `你是团队协作研判员。用户目标与第 ${round} 轮分工的全部成员产出如下，请研判工作是否完成。
+
+【用户消息】
+${message}
+${history ? `\n【聊天背景（可能已压缩）】\n${String(history).slice(0, 6000)}` : ''}
+
+【团队成员】
+${roster}
+
+【第 ${round} 轮产出】
+${outputsText}
+${round >= maxRounds ? `\n注意：已达最大轮次上限（${maxRounds} 轮），除非存在致命缺口必须补救，否则应判定完成。` : ''}
+
+研判要求：
+1. 对照用户目标逐项核对：已交付的部分列出结论与成果文件完整路径；未达成的部分明确缺口
+2. 目标已全部达成或剩余部分价值不大 → done=true，summary 面向用户做最终汇报（结论先行、分成员列出关键产出、包含成果文件完整绝对路径）
+3. 存在必须补救的缺口 → done=false，summary 一句话说明本轮进展与缺口，next 给出下一轮需要继续工作的成员分工（与目标无关的成员 task 留空；数组内只列需要参与/继续的成员）
+4. 只输出 JSON，禁止任何其他文字：{"done":true,"summary":"...","next":[]} 或 {"done":false,"summary":"...","next":[{"id":"成员id","task":"任务描述","deps":["依赖的成员名"]}]}`;
+  const plannerMod = require('./planner');
+  const { content, error } = await plannerMod.runOnce(prompt, dividePlanTimeout(), 'divide-review');
+  if (error && !content) throw new Error(error);
+  if (!content) throw new Error('研判调用无输出');
+  const { extractJSONObject } = require('./teamgen');
+  const obj = extractJSONObject(content);
+  if (!obj || typeof obj.done === 'undefined') throw new Error('研判结果解析失败');
+  const byKey = new Map();
+  for (const a of participants) { byKey.set(a.id, a); byKey.set(a.name, a); }
+  const next = [];
+  const seen = new Set();
+  for (const it of (Array.isArray(obj.next) ? obj.next : [])) {
+    const ag = byKey.get(String(it && it.id || '').trim());
+    if (ag && !seen.has(ag.id)) {
+      seen.add(ag.id);
+      next.push({ agent: ag, task: String(it.task || '').slice(0, 4000), deps: (Array.isArray(it.deps) ? it.deps : []).map(String).slice(0, 10) });
+    }
+  }
+  const done = String(obj.done) === 'true' || obj.done === true;
+  const summary = String(obj.summary || '').slice(0, 8000);
+  if (!done && !next.some(p => p.task)) throw new Error('研判要求继续但下一轮分工为空');
+  return { done, summary, next };
+}
+
+// ---------- 分工会话聊天背景：完整历史 + 超长自动压缩（用户自定义 LLM） ----------
+// 像人类群聊：后续轮次的成员能看到此前全部正式对话；超过长度预算时压缩为要点摘要，
+// 保障背景信息持续可用且不超出 opencode 内核的输入上下文限制（128K）
+const DIVIDE_HISTORY_MAX_CHARS = (() => {
+  const n = Number(process.env.AGENTS_CHAT_HISTORY_MAX_CHARS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 60000; // 默认 6 万字符 ≈ 3-4 万 token，为任务指令与输出留足余量
+})();
+
+async function buildDivideHistory(taskId) {
+  const store = storeRef;
+  let list;
+  try { list = store.getMessages(taskId); } catch { return ''; }
+  // 正式对话内容：用户消息 + 成员工作产出（分工/执行/汇总阶段）
+  const formal = list.filter(m => m.role === 'user' || (m.role === 'assistant' && (m.phase === 'divide' || m.phase === 'work' || m.phase === 'report')));
+  if (!formal.length) return '';
+  const recent = formal.slice(-200); // 轮次上限保护：最多取 200 条
+  const text = recent.map(m => `${m.role === 'user' ? '用户' : (m.agentName || '成员')}：${String(m.content).slice(0, 4000)}`).join('\n');
+  if (text.length <= DIVIDE_HISTORY_MAX_CHARS) return text;
+  // 超长压缩：交给用户自定义 LLM（与分工/组队同一接入）
+  const prompt = `以下是一段团队分工协作的聊天记录（原文 ${text.length} 字符，超长）。请压缩为要点摘要，必须保留：
+1. 用户的核心诉求、约束与补充说明
+2. 每位成员的关键结论、数据与决定
+3. 全部成果文件的完整绝对路径（逐条原样保留，不可省略）
+4. 尚未完成或待确认的事项
+摘要不超过 4000 字，直接输出摘要正文。
+
+${text.slice(-200000)}`;
+  const plannerMod = require('./planner');
+  const { content, error } = await plannerMod.runOnce(prompt, dividePlanTimeout(), 'history-compress');
+  if (content && !error) {
+    return `【聊天记录摘要（原文过长已自动压缩）】\n${content}`;
+  }
+  // 压缩失败兜底：保留最近部分（旧内容丢失好过整体失败）
+  return `【聊天记录（压缩失败，仅保留最近部分）】\n${text.slice(-DIVIDE_HISTORY_MAX_CHARS)}`;
 }
 
 // 依赖分层：deps 全部落在已完成层的成员构成下一层（层内并行，层间串行）；环或未知引用视作无依赖
@@ -1301,7 +1389,8 @@ function divideWorkCtx(task) {
 - 你按分工顺序工作：若上文提供了前置产出，说明同事已完成依赖步骤，请直接引用其结论继续你的部分；否则你与其他成员同批开工
 - 执行中可向任何一位同事发起协作，在产出末尾另起一行写：@同事名：协作请求。系统会转达给对方，其回应会带回给你，你将在收到后继续完成工作
 - 协作请求分两类：①请求输入——请对方提供数据/结论/评审；②指派任务——请对方完成某项具体工作并交付结果（写清任务内容、要求与交付形式）
-- 由你根据工作需要自主决定找谁、协作什么；请求要具体明确（对方无需猜测）。除必要协作外请独立完成并给出结论`;
+- 由你根据工作需要自主决定找谁、协作什么；请求要具体明确（对方无需猜测）。除必要协作外请独立完成并给出结论
+- 若工作产出包含文件（代码/文档/数据文件等），在结论中必须逐个列出成果文件的完整绝对路径（如 /home/user/work/report.md），便于用户与同事直接使用`;
 }
 
 // 唤醒轮：初始任务 + 上轮产出 + 同事反馈（反馈到齐或因上限无反馈后的继续）
@@ -1323,7 +1412,7 @@ ${reqs}
 ${ownLastOutput ? `\n【你最近的工作产出（可直接引用其中内容）】\n${String(ownLastOutput).slice(0, 2000)}\n` : ''}
 请按请求性质逐条处理：
 - 请求输入的：直接提供对方所需的数据、结论或建议
-- 指派任务的：完整执行该项工作并交付结果（可使用工具、产出文件，把成果讲清楚）
+- 指派任务的：完整执行该项工作并交付结果（可使用工具、产出文件，把成果讲清楚；产出文件时给出完整绝对路径）
 若确实无法完成，说明原因并给出替代建议。不要重复执行对方的全量任务，只处理其请求的部分。`;
 }
 
@@ -1489,10 +1578,18 @@ async function runDivideCore(plan, opts, emit, onMessage, execFn) {
       content: `⚠ ${a ? a.name : id} 等待的同事反馈因编排结束而中止（${[...st.expect].map(memberName).join('、')} 未回应）`
     });
   }
-  return { ok, finalText: outputs.join('\n\n'), stopped: isStopped() };
+  // 结构化产出（研判轮次用）：全部成员的最终产出列表
+  const namedOutputs = [];
+  for (const p of plan) {
+    if (!p.task) continue;
+    const out = lastOutput.get(p.agent.id);
+    if (out) namedOutputs.push({ id: p.agent.id, name: p.agent.name, output: out });
+  }
+  return { ok, finalText: outputs.join('\n\n'), outputs: namedOutputs, stopped: isStopped() };
 }
 
-// 分工模式入口：分工调用 → 降级兜底 → 分工表落库 → 调度执行
+// 分工模式入口：分工调用 → 降级兜底 → 分工表落库 → 调度执行 → 研判是否下一轮 → 循环直至完成
+// 多轮语义：每轮全部成员完成后，由 LLM 结合用户诉求与成员产出研判；未完成则生成下一轮分工继续
 async function runDivide(participants, message, opts, emit, onMessage) {
   const taskId = opts.taskId || '';
   const runId = newRunId();
@@ -1501,19 +1598,11 @@ async function runDivide(participants, message, opts, emit, onMessage) {
     summary: String(message).replace(/\s+/g, ' ').slice(0, 200),
     detail: { taskId, mode: 'divide', members: participants.map(a => a.name) }
   });
-  emit({ type: 'notice', content: `🤝 分工模式：正在为 ${participants.length} 位成员分工…`, taskId });
-  let plan;
-  try {
-    plan = await dividePlan(participants, message, opts.history);
-    if (!plan.some(p => p.task)) {
-      emit({ type: 'notice', content: '⚠ 分工结果为空，已降级为全员并行执行', taskId });
-      plan = participants.map(a => ({ agent: a, task: message }));
-    }
-  } catch (e) {
-    emit({ type: 'notice', content: `⚠ 分工调用失败（${e && e.message || e}），已降级为全员并行执行`, taskId });
-    plan = participants.map(a => ({ agent: a, task: message }));
-  }
   const isStopped = opts.isStopped || (() => false);
+  const MAX_ROUNDS = (() => {
+    const n = Number(process.env.AGENTS_CHAT_DIVIDE_MAX_ROUNDS);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 3;
+  })();
   // 成员 opencode 会话（工作记忆）：同一聊天会话内跨轮次续用，成员记得自己此前所有工作
   const taskKey = taskId || 'main';
   let prevSessions = {};
@@ -1534,23 +1623,80 @@ async function runDivide(participants, message, opts, emit, onMessage) {
       hop: item.hop, wakeUp: item.wakeUp || '', final: !!item.final
     };
   };
-  const r = await runDivideCore(plan, Object.assign({}, opts, { participants }), emit, onMessage, execFn);
-  // 会话落盘：即使中途停止也保留已建立的会话，下条消息继续时工作记忆仍在
+  const saveSessions = () => {
+    // 会话落盘：即使中途停止也保留已建立的会话，下条消息继续时工作记忆仍在
+    try {
+      if (ocSessions.size) storeRef.saveDivideSessions(taskKey, Object.fromEntries(ocSessions));
+    } catch { /* 落盘失败不影响编排结果 */ }
+  };
+
+  emit({ type: 'notice', content: `🤝 分工模式：正在为 ${participants.length} 位成员分工…`, taskId });
+  // 首轮分工表
+  let plan;
   try {
-    if (ocSessions.size) storeRef.saveDivideSessions(taskKey, Object.fromEntries(ocSessions));
-  } catch { /* 落盘失败不影响编排结果 */ }
+    plan = await dividePlan(participants, message, opts.history);
+    if (!plan.some(p => p.task)) {
+      emit({ type: 'notice', content: '⚠ 分工结果为空，已降级为全员并行执行', taskId });
+      plan = participants.map(a => ({ agent: a, task: message }));
+    }
+  } catch (e) {
+    emit({ type: 'notice', content: `⚠ 分工调用失败（${e && e.message || e}），已降级为全员并行执行`, taskId });
+    plan = participants.map(a => ({ agent: a, task: message }));
+  }
+
+  let ok = false;
+  let stopped = false;
+  let lastFinalText = '';
+  for (let round = 1; round <= MAX_ROUNDS; round++) {
+    if (isStopped()) break;
+    if (round > 1) emit({ type: 'notice', content: `🔁 进入第 ${round} 轮分工（上限 ${MAX_ROUNDS} 轮）`, taskId });
+    const r = await runDivideCore(plan, Object.assign({}, opts, { participants }), emit, onMessage, execFn);
+    ok = ok || r.ok;
+    lastFinalText = r.finalText || lastFinalText;
+    stopped = r.stopped;
+    if (stopped) break;
+    saveSessions();
+    // 研判：全部成员已完成，结合用户诉求与产出判断是否需要下一轮
+    let review;
+    try {
+      review = await divideReview(participants, message, opts.history, r.outputs, round, MAX_ROUNDS);
+    } catch (e) {
+      emit({ type: 'notice', content: `⚠ 研判调用失败（${e && e.message || e}），本轮产出视为最终结果`, taskId });
+      break;
+    }
+    if (review.done || !review.next.some(p => p.task)) {
+      // 完成：面向用户的最终汇报（含成果文件完整路径）
+      const report = review.summary || '全部分工工作已完成。';
+      emit({ type: 'notice', content: `✅ 研判结论：${review.done ? '用户目标已达成' : '工作结束'}，共 ${round} 轮`, taskId });
+      onMessage({ role: 'assistant', agentId: 'divide-review', agentName: '分工研判', actor: 'assistant', phase: 'divide', content: report });
+      lastFinalText = lastFinalText ? `${lastFinalText}\n\n${report}` : report;
+      break;
+    }
+    // 未完成：下一轮分工（next 只含需要继续的成员，未列入者本轮旁听）
+    const rosterText = `📋 第 ${round + 1} 轮分工（研判：${review.summary || '存在待补缺口'}）\n${review.next.map(p => `- ${p.agent.icon || ''}${p.agent.name}：${p.task || '（本轮旁听）'}`).join('\n')}`;
+    emit({ type: 'notice', content: rosterText, taskId });
+    onMessage({ role: 'sys', phase: 'divide', content: rosterText });
+    plan = review.next;
+    if (round === MAX_ROUNDS) {
+      // 研判要求继续但已达轮次上限：提示用户可再发消息继续
+      emit({ type: 'notice', content: `⚠ 已达分工轮次上限（${MAX_ROUNDS} 轮），编排停止。如需继续，请再发送消息描述剩余工作`, taskId });
+    }
+  }
+  saveSessions();
   logFlow({
     run: runId, type: 'finish', from: '分工',
-    summary: (r.ok ? '完成' : '无产出') + (r.stopped ? '（手动停止）' : ''),
+    summary: (ok ? '完成' : '无产出') + (stopped ? '（手动停止）' : ''),
     detail: { mode: 'divide' }
   });
-  return r;
+  return { ok, finalText: lastFinalText, stopped };
 }
 
 module.exports = {
   runButler, runMentioned, runRoundtable, runDivide, runTasks, prepareRerun, runAutoChecks,
+  buildDivideHistory,
   // 测试导出（单测用，业务代码请勿依赖）
   testDividePlan: dividePlan, testRunDivideCore: runDivideCore, testDivideMentions: divideMentions,
+  testDivideReview: divideReview,
   DIVIDE_MAX_WORK, DIVIDE_MAX_HOP,
   // 测试导出（单测用，业务代码请勿依赖）
   testBoardInit: boardInit, testBoardAppend: boardAppend, testBoardRead: boardRead,
