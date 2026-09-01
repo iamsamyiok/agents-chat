@@ -46,10 +46,20 @@ async function main() {
     title: 'Agents Chat',
     backgroundColor: '#0f1519',
     autoHideMenuBar: true, // 顶部菜单默认隐藏（Alt 唤出，保留 F12/Ctrl+R 调试能力）
+    show: false, // 等页面就绪再显示：避免加载期白屏 + Windows 前台锁定导致焦点丢失
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false, // 页面全部能力走 HTTP/SSE，与浏览器形态一致
     },
+  });
+  // 就绪后显示并聚焦窗口（便携版启动器进程常持有前台，需显式抢回）
+  win.once('ready-to-show', () => {
+    win.show();
+    win.focus();
+  });
+  // 页面加载完成后渲染进程显式获取键盘焦点：修复 Windows 下输入框无法输入
+  win.webContents.once('did-finish-load', () => {
+    try { win.webContents.focus(); } catch { /* ignore */ }
   });
   win.loadURL(`http://127.0.0.1:${port}/`);
   // 渲染进程异常崩溃（显卡/内存）自动重载；连续 3 次崩溃则退出并记录错误，防止死循环
@@ -62,7 +72,9 @@ async function main() {
       console.error('[desktop] 渲染进程连续崩溃，应用退出');
       app.exit(1);
     } else {
-      win.loadURL(`http://127.0.0.1:${port}/`);
+      win.loadURL(`http://127.0.0.1:${port}/`).then(() => {
+        try { win.webContents.focus(); } catch { /* ignore */ }
+      }).catch(() => {});
     }
   });
 

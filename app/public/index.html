@@ -942,7 +942,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.43.3'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.43.5'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -1078,6 +1078,10 @@ async function init() {
   // 版本互检：页面与服务端不一致 → 页面是旧缓存，必须强刷
   if (health.version && health.version !== PAGE_VERSION) {
     addSys(`⚠ 页面版本（${PAGE_VERSION}）与服务端（${health.version}）不一致：浏览器缓存了旧页面，请按 Ctrl+F5 强制刷新`);
+  }
+  // 桌面形态（Electron）兜底聚焦输入框：便携版启动器抢前台的场景下键盘焦点可能未落进渲染进程
+  if (/Electron/i.test(navigator.userAgent)) {
+    try { document.getElementById('input').focus(); } catch { /* ignore */ }
   }
   renderUpdateInfo(health);
   refreshNotifyBtn();
