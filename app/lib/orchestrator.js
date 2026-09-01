@@ -377,10 +377,15 @@ async function approvalGate(kind, label, opts, emit, isStopped, taskId, runId) {
     while (!settled && !isStopped()) await new Promise(r => setTimeout(r, 800));
     return false;
   })();
+  const approvalP = Promise.resolve(opts.requestApproval(kind, label, taskId, runId)); // 附带 approvalId（server 注入，可取消）
   const approved = await Promise.race([
-    Promise.resolve(opts.requestApproval(kind, label, taskId, runId)),
+    approvalP,
     stopWatcher
   ]).finally(() => { settled = true; });
+  // 编排被手动停止时审批仍挂着（stopWatcher 先赢）：立即取消未决记录，防卡片残留与阻塞自动退出
+  if (!approved && isStopped() && approvalP && approvalP.approvalId && typeof opts.cancelApproval === 'function') {
+    try { opts.cancelApproval(approvalP.approvalId); } catch { /* ignore */ }
+  }
   if (approved) {
     emit({ type: 'notice', content: `✔ 审批通过：${label}`, taskId });
   } else {

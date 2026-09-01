@@ -112,18 +112,24 @@ const APPROVAL_TIMEOUT_MS = Number(process.env.AGENTS_CHAT_APPROVAL_TIMEOUT_MS) 
   ? Number(process.env.AGENTS_CHAT_APPROVAL_TIMEOUT_MS) : 600000; // 默认 10 分钟未审批视为拒绝
 
 // emitFn：延迟取当前 SSE 发射器（审批触发时流已建立）；requestApproval(kind,label,taskId,runId)
+// 返回的 promise 附带 approvalId（approvalGate 编排停止时据此取消未决记录，防残留）
 function makeRequestApproval(emitFn) {
-  return (kind, label, taskId, runId) => new Promise((resolve) => {
+  return (kind, label, taskId, runId) => {
     const id = 'apr-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
     const createdAt = new Date().toISOString();
-    const timer = setTimeout(() => finishApproval(id, false, true), APPROVAL_TIMEOUT_MS);
-    pendingApprovals.set(id, { kind, label, taskId: taskId || '', runId: runId || '', resolve, timer, createdAt });
-    try {
-      store.savePendingApproval(id, { kind, label, taskId: taskId || '', runId: runId || '', createdAt, deadline: new Date(Date.now() + APPROVAL_TIMEOUT_MS).toISOString(), status: 'pending' });
-    } catch (e) { console.error('[approval] 落盘失败:', e && e.message); }
-    try { if (typeof emitFn === 'function') emitFn()({ type: 'approval_required', approvalId: id, kind, label, taskId: taskId || '', runId: runId || '' }); } catch { /* SSE 已断开：刷新后经 /api/approvals 恢复 */ }
-  });
+    const p = new Promise((resolve) => {
+      const timer = setTimeout(() => finishApproval(id, false, true), APPROVAL_TIMEOUT_MS);
+      pendingApprovals.set(id, { kind, label, taskId: taskId || '', runId: runId || '', resolve, timer, createdAt });
+      try {
+        store.savePendingApproval(id, { kind, label, taskId: taskId || '', runId: runId || '', createdAt, deadline: new Date(Date.now() + APPROVAL_TIMEOUT_MS).toISOString(), status: 'pending' });
+      } catch (e) { console.error('[approval] 落盘失败:', e && e.message); }
+      try { if (typeof emitFn === 'function') emitFn()({ type: 'approval_required', approvalId: id, kind, label, taskId: taskId || '', runId: runId || '' }); } catch { /* SSE 已断开：刷新后经 /api/approvals 恢复 */ }
+    });
+    return Object.assign(p, { approvalId: id });
+  };
 }
+// 取消未决审批（编排被手动停止时调用；记录已处理则无副作用）
+function cancelApproval(id) { return finishApproval(String(id || ''), false, false); }
 function finishApproval(id, approved, timedOut) {
   const a = pendingApprovals.get(id);
   if (!a) return null;
@@ -153,6 +159,20 @@ function finishApproval(id, approved, timedOut) {
     }
     if (n) console.log(`[approval] ${n} 条上次未决审批已标记中断（审批面板可断点重跑或忽略）`);
   } catch (e) { console.error('[approval] 启动恢复失败:', e && (e.message || e)); }
+})();
+// 启动恢复：上次进程在途 claim → 标记 interrupted（编排已随进程终止；同 clientSubmitId 重试时
+// claimIdempotency 会清除该记录并放行重新发起，避免「崩溃后同 ID 永远 409」）
+(function restoreClaimsOnBoot() {
+  try {
+    let n = 0;
+    for (const [cid, c] of Object.entries(store.getClaims())) {
+      if (c && c.status === 'pending') {
+        store.upsertClaim(cid, { status: 'interrupted' });
+        n++;
+      }
+    }
+    if (n) console.log(`[idempotency] ${n} 条上次在途提交已标记中断（同 ID 重试将重新发起）`);
+  } catch (e) { console.error('[idempotency] 启动恢复失败:', e && (e.message || e)); }
 })();
 
 // ---------- 幂等提交：执行类 API 带 clientSubmitId 时先落 claim，响应丢失后重试不重复派发（借鉴 tutti SubmitClaim） ----------
@@ -574,7 +594,7 @@ const server = http.createServer(async (req, res) => {
     const opts = {
       taskId, history: buildHistoryText(taskId), scope: 'chat',
       isStopped: () => stopTokens.chat !== myToken,
-      approval: approvalSetting(), requestApproval: makeRequestApproval(() => send),
+      approval: approvalSetting(), requestApproval: makeRequestApproval(() => send), cancelApproval,
       resume: { phases: prepared.phases, priorResults: prepared.priorResults, fromStage: prepared.fromStage, baseRun: runId }
     };
     const send = sse(req, res);
@@ -1169,7 +1189,7 @@ ${need}
     const historyText = body.mode === 'divide'
       ? await buildDivideHistory(storeTaskId)
       : buildHistoryText(taskId);
-    const opts = { taskId: storeTaskId, history: historyText, scope: 'chat', isStopped: () => stopTokens.chat !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval(() => send) };
+    const opts = { taskId: storeTaskId, history: historyText, scope: 'chat', isStopped: () => stopTokens.chat !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval(() => send), cancelApproval };
     store.addMessage({ role: 'user', content: message || '（见附件）', taskId: storeTaskId, timestamp: new Date().toISOString() });
 
     const send = sse(req, res);
@@ -2002,7 +2022,7 @@ async function executeTaskBatch(selected, send, myToken) {
   const persist = (m) => store.addMessage({ ...m, timestamp: new Date().toISOString() });
   await runTasks(
     selected, butler, subAgents,
-    { getHistory: (tid) => buildHistoryText(tid), resolveAssign, scope: 'tasks', isStopped: () => stopTokens.tasks !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval(() => send), taskCwd: (task) => (task.worktree && task.worktree.dir) || '' },
+    { getHistory: (tid) => buildHistoryText(tid), resolveAssign, scope: 'tasks', isStopped: () => stopTokens.tasks !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval(() => send), cancelApproval, taskCwd: (task) => (task.worktree && task.worktree.dir) || '' },
     send, persist,
     // 任务会话首条消息：任务本身（用户视角）
     (task) => {

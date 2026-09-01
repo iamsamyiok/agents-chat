@@ -993,7 +993,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.44.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.44.1'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -1201,6 +1201,7 @@ document.addEventListener('keydown', (e) => {
     if (taskBusy || document.hidden) return;
     loadTasks(true);
     refreshCardsStats(); // 编排标签角标同步（stats 接口轻量 <1KB）
+    restoreApprovals(); // 审批卡片补挂：SSE 断线/漏发 approval_required 时不刷新页面也能恢复（同 ID 去重）
   }, 8000);
 }
 
@@ -2543,13 +2544,14 @@ async function discardApproval(id, btn) {
 // 中断审批的断点重跑：从第 1 阶段重新执行原编排（前置产出自动复用）
 async function rerunInterrupted(runId, btn) {
   if (!runId) { toast('该审批无关联的编排记录，无法重跑'); return; }
+  const card = btn ? btn.closest('.approval-card') : null;
   if (btn) { btn.disabled = true; btn.textContent = '重跑中…'; }
   try {
     await streamSSE('/api/flow/rerun', { run: runId, fromStage: 1, clientSubmitId: genCid() }, (e) => handleStreamEvent(e));
-    document.querySelectorAll('.approval-card .ap-btns').forEach(el => {
-      const card = el.closest('.approval-card');
-      if (card && card.dataset.aid && card.classList.contains('ap-interrupted')) el.outerHTML = '<div class="ap-done">↻ 已发起断点重跑</div>';
-    });
+    if (card) {
+      const btns = card.querySelector('.ap-btns');
+      if (btns) btns.outerHTML = '<div class="ap-done">↻ 已发起断点重跑</div>';
+    }
   } catch (e) {
     toast('重跑失败：' + (e && e.message || e));
     if (btn) { btn.disabled = false; btn.textContent = '↻ 断点重跑'; }

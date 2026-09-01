@@ -123,6 +123,30 @@ test('approvalGate：runId 透传到 requestApproval（持久化锚点）', asyn
   assert.deepStrictEqual(calls[0], { kind: 'plan', label: '调度方案', taskId: 'task-5', runId: 'run-abc' });
 });
 
+test('approvalGate：手动停止时取消未决审批（防卡片残留与阻塞自动退出）', async () => {
+  const cancelled = [];
+  const opts = {
+    approval: 'plan',
+    requestApproval: () => Object.assign(new Promise(() => {}), { approvalId: 'apr-stop-1' }), // 永不裁决
+    cancelApproval: (id) => { cancelled.push(id); }
+  };
+  const ok = await orch.testApprovalGate('plan', '调度方案', opts, () => {}, () => true, 'task-6', 'run-6');
+  assert.strictEqual(ok, false); // 停止 = 未通过
+  assert.deepStrictEqual(cancelled, ['apr-stop-1']); // 未决记录被立即取消
+});
+
+test('approvalGate：正常通过/裁决路径不触发取消', async () => {
+  const cancelled = [];
+  const opts = {
+    approval: 'plan',
+    requestApproval: () => Object.assign(Promise.resolve(true), { approvalId: 'apr-ok-1' }),
+    cancelApproval: (id) => { cancelled.push(id); }
+  };
+  const ok = await orch.testApprovalGate('plan', '调度方案', opts, () => {}, () => false, 'task-7', 'run-7');
+  assert.strictEqual(ok, true);
+  assert.deepStrictEqual(cancelled, []);
+});
+
 // ---------- 集成：真实服务子进程（启动恢复 / discard / 幂等重放） ----------
 const PORT = 4200 + (process.pid % 100);
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -132,12 +156,16 @@ let childDead = '';
 
 test.before(async () => {
   // 预置上次进程遗留的未决审批：一条未超时（应标记 interrupted）、一条已超时（应被清除）
+  // 同时预置一条在途 claim（应标记 interrupted，同 cid 重试可重新发起）
   const aid = 'apr-boot-1';
   fs.writeFileSync(path.join(DATA, 'pending-approvals.json'), JSON.stringify({
     approvals: {
       [aid]: { kind: 'plan', label: '调度方案：2 个阶段', taskId: '', runId: 'run-boot-1', createdAt: new Date(Date.now() - 60000).toISOString(), deadline: new Date(Date.now() + 300000).toISOString(), status: 'pending' },
       'apr-boot-expired': { kind: 'verify', label: '交付确认', taskId: '', runId: '', createdAt: new Date(Date.now() - 7200000).toISOString(), deadline: new Date(Date.now() - 3600000).toISOString(), status: 'pending' }
     }
+  }, null, 2));
+  fs.writeFileSync(path.join(DATA, 'submit-claims.json'), JSON.stringify({
+    claims: { 'cid-boot-crash': { scope: 'chat', status: 'pending', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } }
   }, null, 2));
   child = spawn(process.execPath, [path.join(__dirname, '..', 'app', 'server.js'), '--port', String(PORT)], {
     env: { ...process.env, AGENTS_CHAT_MOCK: '1', AGENTS_CHAT_DATA: DATA, AGENTS_CHAT_AUTOSTOP: '0' },
@@ -220,6 +248,17 @@ test('幂等重放：chat 同 cid 完成后重发返回 replayed JSON（不再�
   assert.strictEqual(b.replayed, true);
   assert.strictEqual(b.success, true);
   assert.ok(b.result && b.result.taskId !== undefined);
+});
+
+test('启动恢复：在途 claim 标记 interrupted，同 cid 重试可重新发起（SSE 而非 409）', async () => {
+  // 上次崩溃遗留的 pending claim（cid-boot-crash）已被启动恢复标记 interrupted；
+  // 同 cid 重新提交应放行执行（claimIdempotency 清除 interrupted 记录）
+  const r = await fetch(BASE + '/api/chat', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ message: 'claim-boot-test', clientSubmitId: 'cid-boot-crash' })
+  });
+  assert.ok(/text\/event-stream/.test(r.headers.get('content-type') || ''), '应放行为 SSE 流');
+  await r.text();
 });
 
 test('幂等在途：claim 为 pending 时同 cid 提交返回 409（不二派）', async () => {
