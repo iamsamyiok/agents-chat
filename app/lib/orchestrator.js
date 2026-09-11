@@ -1710,17 +1710,55 @@ async function runDivide(participants, message, opts, emit, onMessage) {
   };
 
   emit({ type: 'notice', content: `🤝 分工模式：正在为 ${participants.length} 位成员分工…`, taskId });
-  // 首轮分工表
-  let plan;
-  try {
-    plan = await dividePlan(participants, message, opts.history);
-    if (!plan.some(p => p.task)) {
-      emit({ type: 'notice', content: '⚠ 分工结果为空，已降级为全员并行执行', taskId });
-      plan = participants.map(a => ({ agent: a, task: message }));
+  // 首轮分工表：连续失败时重试并交由用户选择处理方式（结束/继续尝试/单智能体直接完成）
+  const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
+  const askDivideChoice = async (errText) => {
+    // 三态审批：'abort' | 'retry' | 'single'；超时/异常/否决默认 'single'（保产出）
+    try {
+      const r = await opts.requestApproval('divide_fail',
+        `分工调用连续失败（${errText}）。请选择处理方式：结束任务 / 继续尝试分工 / 不再分工，由一个智能体直接完成（${(participants[0] && participants[0].name) || '首个成员'}）。超时未选默认由单智能体完成。`, taskId, runId);
+      return (r === 'retry' || r === 'abort' || r === 'single') ? r : 'single';
+    } catch { return 'single'; }
+  };
+  let plan = null;
+  let lastDivideErr = '';
+  let planTries = 0;
+  const DIVIDE_TRIES = 3;
+  while (!plan) {
+    try {
+      plan = await dividePlan(participants, message, opts.history);
+      if (!plan.some(p => p.task)) {
+        emit({ type: 'notice', content: '⚠ 分工结果为空，已降级为全员并行执行', taskId });
+        plan = participants.map(a => ({ agent: a, task: message }));
+      }
+      break;
+    } catch (e) {
+      lastDivideErr = (e && e.message) || String(e);
+      const attempt = planTries + 1;
+      if (attempt < DIVIDE_TRIES) {
+        planTries = attempt;
+        emit({ type: 'notice', content: `⚠ 分工调用失败（${lastDivideErr}），${(2 * attempt)} 秒后进行第 ${attempt + 1}/${DIVIDE_TRIES} 次尝试…`, taskId });
+        await sleepMs(2000 * attempt);
+        continue;
+      }
+      planTries = 0;
+      emit({ type: 'notice', content: `⚠ 分工连续 ${DIVIDE_TRIES} 次失败，已发起人工选择…`, taskId });
+      const choice = await askDivideChoice(lastDivideErr);
+      if (choice === 'abort') {
+        emit({ type: 'notice', content: '⛔ 已按您的选择结束任务', taskId });
+        onMessage({ role: 'sys', phase: 'divide', content: '⛔ 分工失败，任务已按您的选择结束。' });
+        saveSessions();
+        return { ok: false, finalText: '分工调用失败，任务已按您的选择结束。', stopped: true };
+      }
+      if (choice === 'retry') {
+        emit({ type: 'notice', content: '↻ 已选择继续尝试分工…', taskId });
+        planTries = 0;
+        continue;
+      }
+      emit({ type: 'notice', content: `▶ 已选择不再分工：由 ${(participants[0] && participants[0].name) || '首个成员'} 一个智能体直接完成全部任务`, taskId });
+      onMessage({ role: 'sys', phase: 'divide', content: `▶ 分工失败已降级：由 ${(participants[0] && participants[0].name) || '首个成员'} 直接完成全部任务。` });
+      plan = [{ agent: participants[0], task: message, deps: [] }];
     }
-  } catch (e) {
-    emit({ type: 'notice', content: `⚠ 分工调用失败（${e && e.message || e}），已降级为全员并行执行`, taskId });
-    plan = participants.map(a => ({ agent: a, task: message }));
   }
 
   let ok = false;

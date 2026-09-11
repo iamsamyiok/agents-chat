@@ -13,6 +13,7 @@
  */
 
 const { spawn, execSync } = require('child_process');
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -91,10 +92,11 @@ function startServer() {
     windowsHide: true
   };
 
-  // Windows 特殊处理
+  // Windows: process.execPath 为 node.exe 绝对路径, 直启无需 shell;
+  // shell:true+detached 会弹出新的 cmd 窗口
   if (process.platform === 'win32') {
-    options.shell = true;
     options.windowsHide = true;
+    options.detached = false;
   }
 
   const child = spawn(process.execPath, [SERVER_PATH, '--port', PORT], options);
@@ -115,23 +117,72 @@ function startServer() {
   // 等待服务就绪
   console.log('等待服务就绪...');
   let retries = 30;
-  const poll = setInterval(() => {
+  const poll = setInterval(async () => {
     retries--;
-    try {
-      execSync(`curl -s -m 2 http://localhost:${PORT}/api/health`, { stdio: 'pipe' });
+    if (await probeHealth(PORT)) {
       clearInterval(poll);
       console.log('服务已就绪!');
       console.log(`访问 http://localhost:${PORT}`);
       openBrowser();
-    } catch {
-      if (retries <= 0) {
-        clearInterval(poll);
-        console.error('服务启动超时，请查看日志:');
-        console.log(`  ${LOG_FILE}`);
-        process.exit(1);
-      }
+    } else if (retries <= 0) {
+      clearInterval(poll);
+      console.error('服务启动超时，请查看日志:');
+      console.log(`  ${LOG_FILE}`);
+      process.exit(1);
     }
   }, 500);
+}
+
+// 健康探测: Node 原生 http(Windows 老版本无 curl 命令也能用)
+function probeHealth(port, timeoutMs) {
+  return new Promise((resolve) => {
+    const req = http.get({ host: 'localhost', port, path: '/api/health', timeout: timeoutMs || 2000 }, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+}
+
+// 前台运行: 直接在当前终端窗口启动 server(不开新窗口, 日志实时可见, Ctrl+C 一起退出)
+function startForeground() {
+  if (isRunning().running) {
+    console.log(`服务已在后台运行 (PID: ${isRunning().pid}), 直接打开页面:`);
+    openBrowser();
+    return;
+  }
+  const env = { ...process.env, AGENTS_CHAT_DATA: DATA_DIR };
+  const child = spawn(process.execPath, [SERVER_PATH, '--port', PORT], {
+    cwd: path.join(__dirname, '..'),
+    env,
+    stdio: 'inherit',
+    windowsHide: true
+  });
+  fs.writeFileSync(PID_FILE, String(child.pid));
+  const cleanup = () => {
+    try { if (process.platform === 'win32') execSync(`taskkill /pid ${child.pid} /T /F`, { stdio: 'ignore' }); else try { child.kill('SIGTERM'); } catch {} } catch {}
+    try { fs.unlinkSync(PID_FILE); } catch {}
+  };
+  process.on('SIGINT', () => { cleanup(); process.exit(0); });
+  process.on('SIGTERM', () => { cleanup(); process.exit(0); });
+  process.on('exit', cleanup);
+  child.on('exit', (code) => {
+    try { fs.unlinkSync(PID_FILE); } catch {}
+    console.log(`服务已退出 (${code ?? ''})`);
+    process.exit(code ?? 0);
+  });
+  console.log(`启动中... 端口 ${PORT}, 数据目录 ${DATA_DIR}`);
+  console.log('Ctrl+C 停止服务');
+  // 服务就绪后自动打开浏览器(Node 原生探测, 不依赖 curl)
+  const poll = setInterval(async () => {
+    if (await probeHealth(PORT)) {
+      clearInterval(poll);
+      console.log(`服务已就绪: http://localhost:${PORT}`);
+      openBrowser();
+    }
+  }, 500);
+  setTimeout(() => clearInterval(poll), 30000);
 }
 
 function stopServer() {
@@ -374,11 +425,14 @@ function autostartStatus() {
 }
 
 // 主逻辑
-const command = process.argv[2] || 'start';
+const command = process.argv[2] || 'fg';
 
 switch (command) {
+  case 'fg':
+  case 'run':
+    startForeground();
+    break;
   case 'start':
-  case '':
     startServer();
     break;
   case 'stop':
@@ -412,9 +466,10 @@ switch (command) {
 Agents Chat CLI v${PKG.version}
 
 用法:
-  agents-chat            启动服务（后台运行，自动打开浏览器）
-  agents-chat start      同上
-  agents-chat stop       停止服务
+  agents-chat            前台启动服务（当前窗口直接运行, Ctrl+C 退出, 自动打开浏览器）
+  agents-chat fg         同上
+  agents-chat start      后台静默运行（不弹新窗口, 日志写文件, 用 stop 停止）
+  agents-chat stop       停止后台服务
   agents-chat status     查看服务状态（含版本与更新检查）
   agents-chat open       仅打开浏览器
   agents-chat update     检查并一键升级到 npm 最新版

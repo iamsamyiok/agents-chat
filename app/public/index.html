@@ -125,6 +125,7 @@
   .approval-card .ap-btns button { flex: 1; border: none; border-radius: 6px; padding: 6px 0; font-size: 13px; cursor: pointer; }
   .approval-card .ap-ok { background: #07c160; color: #fff; }
   .approval-card .ap-no { background: #fa5151; color: #fff; }
+  .approval-card .ap-mid { background: #8a6fe8; color: #fff; }
   .approval-card .ap-done { font-size: 12px; color: #888; text-align: center; padding: 2px 0; }
   .approval-card.ap-interrupted { background: #f4f6fa; border-color: #8a97ab; }
   .approval-card.ap-interrupted .ap-title-int { color: #4a5568; }
@@ -706,19 +707,15 @@
   </div>
 </div>
 
-<!-- 新手引导弹窗 -->
+<!-- 启动自检面板（内核安装 + LLM 配置） -->
 <div id="welcomeMask">
-  <div class="modal" style="width:600px">
-    <h3>👋 欢迎使用 Agents Chat</h3>
-    <div class="tip">一个页面指挥一支 AI 智能体团队：你说需求，管家拆解调度，多个智能体并行干活、互相验收。三步上手：</div>
-    <div style="display:flex;gap:10px;margin:10px 0">
-      <div class="onb-step"><div class="onb-num">1</div><b>直接聊</b><span>下方输入框发需求，管家自动安排团队分工协作</span></div>
-      <div class="onb-step"><div class="onb-num">2</div><b>批量任务</b><span>「导入」一次粘贴多条，可排序、可定时、可 Git 隔离</span></div>
-      <div class="onb-step"><div class="onb-num">3</div><b>无人值守</b><span>定时任务到点自动跑，完成推送通知，错过自动补跑</span></div>
-    </div>
-    <div class="tip" id="onbKernelTip" style="margin-bottom:6px"></div>
+  <div class="modal" style="width:620px">
+    <h3>🔍 启动自检</h3>
+    <div class="tip">检测本机 AI 智能体安装情况与 LLM 配置状态。全部就绪即可开始使用；也可跳过后随时在「帮助」里重新自检。</div>
+    <div id="scBody" style="text-align:left;font-size:13px;line-height:1.9;max-height:52vh;overflow:auto">检测中…</div>
     <div class="modal-actions">
-      <button onclick="closeWelcome(true)">我自己逛逛</button>
+      <button onclick="closeSelfCheck()">全部跳过</button>
+      <button onclick="renderSelfCheck()" style="margin-left:8px">重新检测</button>
     </div>
   </div>
 </div>
@@ -946,7 +943,7 @@
     <h3>❓ 使用帮助</h3>
     <div id="helpBody"></div>
     <div class="modal-actions">
-      <button class="mini-btn" onclick="closeHelp(); openWelcome()">👋 重新查看新手引导</button>
+      <button class="mini-btn" onclick="closeHelp(); openSelfCheck()">🔍 重新运行自检</button>
       <span style="flex:1"></span>
       <button class="primary" onclick="closeHelp()">关闭</button>
     </div>
@@ -993,7 +990,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.44.1'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.44.2'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -1137,14 +1134,10 @@ async function init() {
   renderUpdateInfo(health);
   refreshNotifyBtn();
 
-  // 新手引导：从未使用过（主会话无消息、无任务、本机未看过引导）→ 自动弹欢迎
-  try {
-    if (!localStorage.getItem(ONBOARD_KEY)
-      && getSess('').length === 0
-      && tasks.filter(t => t.kind !== 'scheduled').length === 0) {
-      openWelcome();
-    }
-  } catch { /* localStorage 不可用时跳过 */ }
+  // 中间栏（任务面板）默认折叠, 需要时点「任务⟩」展开
+  try { document.body.classList.add('coll-task'); } catch { }
+  // 启动自检: 每次启动展示内核安装与 LLM 配置状态, 可一键跳过
+  try { openSelfCheck(); } catch { }
 
   input.addEventListener('input', handleAtInput);
   input.addEventListener('blur', () => setTimeout(hideAt, 150));
@@ -2374,6 +2367,16 @@ function msgNode(m) {
         <button class="ap-ok" onclick="rerunInterrupted('${escAttr(m.runId || '')}', this)">↻ 断点重跑</button>
         <button class="ap-no" onclick="discardApproval('${escAttr(m.approvalId)}', this)">✕ 忽略</button>
       </div>`;
+    } else if (m.kind === 'divide_fail') {
+      // 分工失败三选：结束 / 继续尝试分工 / 单智能体直接完成
+      d.innerHTML = `
+      <div class="ap-title">⚠ 分工失败，请选择处理方式</div>
+      <div class="ap-label">${esc(m.label || '')}</div>
+      <div class="ap-btns">
+        <button class="ap-no" onclick="decideCard('${escAttr(m.approvalId)}', 'abort', this)">✘ 结束任务</button>
+        <button class="ap-mid" onclick="decideCard('${escAttr(m.approvalId)}', 'retry', this)">↻ 继续尝试分工</button>
+        <button class="ap-ok" onclick="decideCard('${escAttr(m.approvalId)}', 'single', this)">▶ 单智能体完成</button>
+      </div>`;
     } else {
       d.innerHTML = `
       <div class="ap-title">⏸ 人工审批（${m.kind === 'plan' ? '调度方案' : '交付确认'}）</div>
@@ -2516,6 +2519,18 @@ function addSys(text, taskId, isErr) {
 function addErr(text, taskId) { return addSys(text, taskId, true); }
 
 // ---------- 人工审批卡片 ----------
+const DECIDE_DONE_TEXT = { abort: '✘ 已选择：结束任务', retry: '↻ 已选择：继续尝试分工', single: '▶ 已选择：由一个智能体直接完成' };
+async function decideCard(id, decision, btn) {
+  try {
+    const r = await api('/api/approval', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, decision }) });
+    if (!r.success) throw new Error(r.error || '已处理');
+    document.querySelectorAll(`.approval-card[data-aid="${CSS.escape(id)}"] .ap-btns`).forEach(el => {
+      el.outerHTML = `<div class="ap-done">${DECIDE_DONE_TEXT[decision] || '已提交'}</div>`;
+    });
+  } catch (e) {
+    toast('操作失败：' + e.message);
+  }
+}
 async function approveCard(id, approved, btn) {
   try {
     const r = await api('/api/approval', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, approved }) });
@@ -3457,19 +3472,92 @@ async function discardTaskDiff() {
   else toast(data.error || '丢弃失败');
 }
 
-// ---------- 新手引导与一键示例 ----------
-const ONBOARD_KEY = 'acOnboarded';
-function closeWelcome(markSeen) {
+// ---------- 启动自检（内核安装 + LLM 配置） ----------
+function closeSelfCheck() {
   document.getElementById('welcomeMask').classList.remove('show');
-  if (markSeen) try { localStorage.setItem(ONBOARD_KEY, '1'); } catch { /* 隐私模式忽略 */ }
 }
-function openWelcome() {
-  const tip = document.getElementById('onbKernelTip');
-  const rs = runnerState || {};
-  if (rs.kind === 'demo') tip.innerHTML = '🧪 当前为<b>演示模式</b>（模拟输出，无需任何配置即可体验完整流程）；安装 OpenCode 后即为真实执行';
-  else if (rs.kind === 'missing') tip.innerHTML = '⚠ 未检测到执行内核，真实任务前需安装：npm install -g opencode-ai（详见帮助）';
-  else tip.innerHTML = `✅ 运行内核就绪：${rs.label || 'OpenCode'}`;
+function openWelcome() { openSelfCheck(); } // 兼容帮助菜单旧入口
+async function openSelfCheck() {
   document.getElementById('welcomeMask').classList.add('show');
+  await renderSelfCheck();
+}
+const SC_INSTALL_FALLBACK = {
+  opencode: 'npm install -g opencode-ai',
+  claude: 'npm install -g @anthropic-ai/claude-code',
+  codex: 'npm install -g @openai/codex',
+  pi: 'npm install -g @badlogic/pi-mono'
+};
+async function renderSelfCheck() {
+  const box = document.getElementById('scBody');
+  box.innerHTML = '<div class="tip">检测中…</div>';
+  let h = null, c = null;
+  try { h = await (await fetch('/api/health')).json(); } catch { }
+  try { c = await (await fetch('/api/llm/config')).json(); } catch { }
+  let html = '';
+  // 1. 内核安装状态
+  html += '<b>AI 智能体内核（单聊/群聊执行器）</b><br>';
+  const ks = (h && h.kernels) || [];
+  if (!ks.length) {
+    html += '<div>⚠ 未获取到检测状态（服务未就绪？）</div>';
+  }
+  for (const k of ks) {
+    if (k.ok) {
+      html += `<div>✅ <b>${k.label}</b> 已安装 <span style="color:#888">（${k.cmd}）</span></div>`;
+    } else {
+      const cmd = k.install || SC_INSTALL_FALLBACK[k.id] || ('npm install -g ' + k.id);
+      html += `<div>❌ <b>${k.label}</b> 未安装　<code style="background:#f5f7fa;padding:2px 6px;border-radius:5px">${cmd}</code> <button class="mini-btn" onclick="copyText('${cmd}', this)">复制命令</button></div>`;
+    }
+  }
+  // 2. LLM 配置状态
+  html += '<div style="margin-top:12px"><b>LLM 密钥/模型配置</b></div>';
+  if (!c || c.success === false) {
+    html += '<div>⚠ 无法读取配置状态（服务异常？），可先跳过</div>';
+  } else if (c.supported === false) {
+    html += `<div>ℹ 当前内核 <b>${c.kernel || '未知'}</b> 不支持网页端配置，请在其自身 CLI 中完成登录/密钥配置</div>`;
+  } else {
+    const authOk = !!(c.auth && typeof c.auth === 'object' && Object.values(c.auth).some(Boolean));
+    if (authOk || c.custom) {
+      html += '<div>✅ 已配置';
+      if (c.custom) html += `（自定义接入：${c.custom.baseURL || ''} → ${c.model || ''}）`;
+      else if (authOk) html += `（内核已登录 Provider）`;
+      html += '</div>';
+      html += '<div style="color:#888;font-size:12px">如需改用自定义 OpenAI 兼容接入，可在下方填写并覆盖：</div>';
+      html += SC_FORM(c);
+    } else {
+      html += '<div>❌ 尚未配置。在下方快捷填入（OpenAI 兼容端点），或留空跳过、稍后配置：</div>';
+      html += SC_FORM(c);
+    }
+  }
+  box.innerHTML = html;
+}
+function SC_FORM(c) {
+  const cu = (c && c.custom) || {};
+  return `
+  <div style="display:grid;grid-template-columns:86px 1fr;gap:6px;margin-top:6px;align-items:center">
+    <span>Base URL</span><input id="scBaseURL" placeholder="https://api.example.com/v1" value="${cu.baseURL || ''}" style="padding:5px 8px;border:1px solid #ddd;border-radius:6px">
+    <span>API Key</span><input id="scApiKey" type="password" placeholder="sk-..." value="${cu.apiKey || ''}" style="padding:5px 8px;border:1px solid #ddd;border-radius:6px">
+    <span>模型</span><input id="scModel" placeholder="provider/model（例 openai/gpt-4o-mini）" value="${cu.model || ''}" style="padding:5px 8px;border:1px solid #ddd;border-radius:6px">
+  </div>
+  <div style="margin-top:8px"><button class="mini-btn primary" onclick="saveSelfCfg(this)">保存配置</button> <span id="scMsg" style="font-size:12px;color:#888"></span></div>`;
+}
+async function saveSelfCfg(btn) {
+  const msg = document.getElementById('scMsg');
+  const body = {
+    custom: {
+      baseURL: (document.getElementById('scBaseURL').value || '').trim(),
+      apiKey: (document.getElementById('scApiKey').value || '').trim(),
+      model: (document.getElementById('scModel').value || '').trim()
+    }
+  };
+  btn.disabled = true;
+  try {
+    const r = await (await fetch('/api/llm/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+    msg.textContent = r.success ? '✅ 已保存' : ('❌ ' + (r.error || '保存失败'));
+    if (r.success) setTimeout(renderSelfCheck, 800);
+  } catch (e) {
+    msg.textContent = '❌ 网络错误';
+  }
+  btn.disabled = false;
 }
 
 async function clearTasks() {

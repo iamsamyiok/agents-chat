@@ -115,7 +115,7 @@ function detectKernels() {
   const map = {};
   for (const def of KERNEL_DEFS) {
     const found = findCli(def);
-    map[def.id] = { id: def.id, label: def.label, ok: !!found, cmd: found ? found.cmd : '', shell: !!(found && found.shell) };
+    map[def.id] = { id: def.id, label: def.label, ok: !!found, cmd: found ? found.cmd : '', shell: !!(found && found.shell), install: def.install || '', auth: def.auth || '' };
   }
   detectCache = { ts: Date.now(), map };
   return map;

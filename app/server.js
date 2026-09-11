@@ -136,7 +136,7 @@ function finishApproval(id, approved, timedOut) {
   clearTimeout(a.timer);
   pendingApprovals.delete(id);
   try { store.removePendingApproval(id); } catch { /* ignore */ }
-  a.resolve(!!approved);
+  a.resolve(approved === true ? true : (typeof approved === 'string' && approved ? approved : false)); // 三态：true/false/'retry'|'single'|'abort'
   return { ...a, timedOut: !!timedOut };
 }
 // 启动恢复：上次进程未决审批 → 标记中断（编排已随进程终止无法续接，引导断点重跑）；超时项直接清除
@@ -472,7 +472,7 @@ const server = http.createServer(async (req, res) => {
       runner: runner.kind,
       kernelLabel: runner.kernel ? runner.kernel.label : '',
       kernelCmd: runner.cmd || '',
-      kernels: Object.values(kernels).map(k => ({ id: k.id, label: k.label, ok: k.ok, cmd: k.cmd })),
+      kernels: Object.values(kernels).map(k => ({ id: k.id, label: k.label, ok: k.ok, cmd: k.cmd, install: k.install || '', auth: k.auth || '' })),
       configKernel: String(store.getConfig().kernel || 'auto'),
       model: process.env.AGENTS_CHAT_MODEL || '',
       autoApprove: process.env.AGENTS_CHAT_AUTO_APPROVE !== '0',
@@ -543,8 +543,9 @@ const server = http.createServer(async (req, res) => {
     }
     const a = pendingApprovals.get(id);
     if (!a) { json(res, 404, { success: false, error: '审批不存在或已处理' }); return; }
-    finishApproval(id, !!body.approved, false);
-    json(res, 200, { success: true, id, approved: !!body.approved });
+    const decision = typeof body.decision === 'string' && body.decision ? body.decision : !!body.approved;
+    finishApproval(id, decision, false);
+    json(res, 200, { success: true, id, decision });
     return;
   }
 
