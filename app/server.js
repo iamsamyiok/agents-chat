@@ -103,16 +103,27 @@ const planner = require('./lib/planner');
 let suggestInFlight = false; // AI 组队生成互斥：同刻仅一个（内核单次调用，防并发浪费）
 const plannerLocks = new Set(); // AI 编排按会话互斥（每会话同时一个内核调用）
 const { runButler, runMentioned, runRoundtable, runDivide, runTasks, prepareRerun, buildDivideHistory } = require('./lib/orchestrator');
+const feishu = require('./lib/bridge-feishu'); // 飞书 IM 桥接（WS 长连接，可选启用）
+const mcpCfg = require('./lib/mcp'); // MCP 工具服务器配置（读写内核配置 mcp 字段）
+const refs = require('./lib/refs'); // 参考资料（任务/会话知识库轻量注入）
 const oc = require('./lib/oc');
 const memoryMod = require('./lib/memory');
 const { CardStore, runner: cardRunner, sseSubscribe, MAX_PARALLEL, wouldCycle } = require('./lib/cards');
 
 // ---------- 人工审批关卡：orchestrator 暂停等待用户放行（方案/交付），SSE 断线后可经 /api/approvals 恢复 ----------
 // 落盘持久化（.data/pending-approvals.json）：进程重启后未决审批标记中断，前端引导断点重跑（借鉴 tutti ADR 0006）
-const pendingApprovals = new Map(); // approvalId -> {kind,label,taskId,runId,resolve,timer,createdAt}
+const pendingApprovals = new Map(); // approvalId -> {kind,label,taskId,runId,resolve,timer,createdAt,seq}
 const interruptedApprovals = new Map(); // approvalId -> 落盘记录（上次进程中断遗留，仅展示与引导，不阻塞自动退出）
 const APPROVAL_TIMEOUT_MS = Number(process.env.AGENTS_CHAT_APPROVAL_TIMEOUT_MS) > 0
   ? Number(process.env.AGENTS_CHAT_APPROVAL_TIMEOUT_MS) : 600000; // 默认 10 分钟未审批视为拒绝
+let approvalSeqCounter = 0; // 审批短编号（飞书桥接用：/approve 3 比完整 id 好记）
+
+function nextApprovalSeq() { approvalSeqCounter += 1; return approvalSeqCounter; }
+// 短编号 → 审批记录（飞书 /approve N /reject N）
+function findApprovalBySeq(num) {
+  for (const [id, a] of pendingApprovals) { if (a.seq === num) return [id, a]; }
+  return [null, null];
+}
 
 // emitFn：延迟取当前 SSE 发射器（审批触发时流已建立）；requestApproval(kind,label,taskId,runId)
 // 返回的 promise 附带 approvalId（approvalGate 编排停止时据此取消未决记录，防残留）
@@ -120,13 +131,15 @@ function makeRequestApproval(emitFn) {
   return (kind, label, taskId, runId) => {
     const id = 'apr-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
     const createdAt = new Date().toISOString();
+    const seq = nextApprovalSeq();
     const p = new Promise((resolve) => {
       const timer = setTimeout(() => finishApproval(id, false, true), APPROVAL_TIMEOUT_MS);
-      pendingApprovals.set(id, { kind, label, taskId: taskId || '', runId: runId || '', resolve, timer, createdAt });
+      pendingApprovals.set(id, { kind, label, taskId: taskId || '', runId: runId || '', resolve, timer, createdAt, seq });
       try {
         store.savePendingApproval(id, { kind, label, taskId: taskId || '', runId: runId || '', createdAt, deadline: new Date(Date.now() + APPROVAL_TIMEOUT_MS).toISOString(), status: 'pending' });
       } catch (e) { console.error('[approval] 落盘失败:', e && e.message); }
       try { if (typeof emitFn === 'function') emitFn()({ type: 'approval_required', approvalId: id, kind, label, taskId: taskId || '', runId: runId || '' }); } catch { /* SSE 已断开：刷新后经 /api/approvals 恢复 */ }
+      try { if (feishu.isRunning()) feishu.notify(`⏸ 待审批 #${seq}\n${label || kind}\n回复 /approve ${seq} 通过，/reject ${seq} 驳回`); } catch { /* 桥接未启用或发送失败均忽略 */ }
     });
     return Object.assign(p, { approvalId: id });
   };
@@ -215,6 +228,88 @@ function approvalSetting() {
 const runLocks = { chat: false, tasks: false, solo: false };
 // 停止令牌：每次停止递增，编排循环通过对比快照感知「执行期间被要求停止」
 const stopTokens = { chat: 0, tasks: 0 };
+// ---------- 插话（Steering）----------
+// 执行期间用户消息入队，本轮结束后主循环 drain 续轮；solo 按会话隔离，chat/divide 共用主队列
+const { SteerQueue } = require('./lib/steer');
+const steerQueues = { solo: new Map(), chat: new SteerQueue() };
+const getSoloSteerQueue = (sessionId) => {
+  if (!steerQueues.solo.has(sessionId)) steerQueues.solo.set(sessionId, new SteerQueue());
+  return steerQueues.solo.get(sessionId);
+};
+// 执行中的 SSE sendFn 注册表：插话端点借它向前端广播「已插话」提示（SSE 连接归属发起消息的那个请求）
+const activeStreams = { solo: new Map(), chat: null }; // solo: sessionId -> sendFn; chat: sendFn | null
+// 手动停止后由停止端点置位，主循环据此清空队列并退出续轮
+const steerStopped = { solo: new Set(), chat: false };
+
+// ---------- 飞书桥接 hooks：命令查询 + 派活（复用 runButler 编排，落独立分片 __feishu__） ----------
+const FEISHU_TASK_ID = '__feishu__'; // 飞书派活落库独立分片，与网页群聊会话互相隔离
+const feishuHooks = {
+  runGroupChat: async (text, reply) => {
+    if (runLocks.chat) { reply('⏳ 当前有编排任务在执行中，请稍后再试（可发 /status 查看状态）'); return; }
+    const agents = store.getAgents();
+    const butler = agents.find((a) => a.id === 'butler');
+    const subAgents = agents.filter((a) => a.id !== 'butler');
+    if (!butler) { reply('配置异常：管家智能体缺失，请在网页端检查配置'); return; }
+    runLocks.chat = true;
+    const myToken = ++stopTokens.chat;
+    const persist = (m) => store.addMessage({ ...m, taskId: FEISHU_TASK_ID, timestamp: new Date().toISOString() });
+    try {
+      persist({ role: 'user', content: `【飞书】${text}` });
+      const parts = [];
+      const collector = (ev) => {
+        try {
+          if (ev.type === 'text' && ev.text) parts.push(ev.text);
+          else if (ev.type === 'notice' && ev.content) parts.push(ev.content);
+          else if (ev.type === 'error' && ev.content) parts.push('⚠ ' + ev.content);
+        } catch { /* ignore */ }
+      };
+      await runButler(butler, subAgents, `【来自飞书的消息】${text}`, {
+        taskId: FEISHU_TASK_ID, history: buildHistoryText(FEISHU_TASK_ID), scope: 'chat',
+        isStopped: () => stopTokens.chat !== myToken,
+        approval: approvalSetting(), requestApproval: makeRequestApproval(() => collector), cancelApproval
+      }, collector, persist);
+      const summary = parts.join('\n\n').trim();
+      reply(summary ? `✅ 编排完成：\n${summary}` : '✅ 编排完成（无文本产出，详情见网页端）');
+    } catch (e) {
+      console.error('[feishu] 编排异常:', e && (e.stack || e));
+      reply('任务执行异常：' + (e && e.message || e));
+    } finally {
+      runLocks.chat = false;
+    }
+  },
+  listTasks: async () => {
+    const tasks = store.getTasks();
+    if (!tasks.length) return '当前没有任务';
+    return ['📋 任务列表（前 10 条）：', ...tasks.slice(0, 10).map((t, i) => `${i + 1}. [${t.status || 'pending'}] ${t.title}`)].join('\n');
+  },
+  status: async () => {
+    const lines = [
+      `群聊编排：${runLocks.chat ? '🔄 执行中' : '空闲'}`,
+      `单聊：${runLocks.solo ? '🔄 执行中' : '空闲'}`,
+      `任务队列：${runLocks.tasks ? '🔄 执行中' : '空闲'}`
+    ];
+    if (pendingApprovals.size) lines.push(`待审批：${pendingApprovals.size} 项（/approvals 查看）`);
+    return lines.join('\n');
+  },
+  stop: async () => {
+    if (!runLocks.chat && !runLocks.solo && !runLocks.tasks) return '当前没有执行中的任务';
+    const n = stopScope('chat') + stopScope('tasks') + stopScope('solo');
+    stopTokens.chat += 1; stopTokens.tasks += 1;
+    steerQueues.chat.clear();
+    for (const id of [...pendingApprovals.keys()]) finishApproval(id, false, false);
+    return `已请求停止（终止 ${n} 个子进程），稍后自动收尾`;
+  },
+  approvals: async () => {
+    if (!pendingApprovals.size) return '当前没有待审批事项';
+    return ['⏸ 待审批列表：', ...[...pendingApprovals.entries()].map(([, a]) => `#${a.seq} [${a.kind}] ${(a.label || '').slice(0, 60)}\n  通过：/approve ${a.seq}｜驳回：/reject ${a.seq}`)].join('\n');
+  },
+  resolveApproval: async (num, ok) => {
+    const [id] = findApprovalBySeq(Number(num));
+    if (!id) return `未找到编号 #${num} 的待审批（可能已处理或超时），用 /approvals 查看当前列表`;
+    finishApproval(id, ok, false);
+    return (ok ? '✅ 已通过审批 #' : '🚫 已驳回审批 #') + num;
+  }
+};
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -567,7 +662,7 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/search' && req.method === 'GET') {
     const q = String(parsed.query.q || '');
     const limit = Math.min(200, Math.max(1, Number(parsed.query.limit) || 50));
-    json(res, 200, { success: true, results: store.searchMessages(q, { limit }) });
+    json(res, 200, { success: true, results: store.searchMessages(q, { limit }), tasks: store.searchTasks(q, { limit: 10 }) });
     return;
   }
   if (p === '/api/usage' && req.method === 'GET') {
@@ -592,9 +687,107 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     const scope = ['tasks', 'solo', 'chat', 'card'].includes(body.scope) ? body.scope : 'chat';
     if (scope === 'tasks') stopTokens.tasks++;
-    if (scope === 'chat') stopTokens.chat++; // 聊天/分工/圆桌编排靠令牌跳过剩余阶段，必须递增
+    if (scope === 'chat') { stopTokens.chat++; steerQueues.chat.clear(); steerStopped.chat = true; } // 聊天/分工/圆桌编排靠令牌跳过剩余阶段，必须递增；插话队列一并清空
+    if (scope === 'solo' && body.sessionId) steerStopped.solo.add(String(body.sessionId));
     const n = stopScope(scope);
     json(res, 200, { success: true, scope, stopped: n });
+    return;
+  }
+
+  // ---------- 插话（Steering）：执行中消息入队，本轮结束后自动续轮 ----------
+  if (p === '/api/oc/steer' && req.method === 'POST') {
+    const body = await readBody(req);
+    const sessionId = String(body.sessionId || '');
+    const message = String(body.message || '').trim();
+    if (!message) { json(res, 400, { success: false, error: 'message 不能为空' }); return; }
+    if (!runLocks.solo || !activeStreams.solo.has(sessionId)) {
+      json(res, 409, { success: false, error: '当前没有正在执行的单聊任务' });
+      return;
+    }
+    const q = getSoloSteerQueue(sessionId);
+    if (!q.push(message)) { json(res, 429, { success: false, error: `插话已达上限（${q.max} 条），请等待本轮完成` }); return; }
+    activeStreams.solo.get(sessionId)({ type: 'notice', content: `⏩ 已插话（第 ${q.size} 条），本轮结束后自动生效` });
+    json(res, 200, { success: true, queued: q.size });
+    return;
+  }
+
+  if (p === '/api/chat/steer' && req.method === 'POST') {
+    const body = await readBody(req);
+    const message = String(body.message || '').trim();
+    if (!message) { json(res, 400, { success: false, error: 'message 不能为空' }); return; }
+    if (!runLocks.chat || !activeStreams.chat) {
+      json(res, 409, { success: false, error: '当前没有正在执行的编排任务' });
+      return;
+    }
+    if (!steerQueues.chat.push(message)) { json(res, 429, { success: false, error: `插话已达上限（${steerQueues.chat.max} 条），请等待本轮完成` }); return; }
+    activeStreams.chat({ type: 'notice', content: `⏩ 已插话（第 ${steerQueues.chat.size} 条），编排结束后自动生效` });
+    json(res, 200, { success: true, queued: steerQueues.chat.size });
+    return;
+  }
+
+  // ---------- 飞书桥接：配置读写 + hooks（复用群聊编排与审批，零新执行通道） ----------
+  if (p === '/api/bridge/config' && req.method === 'GET') {
+    const cfg = store.getConfig().feishu || {};
+    json(res, 200, {
+      success: true,
+      config: {
+        enabled: !!cfg.enabled,
+        appId: cfg.appId || '',
+        appSecret: cfg.appSecret ? '••••••••' + String(cfg.appSecret).slice(-4) : '',
+        allowedChats: Array.isArray(cfg.allowedChats) ? cfg.allowedChats : [],
+        pushEnabled: cfg.pushEnabled !== false,
+        domain: cfg.domain === 'lark' ? 'lark' : 'feishu',
+        running: feishu.isRunning()
+      }
+    });
+    return;
+  }
+  if (p === '/api/bridge/config' && req.method === 'POST') {
+    const body = await readBody(req);
+    const cfg = store.getConfig();
+    const prev = cfg.feishu || {};
+    const nextFeishu = {
+      enabled: !!body.enabled,
+      appId: String(body.appId || '').trim(),
+      appSecret: String(body.appSecret || '').trim() || prev.appSecret || '', // 留空=沿用原值（打码回显场景）
+      allowedChats: Array.isArray(body.allowedChats)
+        ? body.allowedChats.map((s) => String(s).trim()).filter(Boolean)
+        : String(body.allowedChatsRaw || '').split(/[,，\s]+/).map((s) => s.trim()).filter(Boolean),
+      pushEnabled: body.pushEnabled !== false,
+      domain: body.domain === 'lark' ? 'lark' : 'feishu'
+    };
+    if (nextFeishu.enabled && (!nextFeishu.appId || !nextFeishu.appSecret)) {
+      json(res, 400, { success: false, error: '启用桥接需要填写 App ID 与 App Secret' });
+      return;
+    }
+    // 白名单允许为空：首条消息会自动回复 chatId 引导回填（解决首次配置的鸡生蛋问题）
+    try {
+      store.saveConfig({ ...cfg, feishu: nextFeishu });
+    } catch (e) {
+      json(res, 500, { success: false, error: '配置保存失败：' + (e && e.message || e) });
+      return;
+    }
+    const started = nextFeishu.enabled ? feishu.start(nextFeishu, feishuHooks) : (feishu.stop(), false);
+    json(res, 200, { success: true, running: !!started });
+    return;
+  }
+
+  // ---------- MCP 工具服务器配置（内核配置 mcp 字段；保存后下次任务执行生效） ----------
+  if (p === '/api/mcp' && req.method === 'GET') {
+    const listed = mcpCfg.listMcpServers();
+    if (listed.error) { json(res, 409, { success: false, error: listed.error }); return; }
+    json(res, 200, { success: true, servers: listed.servers });
+    return;
+  }
+  if (p === '/api/mcp' && req.method === 'POST') {
+    const body = await readBody(req);
+    try {
+      const r = mcpCfg.saveMcpServers(body.servers);
+      json(res, 200, { success: true, count: r.count, note: '已保存，下一次任务执行自动生效' });
+    } catch (e) {
+      const msg = String((e && e.message) || '保存失败');
+      json(res, msg.includes('损坏') ? 409 : 400, { success: false, error: msg });
+    }
     return;
   }
 
@@ -1025,7 +1218,8 @@ ${need}
     }
     const mode = body.mode === 'scheduled' ? 'scheduled' : 'sequential';
     const runner = body.runner === 'solo' ? 'solo' : '';
-    const { added, warnings, addedTasks } = store.importTasks(body.text, mode, runner, body.model);
+    const { normalizeRefs } = require('./lib/refs');
+    const { added, warnings, addedTasks } = store.importTasks(body.text, mode, runner, body.model, normalizeRefs(body.refs));
     // Git 隔离执行：为每个新任务创建独立 worktree（工作目录是 git 仓库时生效）
     let isolated = 0;
     if (body.isolated && Array.isArray(addedTasks)) {
@@ -1147,6 +1341,7 @@ ${need}
       settleClaim(idem.cid, true, { count: selected.length, scope: soloScope ? 'solo' : 'chat', titles: selected.map(t => t.title).join('、').slice(0, 2000) });
       // 群聊批次整体完成通知（单任务通知由 orchestrator 消息流承担，批次级聚合在此）
       notifyDone({ kind: 'batch', title: `${soloScope ? '单聊' : '群聊'}任务批次（${selected.length} 个）`, status: 'done', snippet: selected.map(t => t.title).join('、') });
+      try { if (feishu.isRunning()) feishu.notify(`✅ 任务批次完成（${selected.length} 个）：\n${selected.map(t => '· ' + t.title).join('\n').slice(0, 800)}`); } catch { /* 推送失败忽略 */ }
     } catch (err) {
       console.error('[tasks/run] 编排异常:', err && (err.stack || err));
       send({ type: 'error', content: `任务编排异常：${err && err.message || err}` });
@@ -1306,7 +1501,9 @@ ${need}
     store.addMessage({ role: 'user', content: message || '（见附件）', taskId: storeTaskId, timestamp: new Date().toISOString() });
 
     const send = sse(req, res);
+    activeStreams.chat = send; // 注册给 /api/chat/steer 广播「已插话」回执
     const persist = (m) => store.addMessage({ ...m, taskId: storeTaskId, timestamp: new Date().toISOString() });
+    steerStopped.chat = false; // 新编排重置插话停止标记
     try {
       let run;
       if (body.mode === 'divide') {
@@ -1324,12 +1521,37 @@ ${need}
       }
       await run;
       settleClaim(idem.cid, true, { taskId: storeTaskId, mode: body.mode || 'chat', summary: String((run && run.finalText) || '').slice(0, 2000) });
+      // 插话续轮：编排完成后若队列有插话，逐条作为新一轮消息重新调度（@点名/模式语义由各轮消息自带）
+      while (steerQueues.chat.size > 0 && !steerStopped.chat) {
+        const steerText = steerQueues.chat.drain();
+        if (!steerText) break;
+        send({ type: 'notice', content: '↻ 携带插话发起新一轮' });
+        store.addMessage({ role: 'user', content: steerText, taskId: storeTaskId, timestamp: new Date().toISOString() });
+        const steerMentions = resolveMentions(steerText, agents);
+        const steerClean = stripMentions(steerText) || steerText;
+        const steerOpts = { ...opts, history: body.mode === 'divide' ? await buildDivideHistory(storeTaskId) : buildHistoryText(storeTaskId) };
+        let steerRun;
+        if (body.mode === 'divide') {
+          steerRun = runDivide(divideParticipants, steerClean, steerOpts, send, persist);
+        } else if (body.mode === 'roundtable') {
+          const speakers = steerMentions.filter(a => a.id !== butler.id);
+          steerRun = runRoundtable(butler, speakers.length ? speakers : subAgents, steerClean, steerOpts, send, persist);
+        } else {
+          steerRun = steerMentions.length > 0
+            ? runMentioned(steerMentions, steerClean, steerOpts, send, persist)
+            : runButler(butler, subAgents, steerClean, steerOpts, send, persist);
+        }
+        await steerRun;
+      }
     } catch (err) {
       console.error('[chat] 编排异常:', err && (err.stack || err));
       send({ type: 'error', content: `编排异常：${err && err.message || err}` });
       settleClaimFail(idem.cid, err && err.message || String(err));
     } finally {
+      steerQueues.chat.clear();
+      activeStreams.chat = null;
       runLocks.chat = false;
+      try { if (feishu.isRunning()) feishu.notify(`✅ 网页编排已完成（${message ? String(message).slice(0, 60) : '见网页'}）\n回复 /status 可查看运行状态`); } catch { /* 推送失败不影响编排 */ }
       try { res.end(); } catch { /* closed */ }
     }
     return;
@@ -1587,6 +1809,7 @@ ${need}
     const finalMessage = message + attSuffix;
 
     runLocks.solo = true;
+    steerStopped.solo.delete(sessionId); // 清残留停止标记（上次停止遗留）
     store.addMessage({ role: 'user', content: message, taskId: sessionId, timestamp: new Date().toISOString() });
     // 标题留空时取首条消息；模型选择随会话记忆
     const patch = {};
@@ -1595,44 +1818,77 @@ ${need}
     store.upsertOcSession(sessionId, patch);
 
     const send = sse(req, res);
+    const steerQ = getSoloSteerQueue(sessionId);
     const texts = new Map();  // partId -> 最新快照
     const order = [];         // 正文 part 出现顺序（多段拼接用）
     send({ type: 'start', sessionId, model });
     try {
-      await new Promise((resolve) => {
+      // 插话主循环：本轮 done 后若队列有插话则自动续轮（opencode -s 续聊携带上文），直至队列空或被停止
+      let prompt = finalMessage;
+      let files = runner.kind === 'opencode' ? ocFiles : [];
+      let firstTurn = true;
+      while (true) {
+        if (steerStopped.solo.has(sessionId)) { steerQ.clear(); break; }
+        texts.clear(); order.length = 0;
         const kind = runner.kind === 'demo' ? 'demo' : (runner.kind === 'opencode' ? 'opencode' : 'fallback');
-        oc.chatSolo(kind, runner, { prompt: finalMessage, model, ocSessionId: rec.ocSessionId || '', files: runner.kind === 'opencode' ? ocFiles : [] }, (ev) => {
-          if (ev.type === 'session') {
-            // 首个 sessionID 回填：后续轮次经 -s 在同一 opencode 会话续聊
-            store.upsertOcSession(sessionId, { ocSessionId: ev.ocSessionId });
-            send({ type: 'session', sessionId, ocSessionId: ev.ocSessionId });
-          } else if (ev.type === 'text') {
-            if (!texts.has(ev.partId)) order.push(ev.partId);
-            texts.set(ev.partId, ev.text);
-            send({ type: 'text', sessionId, partId: ev.partId, text: ev.text });
-          } else if (ev.type === 'reasoning') {
-            send({ type: 'reasoning', sessionId, partId: ev.partId, text: ev.text });
-          } else if (ev.type === 'tool') {
-            send({ type: 'tool', sessionId, name: ev.name, summary: ev.summary });
-          } else if (ev.type === 'done') {
-            send({ type: 'done', sessionId, error: ev.error || undefined, noResume: !!ev.noResume });
-            resolve();
-          }
+        activeStreams.solo.set(sessionId, send);
+        const errFromRun = await new Promise((resolve) => {
+          oc.chatSolo(kind, runner, { prompt, model, ocSessionId: rec.ocSessionId || '', files }, (ev) => {
+            if (ev.type === 'session') {
+              // 首个 sessionID 回填：后续轮次经 -s 在同一 opencode 会话续聊
+              rec.ocSessionId = ev.ocSessionId; // 同步内存快照，供后续轮/插话轮取用
+              store.upsertOcSession(sessionId, { ocSessionId: ev.ocSessionId });
+              send({ type: 'session', sessionId, ocSessionId: ev.ocSessionId });
+            } else if (ev.type === 'text') {
+              if (!texts.has(ev.partId)) order.push(ev.partId);
+              texts.set(ev.partId, ev.text);
+              send({ type: 'text', sessionId, partId: ev.partId, text: ev.text });
+            } else if (ev.type === 'reasoning') {
+              send({ type: 'reasoning', sessionId, partId: ev.partId, text: ev.text });
+            } else if (ev.type === 'tool') {
+              send({ type: 'tool', sessionId, name: ev.name, summary: ev.summary });
+            } else if (ev.type === 'done') {
+              // done 事件由主循环在最后一轮统一发送（中间轮还有插话续流，提前发会令前端封流）
+              resolve(ev.error || '');
+            }
+          });
         });
-      });
-      // 最终正文快照落库（reasoning/tool 过程信息不持久化）
-      const finalText = order.map(id => texts.get(id)).join('\n\n').trim();
-      if (finalText) {
-        store.addMessage({ role: 'assistant', agentId: 'solo', agentName: 'OpenCode', phase: 'work', taskId: sessionId, content: finalText, timestamp: new Date().toISOString() });
+        activeStreams.solo.delete(sessionId);
+        const lastErr = errFromRun;
+        // 最终正文快照落库（reasoning/tool 过程信息不持久化）
+        const finalText = order.map(id => texts.get(id)).join('\n\n').trim();
+        if (finalText) {
+          store.addMessage({ role: 'assistant', agentId: 'solo', agentName: 'OpenCode', phase: 'work', taskId: sessionId, content: finalText, timestamp: new Date().toISOString() });
+        }
+        store.upsertOcSession(sessionId, {}); // 刷新 updatedAt（侧栏排序）
+        if (firstTurn) {
+          settleClaim(idem.cid, true, { sessionId, summary: finalText.slice(0, 2000) });
+          firstTurn = false;
+        }
+        // 停止/无插话/内核不支持续聊 → 结束；否则取插话续轮
+        if (steerStopped.solo.has(sessionId)) { steerQ.clear(); break; }
+        const steerText = steerQ.drain();
+        if (!steerText) {
+          const noResume = !rec.ocSessionId;
+          send({ type: 'done', sessionId, noResume, ...(lastErr ? { error: lastErr } : {}) });
+          break;
+        }
+        if (!rec.ocSessionId) {
+          send({ type: 'notice', content: 'ℹ 当前内核不支持会话续聊，插话将作为独立对话执行' });
+        }
+        send({ type: 'steer', sessionId, content: steerText });
+        store.addMessage({ role: 'user', content: steerText, taskId: sessionId, timestamp: new Date().toISOString() });
+        prompt = `【用户插话（在刚才任务基础上的补充或修正，请结合上文继续）】\n${steerText}`;
+        files = [];
       }
-      store.upsertOcSession(sessionId, {}); // 刷新 updatedAt（侧栏排序）
-      settleClaim(idem.cid, true, { sessionId, summary: finalText.slice(0, 2000) });
     } catch (err) {
       console.error('[oc/chat] 单聊异常:', err && (err.stack || err));
       send({ type: 'error', content: `单聊异常：${err && err.message || err}` });
       send({ type: 'done', sessionId, error: '内部异常' });
       settleClaimFail(idem.cid, err && err.message || String(err));
     } finally {
+      activeStreams.solo.delete(sessionId);
+      steerQ.clear();
       runLocks.solo = false;
       try { res.end(); } catch { /* closed */ }
     }
@@ -2101,6 +2357,7 @@ function cleanupOnce() {
   }
 }
 function shutdown(code) {
+  try { feishu.stop(); } catch { /* ignore */ }
   cleanupOnce();
   process.exit(code);
 }
@@ -2198,10 +2455,11 @@ async function executeSoloTaskBatch(selected, send, myToken) {
     if (wtDir) send({ type: 'notice', content: `🌿 本任务在 Git 隔离区执行：${wtDir}`, taskId: task.id });
     await worktreeMod.runWithTaskCwd(wtDir, () => new Promise((resolve) => {
       const kind = runner.kind === 'demo' ? 'demo' : (runner.kind === 'opencode' ? 'opencode' : 'fallback');
+      const refsBlock = refs.buildRefsBlock(task.refs);
       oc.chatSolo(kind, runner, {
         prompt: cont
-          ? `请在当前会话已有工作成果的基础上继续完成下一项任务：\n\n${task.title}${task.notes ? `\n补充说明：${task.notes}` : ''}`
-          : `请完成以下任务并给出结果：\n\n${task.title}${task.notes ? `\n补充说明：${task.notes}` : ''}`,
+          ? `请在当前会话已有工作成果的基础上继续完成下一项任务：\n\n${task.title}${task.notes ? `\n补充说明：${task.notes}` : ''}${refsBlock}`
+          : `请完成以下任务并给出结果：\n\n${task.title}${task.notes ? `\n补充说明：${task.notes}` : ''}${refsBlock}`,
         model: task.model || '', // 导入时记录的用户所选模型（单聊定时任务用页面所选模型执行）
         ocSessionId: sesId,
         behavior: 'solo-task'
@@ -2364,6 +2622,11 @@ server.listen(PORT, LISTEN_HOST, () => {
   const orphanCards = CardStore.resetRunning();
   if (orphanCards > 0) console.log(`检测到 ${orphanCards} 张上次未正常结束的卡牌，已复位为待执行`);
   startScheduler();
+  // 飞书桥接：配置启用则随服务启动 WS 长连接（失败仅打日志，不影响主服务）
+  try {
+    const feishuCfg = store.getConfig().feishu;
+    if (feishuCfg && feishuCfg.enabled && feishuCfg.appId && feishuCfg.appSecret) feishu.start(feishuCfg, feishuHooks);
+  } catch (e) { console.error('[feishu] 启动异常:', e && (e.message || e)); }
   startAutoStop();
   startPruneTimer();
   console.log(`Agents Chat v${APP_VERSION} 已启动: http://localhost:${realPort}`);

@@ -1174,7 +1174,7 @@ async function runTasks(tasks, butler, subAgents, opts, emit, onMessage, onTaskS
     const taskCwd = opts.taskCwd ? String(opts.taskCwd(task) || '') : '';
     if (taskCwd) emit({ type: 'notice', content: `🌿 本任务在 Git 隔离区执行：${taskCwd}`, taskId: task.id });
     await require('./worktree').runWithTaskCwd(taskCwd, async () => {
-      const prompt = `请完成以下任务并给出结果：\n${task.title}${task.notes ? `\n\n补充说明：${task.notes}` : ''}`;
+      const prompt = `请完成以下任务并给出结果：\n${task.title}${task.notes ? `\n\n补充说明：${task.notes}` : ''}${require('./refs').buildRefsBlock(task.refs)}`;
       // 先建历史背景（不含本任务的起始消息），再写入任务会话首条消息
       const history = opts.getHistory ? opts.getHistory(task.id) : '';
       if (onTaskStart) onTaskStart(task);

@@ -434,4 +434,4 @@ function authProviders(runnerCmd) {
   } catch { return null; } // 命令不可用/超时：未知状态（与"明确无认证"区分）
 }
 
-module.exports = { chatSolo, listOcModels, demoModels, MODEL_RE, parseSoloEventLine, ocConfigPath, readDefaultModel, writeDefaultModel, parseAuthList, authProviders, readCustomProvider, writeCustomProvider, clearCustomProvider, sanitizeCustomModelId };
+module.exports = { chatSolo, listOcModels, demoModels, MODEL_RE, parseSoloEventLine, ocConfigPath, loadOcConfig, saveOcConfig, readDefaultModel, writeDefaultModel, parseAuthList, authProviders, readCustomProvider, writeCustomProvider, clearCustomProvider, sanitizeCustomModelId };

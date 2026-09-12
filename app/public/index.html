@@ -626,6 +626,35 @@
         <div class="form-row"><label>等待时长（秒）</label><input id="cfgExecTimeout" type="number" min="0" step="30" placeholder="0 = 一直等待（默认）"></div>
       </div>
 
+      <!-- 区块四：IM 桥接（飞书） -->
+      <div class="cfg-sec">
+        <div class="cfg-sec-h">📣 IM 桥接（飞书）</div>
+        <p class="tip">把飞书消息接入本地团队：在飞书群里 <b>@机器人</b> 或机器人单聊直接派活，结果自动回发；网页派活完成后也可推送提醒。需先在<a href="https://open.feishu.cn/app" target="_blank" rel="noopener">飞书开放平台</a>创建自建应用：<br>
+        ① 添加应用能力 → 机器人；② 事件与回调 → 订阅方式选「<b>使用长连接接收事件</b>」→ 添加事件 <b>im.message.receive_v1</b>；③ 权限管理开通 <b>im:message</b> 与 <b>im:message:send_as_bot</b>；④ 发布版本后，把机器人拉进群。白名单 chatId 可先用机器人发一条消息，从服务日志 [feishu] 前缀中获取。</p>
+        <div class="form-row"><label><input id="cfgFeishuEnabled" type="checkbox" style="width:auto"> 启用桥接</label></div>
+        <div class="form-row"><label>App ID</label><input id="cfgFeishuAppId" type="text" placeholder="cli_xxxxxxxx"></div>
+        <div class="form-row"><label>App Secret</label><input id="cfgFeishuSecret" type="password" placeholder="留空 = 沿用已保存的值"></div>
+        <div class="form-row"><label>白名单 chatId</label><input id="cfgFeishuChats" type="text" placeholder="oc_xxx, oc_yyy（逗号分隔，机器人收发仅限这些会话）"></div>
+        <div class="form-row"><label><input id="cfgFeishuPush" type="checkbox" style="width:auto" checked> 网页派活完成后推送到飞书</label></div>
+      </div>
+
+      <!-- 区块五：MCP 工具服务器 -->
+      <div class="cfg-sec">
+        <div class="cfg-sec-h">🔧 MCP 工具服务器</div>
+        <p class="tip">给 AI 员工接入外部工具（浏览器自动化、网页抓取等）。保存后<b>下一次任务执行自动生效</b>。local 型在本机启动命令行进程（如 <code>npx -y @playwright/mcp</code>），remote 型连接远程 HTTP 服务。环境变量 / headers 常用于放 token，保存后打码不回显。</p>
+        <div id="cfgMcpList"></div>
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+          <button class="mini-btn" onclick="addMcpRow()">+ 添加服务器</button>
+          <select id="cfgMcpExample" style="max-width:230px" onchange="fillMcpExample(this.value)">
+            <option value="">示例一键填入…</option>
+            <option value="playwright">Playwright 浏览器自动化</option>
+            <option value="fetch">Fetch 网页抓取</option>
+          </select>
+          <button class="mini-btn primary" onclick="saveMcpCfg()" title="仅保存 MCP 服务器列表（独立于上方主配置的保存按钮）">保存 MCP</button>
+        </div>
+        <div id="cfgMcpMsg" class="tip" style="margin-top:4px"></div>
+      </div>
+
       <div class="modal-actions">
         <button onclick="closeCfg()">取消</button>
         <button class="primary" id="cfgClearCustomBtn" onclick="clearLlmCustom()">清除自定义接入</button>
@@ -781,6 +810,10 @@
       <input type="checkbox" id="importIsolated" style="width:auto">
       <label for="importIsolated" style="flex:1;cursor:pointer">🌿 Git 隔离执行：每个任务在独立 Git worktree 分支中执行，互不污染；完成后可查看改动、合并回主目录或整体丢弃（统一工作目录需是 Git 仓库）</label>
     </div>
+    <div style="margin:6px 0 0">
+      <div class="tip" style="margin:0 0 3px">📎 参考资料（可选，每行一个本地路径或 URL，AI 执行时会自行读取）</div>
+      <textarea id="importRefs" rows="2" placeholder="/path/to/报告.md&#10;https://example.com/spec" style="width:100%;box-sizing:border-box;border:1px solid #e2e2e2;border-radius:8px;padding:6px 8px;font-size:12px;font-family:inherit"></textarea>
+    </div>
     <div class="modal-actions">
       <button onclick="closeImport()">取消</button>
       <button class="primary" onclick="doImport()">提取任务</button>
@@ -934,7 +967,7 @@
   <div class="modal wide">
     <h3>聊天历史（主会话）</h3>
     <div class="tip">按时间正序展示全部主会话记录（含已开启新会话前的内容），仅供查阅；消息中的 .md 文件路径可点击预览</div>
-    <input id="histSearch" placeholder="🔍 搜索全部会话消息（含任务/单聊会话，关键词匹配）…" autocomplete="off"
+    <input id="histSearch" placeholder="🔍 搜索全部任务与消息（Ctrl/Cmd+K 快速唤起）…" autocomplete="off"
       style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #e2e2e2;border-radius:8px;font-size:12.5px;margin-bottom:6px">
     <div id="histUsage" style="font-size:11.5px;color:#888;margin:0 0 6px"></div>
     <div id="histSearchResult" style="display:none"></div>
@@ -1021,7 +1054,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.49.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.50.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -1208,6 +1241,13 @@ document.addEventListener('click', (e) => {
 // Esc 关闭预览弹窗
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closePreview();
+  // Ctrl/Cmd+K：全局唤起全文搜索（打开历史弹窗并聚焦搜索框）
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault();
+    document.getElementById('historyMask').classList.add('show');
+    const box = document.getElementById('histSearch');
+    box.focus(); box.select();
+  }
 });
 
   // 页面心跳：告知服务端「网页还开着」（全部页面关闭后服务端会自动退出）
@@ -1674,6 +1714,8 @@ function sealSoloStream(key) {
 // ---------- 对话发送 ----------
 function updateSoloSendBtn() {
   const btn = document.getElementById('soloSendBtn');
+  const el = document.getElementById('soloInput');
+  if (el) el.placeholder = soloBusy ? 'AI 执行中，输入文字回车即插话（本轮结束后自动生效）…' : '描述任务，Enter 发送，Shift+Enter 换行…';
   if (soloBusy) {
     btn.textContent = soloStopAsked ? '停止中…' : '停止';
     btn.classList.add('stop');
@@ -1689,7 +1731,7 @@ async function onSoloSendBtn() {
     soloStopAsked = true;
     updateSoloSendBtn();
     try {
-      await api('/api/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'solo' }) });
+      await api('/api/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'solo', sessionId: curOcId }) });
       toast('已请求停止，正在等待进程结束…');
     } catch { toast('停止请求失败，请重试'); }
     return;
@@ -1713,7 +1755,19 @@ async function soloSend() {
       renderHeader();
     } catch { toast('自动新建会话失败'); return; }
   }
-  if (soloBusy) return;
+  // 执行中：走插话（Steering）——消息入队，本轮结束后服务端自动续轮
+  if (soloBusy) {
+    if (!text) { toast('插话暂不支持附件，请等待本轮完成后再发附件'); return; }
+    if (!curOcId) return;
+    el.value = '';
+    pushSoloMsg(curOcId, { role: 'user', content: text, ts: Date.now() });
+    try {
+      const r = await api('/api/oc/steer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: curOcId, message: text, clientSubmitId: genCid() }) });
+      if (r && r.success) toast(`已插话，本轮结束后自动生效（第 ${r.queued} 条）`);
+      else { toast(r && r.error || '插话失败'); el.value = text; }
+    } catch { toast('插话失败，请重试'); el.value = text; }
+    return;
+  }
   soloBusy = true;
   soloStopAsked = false;
   updateSoloSendBtn();
@@ -2868,7 +2922,146 @@ async function openCfg() {
     const ets = j2 && j2.execTimeoutSec;
     document.getElementById('cfgExecTimeout').value = (ets === null || ets === undefined) ? '' : String(ets);
   } catch (e) { /* 忽略，用占位符 */ }
+  try {
+    const r3 = await fetch('/api/bridge/config');
+    const j3 = await r3.json();
+    if (j3 && j3.success && j3.config) {
+      const c = j3.config;
+      document.getElementById('cfgFeishuEnabled').checked = !!c.enabled;
+      document.getElementById('cfgFeishuAppId').value = c.appId || '';
+      document.getElementById('cfgFeishuSecret').value = ''; // 打码不回显，留空=沿用
+      document.getElementById('cfgFeishuSecret').placeholder = c.appSecret ? `已保存（••••••${String(c.appSecret).slice(-4)}），留空沿用` : '留空 = 沿用已保存的值';
+      document.getElementById('cfgFeishuChats').value = (c.allowedChats || []).join(', ');
+      document.getElementById('cfgFeishuPush').checked = c.pushEnabled !== false;
+      if (c.running) loadFeishuStatus();
+    }
+  } catch (e) { /* 忽略，用占位符 */ }
   loadLlmConfig();
+  loadMcpCfg();
+}
+function loadFeishuStatus() {
+  fetch('/api/bridge/config').then(r => r.json()).then(j => {
+    if (j && j.success && j.config && j.config.running) console.log('[feishu] 桥接运行中');
+  }).catch(() => { });
+}
+
+// ---------- MCP 工具服务器配置（保存后下一次任务执行自动生效） ----------
+let mcpServers = []; // 打码视图：{name,type,commandStr,url,enabled,environment:{k:{has,tail4}},headers:{k:{has,tail4}}}
+const MCP_EXAMPLES = {
+  playwright: { name: 'playwright', type: 'local', command: 'npx -y @playwright/mcp', envTip: '无需环境变量' },
+  fetch: { name: 'fetch', type: 'local', command: 'npx -y mcp-server-fetch', envTip: '无需环境变量' }
+};
+function maskTip(obj) {
+  const keys = Object.keys(obj || {});
+  if (!keys.length) return '';
+  return keys.map(k => obj[k] && obj[k].has ? `${k}=已配置(尾4位${obj[k].tail4})，等号后留空沿用` : `${k}=`).join('\n');
+}
+async function loadMcpCfg() {
+  const box = document.getElementById('cfgMcpList');
+  const msg = document.getElementById('cfgMcpMsg');
+  try {
+    const j = await (await fetch('/api/mcp')).json();
+    if (j && j.success && Array.isArray(j.servers)) {
+      mcpServers = j.servers;
+      renderMcpList();
+      msg.textContent = '';
+    } else {
+      mcpServers = [];
+      box.innerHTML = '';
+      msg.style.color = '#d33';
+      msg.textContent = (j && j.error) || 'MCP 配置读取失败';
+    }
+  } catch { msg.textContent = 'MCP 配置读取失败'; }
+}
+function renderMcpList() {
+  document.getElementById('cfgMcpList').innerHTML = mcpServers.map((s, i) => mcpRowHtml(s, i)).join('') || '<div class="tip" style="margin:2px 0">尚未配置任何 MCP 服务器</div>';
+}
+function mcpRowHtml(s, i) {
+  const envTip = maskTip(s.environment) || 'KEY=value（每行一个，可留空）';
+  const hdrTip = maskTip(s.headers) || 'KEY=value（每行一个，可留空）';
+  return `<div class="mcp-row" data-i="${i}" style="border:1px solid #e6e9f0;border-radius:8px;padding:8px 10px;margin:6px 0;background:#fff">
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <input class="mr-name" value="${escAttr(s.name || '')}" placeholder="名称（字母数字_.-）" style="width:130px">
+      <select class="mr-type" onchange="mcpTypeChange(this)">
+        <option value="local"${s.type !== 'remote' ? ' selected' : ''}>local 本机命令</option>
+        <option value="remote"${s.type === 'remote' ? ' selected' : ''}>remote 远程服务</option>
+      </select>
+      <label style="font-size:11.5px;color:#666"><input class="mr-enabled" type="checkbox" style="width:auto"${s.enabled !== false ? ' checked' : ''}> 启用</label>
+      <button class="mini-btn gray" style="margin-left:auto" onclick="this.closest('.mcp-row').remove();refreshMcpEmpty()">删除</button>
+    </div>
+    <div class="mr-local"${s.type === 'remote' ? ' style="display:none"' : ''}>
+      <input class="mr-cmd" value="${escAttr(s.commandStr || '')}" placeholder="启动命令，如 npx -y @playwright/mcp（含空格参数用引号包裹）" style="margin-top:4px;width:100%;box-sizing:border-box">
+      <textarea class="mr-env" placeholder="${escAttr(envTip)}" rows="2" style="margin-top:4px;width:100%;box-sizing:border-box;font-size:11.5px"></textarea>
+    </div>
+    <div class="mr-remote"${s.type === 'remote' ? '' : ' style="display:none"'}>
+      <input class="mr-url" value="${escAttr(s.url || '')}" placeholder="https://…（MCP 服务地址）" style="margin-top:4px;width:100%;box-sizing:border-box">
+      <textarea class="mr-headers" placeholder="${escAttr(hdrTip)}" rows="2" style="margin-top:4px;width:100%;box-sizing:border-box;font-size:11.5px"></textarea>
+    </div>
+  </div>`;
+}
+function refreshMcpEmpty() {
+  // 列表删空后补提示占位（只操作 DOM，不从 mcpServers 快照重渲染——快照已过期，收集以 DOM 为准）
+  const box = document.getElementById('cfgMcpList');
+  if (!box.querySelector('.mcp-row') && !box.querySelector('.tip')) {
+    box.insertAdjacentHTML('beforeend', '<div class="tip" style="margin:2px 0">尚未配置任何 MCP 服务器</div>');
+  }
+}
+function mcpTypeChange(sel) {
+  const row = sel.closest('.mcp-row');
+  row.querySelector('.mr-local').style.display = sel.value === 'remote' ? 'none' : '';
+  row.querySelector('.mr-remote').style.display = sel.value === 'remote' ? '' : 'none';
+}
+function addMcpRow(prefill) {
+  const box = document.getElementById('cfgMcpList');
+  const tip = box.querySelector('.tip'); if (tip) tip.remove();
+  box.insertAdjacentHTML('beforeend', mcpRowHtml(prefill || { name: '', type: 'local', commandStr: '', url: '', enabled: true, environment: {}, headers: {} }, -1));
+}
+function fillMcpExample(key) {
+  const ex = MCP_EXAMPLES[key];
+  if (!ex) return;
+  addMcpRow({ name: ex.name, type: 'local', commandStr: ex.command, url: '', enabled: true, environment: {}, headers: {} });
+  document.getElementById('cfgMcpExample').value = '';
+}
+function collectMcpRows() {
+  // textarea 解析：KEY=v 正常收集；KEY=（空值）收集为 '' 由服务端沿用旧值；整行删除 = 删除该键
+  const rows = [];
+  document.querySelectorAll('#cfgMcpList .mcp-row').forEach((row) => {
+    const type = row.querySelector('.mr-type').value;
+    const item = {
+      name: row.querySelector('.mr-name').value.trim(),
+      type,
+      enabled: row.querySelector('.mr-enabled').checked
+    };
+    const parseTa = (ta) => {
+      const out = {};
+      String(ta.value || '').split('\n').forEach(line => {
+        const t = line.trim(); if (!t || t.startsWith('#')) return;
+        const eq = t.indexOf('='); if (eq <= 0) return;
+        const k = t.slice(0, eq).trim(); const v = t.slice(eq + 1).trim();
+        out[k] = v; // 空串=沿用旧值
+      });
+      return out;
+    };
+    if (type === 'local') { item.command = row.querySelector('.mr-cmd').value; item.environment = parseTa(row.querySelector('.mr-env')); }
+    else { item.url = row.querySelector('.mr-url').value.trim(); item.headers = parseTa(row.querySelector('.mr-headers')); }
+    rows.push(item);
+  });
+  return rows;
+}
+async function saveMcpCfg() {
+  const msg = document.getElementById('cfgMcpMsg');
+  msg.style.color = ''; msg.textContent = '保存中…';
+  try {
+    const r = await fetch('/api/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ servers: collectMcpRows() }) });
+    const j = await r.json();
+    if (j && j.success) {
+      await loadMcpCfg(); // 先刷新打码视图，再设提示（避免刷新逻辑清掉消息）
+      msg.textContent = `已保存（${j.count} 个服务器），下一次任务执行自动生效`;
+    } else {
+      msg.style.color = '#d33';
+      msg.textContent = (j && j.error) || '保存失败';
+    }
+  } catch { msg.style.color = '#d33'; msg.textContent = '保存失败'; }
 }
 function closeCfg() { document.getElementById('cfgModal').style.display = 'none'; }
 async function saveCfg() {
@@ -2913,6 +3106,17 @@ async function saveCfg() {
       r = await fetch('/api/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agents: agents.filter(a => a.id !== 'butler'), globalCwd: globalCwd || '', kernel: configKernel || 'auto', approval: configApproval || 'off', execTimeoutSec: Math.max(0, Math.round(Number(etsRaw) || 0)) }) });
       j = await r.json();
       if (!(j && j.success)) throw new Error('执行等待保存失败：' + ((j && j.error) || '未知'));
+    }
+    // 5) IM 桥接（飞书）：secret 留空=沿用；启用时后端校验必填项并热启动 WS 长连接
+    const fEnabled = document.getElementById('cfgFeishuEnabled').checked;
+    const fAppId = document.getElementById('cfgFeishuAppId').value.trim();
+    const fSecret = document.getElementById('cfgFeishuSecret').value;
+    const fChats = document.getElementById('cfgFeishuChats').value.trim();
+    if (fEnabled || fAppId || fSecret || fChats) {
+      r = await fetch('/api/bridge/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: fEnabled, appId: fAppId, appSecret: fSecret, allowedChatsRaw: fChats, pushEnabled: document.getElementById('cfgFeishuPush').checked }) });
+      j = await r.json();
+      if (!(j && j.success)) throw new Error('IM 桥接保存失败：' + ((j && j.error) || '未知'));
+      if (fEnabled && j.running) note += '；飞书桥接已连接';
     }
     msg.style.color = '#07c160'; msg.textContent = note;
     loadLlmConfig();
@@ -2993,11 +3197,24 @@ function genCid() {
 
 async function send() {
   const text = input.value.trim();
-  if ((!text && pendingAttachments.length === 0) || chatBusy) return;
+  if (!text && pendingAttachments.length === 0) return;
+  // 编排执行中：文本走插话（Steering），本轮结束后自动续轮；附件不支持插话
+  if (chatBusy) {
+    if (!text) { toast('插话暂不支持附件，请等待本轮完成后再发附件'); return; }
+    input.value = '';
+    pushUser(text);
+    try {
+      const r = await api('/api/chat/steer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, clientSubmitId: genCid() }) });
+      if (r && r.success) toast(`已插话，编排结束后自动生效（第 ${r.queued} 条）`);
+      else { toast(r && r.error || '插话失败'); input.value = text; }
+    } catch { toast('插话失败，请重试'); input.value = text; }
+    return;
+  }
   chatBusy = true;
   stopAsked = false;
   setSendBtn();
   let typing = null;
+  const isDivide = chatMode === 'divide'; // 函数作用域声明：finally 中也要读取（try 块内声明对外不可见）
   try {
     input.value = '';
     hideAt();
@@ -3008,7 +3225,6 @@ async function send() {
     pushUser(text || '（见附件）');
     typing = addSys('智能体处理中…');
 
-    const isDivide = chatMode === 'divide';
     if (isDivide) { dvRunning = true; updateModeBadges(); }
     const atts = pendingAttachments.slice();
     const chatBody = { message: text, taskId: curTaskId, mode: isDivide ? 'divide' : (roundtableOn ? 'roundtable' : ''), participants: isDivide ? dvList.filter(id => dvStaff.some(s => s.id === id)) : [], clientSubmitId: genCid() };
@@ -3025,10 +3241,9 @@ async function send() {
     renderAttChips();
     chatBusy = false;
     stopAsked = false;
-    const wasDivide = isDivide;
     dvRunning = false;
     // 分工执行结束且用户已切走：分工标签打绿点提醒（进入分工模式即清除）
-    if (wasDivide && chatMode !== 'divide') {
+    if (isDivide && chatMode !== 'divide') {
       try { localStorage.setItem('acDivideUnread', '1'); } catch { /* ignore */ }
     }
     setSendBtn();
@@ -3230,8 +3445,17 @@ async function openHistory() {
 }
 function closeHistory() { document.getElementById('historyMask').classList.remove('show'); }
 
-// ---------- 全历史搜索（服务端逐分片匹配，含任务/单聊会话） ----------
+// ---------- 全历史搜索（服务端逐分片匹配，含任务/单聊会话；任务标题/备注同样参与匹配） ----------
 let histSearchTimer = null;
+// snippet 关键词高亮：先 HTML 转义再包 <mark>（命中词同样转义后匹配，避免注入）
+function hlSnippet(text, q) {
+  const escd = esc(String(text || ''));
+  if (!q) return escd;
+  const qEscd = esc(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  try {
+    return escd.replace(new RegExp(qEscd, 'gi'), m => `<mark style="background:#fff3b8;padding:0 1px;border-radius:2px">${m}</mark>`);
+  } catch { return escd; }
+}
 document.getElementById('histSearch').addEventListener('input', (e) => {
   clearTimeout(histSearchTimer);
   const q = e.target.value.trim();
@@ -3241,25 +3465,37 @@ document.getElementById('histSearch').addEventListener('input', (e) => {
     try {
       const data = await api('/api/search?q=' + encodeURIComponent(q) + '&limit=50');
       const list = data.results || [];
+      const taskList = data.tasks || [];
+      const sessLabel = (sid) => {
+        if (sid === '') return { tag: '主会话', jump: `closeHistory();setChatMode('group')` };
+        if (sid === '__divide__') return { tag: '分工空间', jump: `closeHistory();setChatMode('divide')` };
+        if (sid === '__feishu__') return { tag: '飞书会话', jump: `toast('该消息来自飞书桥接会话，请在飞书里查看')` };
+        const t = tasks.find(x => x.id === sid);
+        if (t) return { tag: '任务·' + (t.title || sid).slice(0, 14), jump: `closeHistory();setChatMode('group');switchSession('${escAttr(sid)}')` };
+        if (String(sid).startsWith('oc-')) return { tag: '单聊会话', jump: `closeHistory();setChatMode('solo');switchSoloSession('${escAttr(sid)}')` };
+        return { tag: `会话 ${esc(sid.slice(0, 12))}`, jump: `toast('该会话已不在当前列表中')` };
+      };
+      let html = '';
+      if (taskList.length) {
+        html += `<div class="tip" style="margin:0 0 4px;font-weight:600">任务（${taskList.length}）</div>`;
+        html += taskList.map(t => `<div class="hist-hit" onclick="closeHistory();setChatMode('group');switchSession('${escAttr(t.id)}')" title="点击打开该任务">
+          <div class="hh-meta">📋 ${hlSnippet(t.title, q)} · ${esc(t.status)}${t.notes ? ' · ' + hlSnippet(t.notes, q) : ''}</div></div>`).join('');
+      }
+      if (list.length) {
+        html += `<div class="tip" style="margin:8px 0 4px;font-weight:600">消息（${list.length}${list.length >= 50 ? '，已达上限，可加精确关键词' : ''}）</div>`;
+        html += list.map(r => {
+          const sl = sessLabel(r.sessionId);
+          const who = r.role === 'user' ? '👤 我' : esc(r.agentName || 'AI');
+          return `<div class="hist-hit" onclick="${sl.jump}" title="点击定位该会话">
+            <div class="hh-meta">${esc((r.timestamp || '').replace('T', ' ').slice(0, 16))} · ${sl.tag} · ${who}</div>
+            <div class="hh-snippet">${hlSnippet(r.snippet, q)}</div></div>`;
+        }).join('');
+      }
       box.style.display = 'block';
-      box.innerHTML = list.length
-        ? `<div class="tip" style="margin:0 0 4px">找到 ${list.length} 条匹配${list.length >= 50 ? '（已达上限，可加精确关键词）' : ''}</div>` +
-          list.map(r => {
-            const sess = r.sessionId === '' ? '主会话' : `会话 ${esc(r.sessionId.slice(0, 12))}`;
-            const who = r.role === 'user' ? '👤 我' : esc(r.agentName || 'AI');
-            return `<div class="hist-hit" onclick="jumpToSearchSess('${esc(r.sessionId)}')" title="点击定位该会话">
-              <div class="hh-meta">${esc((r.timestamp || '').replace('T', ' ').slice(0, 16))} · ${sess} · ${who}</div>
-              <div class="hh-snippet">${esc(r.snippet)}</div></div>`;
-          }).join('')
-        : '<div class="tip">没有匹配的消息</div>';
+      box.innerHTML = html || '<div class="tip">没有匹配的任务或消息</div>';
     } catch { box.innerHTML = '<div class="tip">搜索失败</div>'; box.style.display = 'block'; }
   }, 300);
 });
-function jumpToSearchSess(sessId) {
-  // 主会话结果留在历史弹窗（消息就在下方）；其余会话提示定位方式
-  if (!sessId) { toast('该消息在主会话中，见下方历史记录'); return; }
-  toast('该消息位于会话 ' + sessId.slice(0, 16) + '…：任务消息在任务列表点击对应任务查看，单聊在左侧会话列表选择');
-}
 
 // ---------- 用量统计与空间管理 ----------
 async function loadUsageBar() {
@@ -3449,7 +3685,8 @@ async function doImport() {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       text, mode: importMode, runner: chatMode === 'solo' ? 'solo' : '',
-      isolated: !!(document.getElementById('importIsolated') || {}).checked
+      isolated: !!(document.getElementById('importIsolated') || {}).checked,
+      refs: String((document.getElementById('importRefs') || {}).value || '').split('\n').map(s => s.trim()).filter(Boolean)
     })
   });
   if (data.success) {
@@ -3470,6 +3707,7 @@ async function doImport() {
     (data.warnings || []).forEach(w => chatMode === 'solo' ? addSoloSys('⚠ ' + w) : addSys('⚠ ' + w));
     closeImport();
     importText.value = '';
+    const ir = document.getElementById('importRefs'); if (ir) ir.value = '';
   } else toast(data.error || '导入失败');
 }
 
@@ -5113,6 +5351,7 @@ function openHelp() {
   document.getElementById('helpMask').classList.add('show');
 }
 function closeHelp() { document.getElementById('helpMask').classList.remove('show'); }
+
 
 init();
 </script>

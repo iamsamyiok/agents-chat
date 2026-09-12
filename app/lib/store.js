@@ -506,13 +506,14 @@ function parseTasksFromText(text, mode, runner, model) {
   return { tasks: parsed, warnings };
 }
 
-function importTasks(text, mode, runner, model) {
+function importTasks(text, mode, runner, model, refs) {
   const { tasks: parsed, warnings } = parseTasksFromText(text, mode, runner);
+  const refList = Array.isArray(refs) ? refs.map(r => String(r || '').trim()).filter(Boolean) : [];
   const tasks = getTasks();
   // 若存在无 seq 的旧任务，先按现有顺序（createdAt）补齐
   let next = 0;
   for (const t of tasks) { if (t.seq === undefined) t.seq = next++; else next = Math.max(next, t.seq + 1); }
-  for (const t of parsed) { t.seq = next++; if (runner === 'solo' && model) t.model = String(model); }
+  for (const t of parsed) { t.seq = next++; if (runner === 'solo' && model) t.model = String(model); if (refList.length) t.refs = refList.slice(); }
   saveTasks(tasks.concat(parsed));
   return { added: parsed.length, warnings, addedTasks: parsed };
 }
@@ -705,6 +706,17 @@ function searchMessages(q, { limit = 50 } = {}) {
   }
   out.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
   return out.slice(0, limit);
+}
+
+// 全局搜索：任务标题/备注关键词匹配（供 /api/search 与历史弹窗任务组结果）
+function searchTasks(q, { limit = 10 } = {}) {
+  const needle = String(q || '').trim().toLowerCase();
+  if (!needle) return [];
+  return getTasks()
+    .filter(t => String(t.title || '').toLowerCase().includes(needle) || String(t.notes || '').toLowerCase().includes(needle))
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    .slice(0, limit)
+    .map(t => ({ id: t.id, title: t.title || '', status: t.status || '', kind: t.kind || '', notes: String(t.notes || '').slice(0, 80), createdAt: t.createdAt || '' }));
 }
 
 // ---------- 用量统计（token/请求数按日累计，usage.json） ----------
@@ -1167,6 +1179,7 @@ module.exports = {
   clearMessages,
   countMessagesByTask,
   searchMessages,
+  searchTasks,
   recordUsage,
   getUsageStats,
   dataStats,

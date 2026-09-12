@@ -1,6 +1,6 @@
 {
   "name": "agents-chat-cli",
-  "version": "3.49.0",
+  "version": "3.50.0",
   "description": "多智能体群聊工具 - 支持 OpenCode/Claude Code/Codex/pi 内核，微信风格聊天界面",
   "main": "desktop/main.js",
   "bin": {
@@ -46,5 +46,9 @@
   "devDependencies": {
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.73.3",
+    "axios": "^1.20.0"
   }
 }

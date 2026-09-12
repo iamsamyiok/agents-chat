@@ -113,6 +113,74 @@ test('GET /api/search 关键词检索', async () => {
   assert.ok(body.success);
   assert.ok(body.results.length >= 1);
   assert.ok(body.results[0].snippet.includes('needle-xyz'));
+  assert.ok(Array.isArray(body.tasks)); // 任务组结果字段（标题/备注匹配）
+});
+
+test('GET /api/search 任务标题命中', async () => {
+  const imp = await fetch(BASE + '/api/tasks/import', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '1. 路由搜索冒烟任务标题xyz', mode: 'sequential', runner: 'solo' })
+  });
+  const ib = await imp.json();
+  assert.ok(ib.success);
+  const { body } = await get('/api/search?q=路由搜索冒烟');
+  assert.ok(body.success);
+  assert.ok(body.tasks.some(t => t.title.includes('路由搜索冒烟')));
+});
+
+test('MCP 配置路由：列表/保存校验/损坏拒绝', async () => {
+  // 服务进程读真实用户配置（可能已有 mcp 项），只断言结构契约
+  let r = await get('/api/mcp');
+  assert.ok(r.body.success);
+  assert.ok(Array.isArray(r.body.servers));
+  // 合法保存：local + remote
+  let resp = await fetch(BASE + '/api/mcp', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ servers: [
+      { name: 'pw', type: 'local', command: 'npx -y @playwright/mcp', environment: { K: 'v1' } },
+      { name: 'docs', type: 'remote', url: 'https://d.example/mcp', headers: { Authorization: 'Bearer t-8888' } }
+    ] })
+  });
+  let j = await resp.json();
+  assert.ok(j.success);
+  assert.strictEqual(j.count, 2);
+  // 列表打码：明文不回传
+  r = await get('/api/mcp');
+  const pw = r.body.servers.find(s => s.name === 'pw');
+  assert.strictEqual(pw.commandStr, 'npx -y @playwright/mcp');
+  assert.deepStrictEqual(pw.environment.K, { has: true, tail4: 'v1' });
+  assert.strictEqual(JSON.stringify(r.body).includes('t-8888'), false);
+  // 非法保存 400（空命令）且不影响已有配置
+  resp = await fetch(BASE + '/api/mcp', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ servers: [{ name: 'bad', type: 'local', command: '  ' }] })
+  });
+  assert.strictEqual(resp.status, 400);
+  j = await resp.json();
+  assert.ok(j.error && j.error.includes('命令'));
+  // 空 secret 沿用：重存 pw 时 K 留空 → 旧值保留
+  resp = await fetch(BASE + '/api/mcp', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ servers: [{ name: 'pw', type: 'local', command: 'npx -y @playwright/mcp', environment: { K: '' } }] })
+  });
+  assert.ok((await resp.json()).success);
+  // 空表 → 删除全部
+  resp = await fetch(BASE + '/api/mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ servers: [] }) });
+  assert.ok((await resp.json()).success);
+});
+
+test('任务导入透传 refs 到任务对象', async () => {
+  const resp = await fetch(BASE + '/api/tasks/import', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '1. 带参考的任务A\n2. 带参考的任务B', mode: 'sequential', runner: 'solo', refs: ['/tmp/ref-doc.md', 'https://example.com/spec'] })
+  });
+  const j = await resp.json();
+  assert.ok(j.success);
+  const imported = j.tasks.filter(t => t.title.includes('带参考的任务'));
+  assert.strictEqual(imported.length, 2);
+  for (const t of imported) {
+    assert.deepStrictEqual(t.refs, ['/tmp/ref-doc.md', 'https://example.com/spec']);
+  }
 });
 
 test('Git 隔离路由边界：无隔离区返回 404', async () => {

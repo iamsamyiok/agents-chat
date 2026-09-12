@@ -32,6 +32,26 @@ test('searchMessages：空关键词/无匹配', () => {
   assert.deepStrictEqual(store.searchMessages('不存在的词'), []);
 });
 
+test('searchTasks：标题与备注命中、排序与截断', () => {
+  store.saveTasks([
+    { id: 'st-1', seq: 0, title: '周报自动化生成', kind: 'chat', status: 'done', notes: '', createdAt: '2026-09-01T00:00:00.000Z' },
+    { id: 'st-2', seq: 1, title: '无关任务', kind: 'chat', status: 'pending', notes: '内容提到周报模板', createdAt: '2026-09-02T00:00:00.000Z' },
+    { id: 'st-3', seq: 2, title: '完全无关', kind: 'chat', status: 'pending', notes: '', createdAt: '2026-09-03T00:00:00.000Z' }
+  ]);
+  const r = store.searchTasks('周报');
+  assert.strictEqual(r.length, 2);
+  assert.strictEqual(r[0].id, 'st-2'); // createdAt 倒序
+  assert.strictEqual(r[1].id, 'st-1');
+  assert.ok(r[1].title.includes('周报'));
+  assert.deepStrictEqual(store.searchTasks(''), []);
+  assert.deepStrictEqual(store.searchTasks('zzz-no-hit'), []);
+  // 超过 limit 截断
+  const many = Array.from({ length: 15 }, (_, i) => ({ id: `st-m${i}`, seq: i, title: `压测词任务${i}`, kind: 'chat', status: 'pending', notes: '', createdAt: '' }));
+  store.saveTasks(many);
+  assert.strictEqual(store.searchTasks('压测词', { limit: 10 }).length, 10);
+  store.saveTasks([]);
+});
+
 test('usage：按消息携带 usage 累计', () => {
   store.addMessage({ role: 'assistant', content: 'a', taskId: 'u1', usage: 1500 });
   store.addMessage({ role: 'assistant', content: 'b', taskId: 'u1', usage: 2.9 });
