@@ -78,6 +78,7 @@
   .st-running { background: #10aeff; animation: pulse 1.2s infinite; }
   .st-done { background: #07c160; }
   .st-failed { background: #fa5151; }
+  .st-blocked { background: #b06f2d; }
   .main-av { background: linear-gradient(135deg, #57be6a, #10aeff); font-size: 18px; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
   .task-main { flex: 1; min-width: 0; }
@@ -1054,7 +1055,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.50.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.51.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -1911,7 +1912,13 @@ function detectBackgroundDone() {
 }
 
 function statusText(s) {
-  return { pending: '待执行', running: '执行中', done: '已完成', failed: '失败' }[s] || s;
+  return { pending: '待执行', running: '执行中', done: '已完成', failed: '失败', blocked: '已阻塞' }[s] || s;
+}
+
+// DAG 依赖徽标：显示依赖的本批次编号（导入时冗余存储在 depNos）
+function depBadge(t) {
+  if (!Array.isArray(t.depNos) || !t.depNos.length) return '';
+  return `<span style="color:#b06f2d;font-size:11px;margin-right:4px" title="依赖同批次编号 ${t.depNos.join(',')} 的任务：全部完成后自动执行，前置失败则阻塞跳过">⛓ 等 ${t.depNos.join(',')}</span>`;
 }
 
 // 侧栏可见任务（顺序视图）：仅顺序任务；定时任务在「⏰ 定时任务」视图中管理
@@ -2023,15 +2030,15 @@ function renderTasks() {
       badge.style.display = pend ? 'inline' : 'none';
       badge.textContent = pend;
       tasksHtml = vis.length ? vis.map(t => {
-        const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : '•';
+        const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : t.status === 'blocked' ? '⛓' : '•';
         return `<div class="task-item ${curOcId === t.id ? 'active' : ''}" draggable="${!taskBusy && t.status !== 'running'}" ondragstart="onDragStart('${escAttr(t.id)}',event)" ondragover="onDragOver(event)" ondragleave="this.classList.remove('drag-over')" ondrop="onDrop('${escAttr(t.id)}',event)" onclick="switchSoloSession('${escAttr(t.id)}')">
           ${unreadSess.has(t.id) ? '<span class="unread-dot"></span>' : ''}
           <div class="task-avatar st-${t.status}">${icon}</div>
           <div class="task-main">
             <div class="task-title">${esc(t.title)}</div>
-            <div class="task-sub"><span>${linkBadge(t)}${wtBadge(t)}${statusText(t.status)}</span><span>${fmtTime(t.createdAt)}</span></div>
+            <div class="task-sub"><span>${linkBadge(t)}${depBadge(t)}${wtBadge(t)}${statusText(t.status)}</span><span>${fmtTime(t.createdAt)}</span></div>
           </div>
-          ${t.status === 'pending' || t.status === 'failed' ? `<button class="mini-btn" onclick="event.stopPropagation();runTask('${escAttr(t.id)}')">执行</button>` : ''}
+          ${t.status === 'pending' || t.status === 'failed' || t.status === 'blocked' ? `<button class="mini-btn" onclick="event.stopPropagation();runTask('${escAttr(t.id)}')">执行</button>` : ''}
           ${wtBtn(t)}
           <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
         </div>`;
@@ -2086,16 +2093,16 @@ function renderTasks() {
     tasksHtml = '<div class="task-empty">暂无顺序任务<br>点上方「导入」添加<br>定时任务请切到上方「⏰ 定时任务」</div>';
   } else {
     tasksHtml = vis.map((t) => {
-      const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : '•';
+      const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '!' : t.status === 'running' ? '▶' : t.status === 'blocked' ? '⛓' : '•';
       const assign = t.assign && t.assign !== butlerId ? ` · @${esc(assignName(t.assign))}` : '';
       return `<div class="task-item ${curTaskId === t.id ? 'active' : ''}" draggable="${!taskBusy && t.status !== 'running'}" ondragstart="onDragStart('${escAttr(t.id)}',event)" ondragover="onDragOver(event)" ondragleave="this.classList.remove('drag-over')" ondrop="onDrop('${escAttr(t.id)}',event)" onclick="switchSession('${escAttr(t.id)}')">
         ${unreadSess.has(t.id) ? '<span class="unread-dot"></span>' : ''}
         <div class="task-avatar st-${t.status}">${icon}</div>
         <div class="task-main">
           <div class="task-title">${esc(t.title)}</div>
-          <div class="task-sub"><span>${wtBadge(t)}${statusText(t.status)}${assign}</span><span>${fmtTime(t.createdAt)}</span></div>
+          <div class="task-sub"><span>${depBadge(t)}${wtBadge(t)}${statusText(t.status)}${assign}</span><span>${fmtTime(t.createdAt)}</span></div>
         </div>
-        ${t.status === 'pending' || t.status === 'failed' ? `<button class="mini-btn" onclick="event.stopPropagation();runTask('${escAttr(t.id)}')">执行</button>` : ''}
+        ${t.status === 'pending' || t.status === 'failed' || t.status === 'blocked' ? `<button class="mini-btn" onclick="event.stopPropagation();runTask('${escAttr(t.id)}')">执行</button>` : ''}
         ${wtBtn(t)}
         <button class="mini-btn danger" title="删除任务及其会话" onclick="event.stopPropagation();delTask('${escAttr(t.id)}')">✕</button>
       </div>`;
@@ -3568,12 +3575,12 @@ let importMode = 'sequential';
 let importAt = null; // { start, end, items, active }
 
 const IMPORT_TIP = {
-  sequential: '每行一个任务，使用 <code>1.</code> <code>2.</code> 编号；行末可 <code>@智能体</code> 指派（输入 @ 有补全）——不指派则由管家调度，指派子智能体则独立完成。任务按编号顺序执行。',
+  sequential: '每行一个任务，使用 <code>1.</code> <code>2.</code> 编号；行末可 <code>@智能体</code> 指派（输入 @ 有补全）——不指派则由管家调度，指派子智能体则独立完成。任务按编号顺序执行。<br><b>依赖编排</b>：行尾写 <code>←1,2</code>（或 <code>&lt;-1,2</code>）声明依赖同批编号 1、2 的任务——前置全部完成才执行（无依赖的任务并行跑），前置失败则该任务标记「已阻塞」跳过。例：<code>3. 写初稿 ←1,2 @写手</code>。',
   scheduled: '每行一个定时任务：行首写启动时间（格式 <code>20260818-1307</code>），行首输入 <code>[]</code> 自动填入当前日期时间（可修改）；行末可 <code>@智能体</code> 指派。到点自动执行。'
 };
 // 单聊模式导入语法：- 接续上一任务会话；// 并行独立进程
 const IMPORT_TIP_SOLO = {
-  sequential: '单聊任务语法（OpenCode 直接执行，不经管家）：<br>· <code>1.任务</code> 编号开头，无前缀 = 新会话独立执行<br>· <code>2.-任务</code> <b>-</b> 前缀 = 在上一任务的会话中继续（同进程续聊，AI 记得前面的成果）<br>· <code>3.//任务</code> <b>//</b> 前缀 = 并行执行：连续多个 <b>//</b> 任务各自独立进程同时跑<br>执行顺序：串行链按编号顺序，遇到连续 <b>//</b> 任务并行执行，之后再继续后续任务',
+  sequential: '单聊任务语法（OpenCode 直接执行，不经管家）：<br>· <code>1.任务</code> 编号开头，无前缀 = 新会话独立执行<br>· <code>2.-任务</code> <b>-</b> 前缀 = 在上一任务的会话中继续（同进程续聊，AI 记得前面的成果）<br>· <code>3.//任务</code> <b>//</b> 前缀 = 并行执行：连续多个 <b>//</b> 任务各自独立进程同时跑<br>执行顺序：串行链按编号顺序，遇到连续 <b>//</b> 任务并行执行，之后再继续后续任务<br><b>依赖编排</b>：行尾写 <code>←1,2</code>（或 <code>&lt;-1,2</code>）声明依赖同批编号任务——前置全部完成才执行（无依赖的一起并行跑），前置失败则标记「已阻塞」跳过。含依赖的批次由依赖关系驱动调度（<b>-</b>/<b>//</b> 前缀仍生效，续聊任务建议补依赖声明保证前序就绪）',
   scheduled: '单聊定时任务：行首写启动时间（格式 <code>20260818-1307</code>，输入 <code>[]</code> 自动填入当前时间）；同样支持 <code>-</code> 续聊与 <code>//</code> 并行前缀（编号之后）。到点自动执行。'
 };
 const IMPORT_PH = {
@@ -3708,7 +3715,7 @@ async function doImport() {
     closeImport();
     importText.value = '';
     const ir = document.getElementById('importRefs'); if (ir) ir.value = '';
-  } else toast(data.error || '导入失败');
+  } else toast(data.errors && data.errors.length ? `依赖校验失败：${data.errors.map(e => e.message).join('；')}` : (data.error || '导入失败'));
 }
 
 // ---------- Git 隔离区改动查看 / 合并 / 丢弃 ----------

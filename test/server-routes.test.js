@@ -421,3 +421,40 @@ test('404 未知路由', async () => {
   const r = await fetch(BASE + '/api/nonexistent');
   assert.strictEqual(r.status, 404);
 });
+
+test('DAG：依赖校验失败返回 400 逐行错误且不入库', async () => {
+  const before = await get('/api/tasks');
+  const beforeCount = before.body.tasks.length;
+  const r = await fetch(BASE + '/api/tasks/import', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '1. DAG坏批次A ←9', mode: 'sequential', runner: 'solo' })
+  });
+  assert.strictEqual(r.status, 400);
+  const b = await r.json();
+  assert.strictEqual(b.success, false);
+  assert.ok(Array.isArray(b.errors) && b.errors.length === 1);
+  assert.ok(b.errors[0].message.includes('9'));
+  const after = await get('/api/tasks');
+  assert.strictEqual(after.body.tasks.length, beforeCount);
+});
+
+test('DAG：正常依赖批次入库带 dependsOn；blocked 显式重跑清除', async () => {
+  const imp = await fetch(BASE + '/api/tasks/import', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: '1. DAG正批A\n2. DAG正批B ←1', mode: 'sequential', runner: 'solo' })
+  });
+  const ib = await imp.json();
+  assert.ok(ib.success);
+  const saved = ib.tasks.filter(t => t.title.startsWith('DAG正批'));
+  assert.strictEqual(saved.length, 2);
+  const child = saved.find(t => t.title === 'DAG正批B');
+  assert.ok(Array.isArray(child.dependsOn) && child.dependsOn.length === 1);
+  assert.deepStrictEqual(child.depNos, [1]);
+  // 清理本用例任务，避免影响后续/其他用例的可见任务
+  for (const t of saved) {
+    await fetch(BASE + '/api/tasks/delete', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: t.id })
+    });
+  }
+});

@@ -102,10 +102,11 @@ const teamgen = require('./lib/teamgen');
 const planner = require('./lib/planner');
 let suggestInFlight = false; // AI 组队生成互斥：同刻仅一个（内核单次调用，防并发浪费）
 const plannerLocks = new Set(); // AI 编排按会话互斥（每会话同时一个内核调用）
-const { runButler, runMentioned, runRoundtable, runDivide, runTasks, prepareRerun, buildDivideHistory } = require('./lib/orchestrator');
+const { runButler, runMentioned, runRoundtable, runDivide, runTasks, runSingleTask, prepareRerun, buildDivideHistory } = require('./lib/orchestrator');
 const feishu = require('./lib/bridge-feishu'); // 飞书 IM 桥接（WS 长连接，可选启用）
 const mcpCfg = require('./lib/mcp'); // MCP 工具服务器配置（读写内核配置 mcp 字段）
 const refs = require('./lib/refs'); // 参考资料（任务/会话知识库轻量注入）
+const dag = require('./lib/dag'); // 任务依赖 DAG 调度器
 const oc = require('./lib/oc');
 const memoryMod = require('./lib/memory');
 const { CardStore, runner: cardRunner, sseSubscribe, MAX_PARALLEL, wouldCycle } = require('./lib/cards');
@@ -1219,7 +1220,13 @@ ${need}
     const mode = body.mode === 'scheduled' ? 'scheduled' : 'sequential';
     const runner = body.runner === 'solo' ? 'solo' : '';
     const { normalizeRefs } = require('./lib/refs');
-    const { added, warnings, addedTasks } = store.importTasks(body.text, mode, runner, body.model, normalizeRefs(body.refs));
+    const imported = store.importTasks(body.text, mode, runner, body.model, normalizeRefs(body.refs));
+    const { added, warnings, addedTasks } = imported;
+    if (Array.isArray(imported.errors) && imported.errors.length) {
+      // DAG 校验失败（缺失编号/依赖环）：整批不入库，返回逐行错误
+      json(res, 400, { success: false, error: '任务依赖校验失败', errors: imported.errors, warnings });
+      return;
+    }
     // Git 隔离执行：为每个新任务创建独立 worktree（工作目录是 git 仓库时生效）
     let isolated = 0;
     if (body.isolated && Array.isArray(addedTasks)) {
@@ -1319,6 +1326,13 @@ ${need}
     const myToken = stopTokens.tasks; // 执行期间令牌变化 = 用户请求了停止
     const soloScope = body.scope === 'solo';
     const all = store.getTasks().slice().sort((a, b) => a.createdAt - b.createdAt);
+    // 显式指定 ids 的重跑：blocked 任务清除阻塞标记（恢复 pending）后再进入执行筛选；后继任务不自动恢复
+    if (Array.isArray(body.taskIds) && body.taskIds.length > 0) {
+      for (const id of body.taskIds) {
+        const t = all.find(x => x.id === id);
+        if (t && t.status === 'blocked') store.updateTask(id, { status: 'pending', result: '' });
+      }
+    }
     const selected = Array.isArray(body.taskIds) && body.taskIds.length > 0
       ? all.filter(t => body.taskIds.includes(t.id))
       : all.filter(t => (t.status === 'pending' || t.status === 'failed')
@@ -2394,21 +2408,40 @@ async function executeTaskBatch(selected, send, myToken) {
     return agents.find(a => a.id === task.assign) || null;
   };
   const persist = (m) => store.addMessage({ ...m, timestamp: new Date().toISOString() });
+  const sharedOpts = { getHistory: (tid) => buildHistoryText(tid), resolveAssign, scope: 'tasks', isStopped: () => stopTokens.tasks !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval(() => send), cancelApproval, taskCwd: (task) => (task.worktree && task.worktree.dir) || '' };
+  const firstMsg = (task) => {
+    if (store.getMessages(task.id).length === 0) {
+      store.addMessage({
+        role: 'user',
+        content: `任务：${task.title}${task.notes ? `\n补充说明：${task.notes}` : ''}`,
+        taskId: task.id,
+        timestamp: new Date().toISOString()
+      });
+    }
+  };
+
+  // 批次含 DAG 依赖时走依赖驱动调度器（群聊默认并发 1 = 依赖生效但串行执行，环境变量灰度并行）
+  const hasDag = selected.some(t => Array.isArray(t.dependsOn) && t.dependsOn.length > 0);
+  if (hasDag) {
+    const r = await dag.runDagBatch(selected, async (task) => {
+      const status = await orchestrator.runSingleTask(task, butler, subAgents, sharedOpts, send, persist, firstMsg, (taskId, patch) => store.updateTask(taskId, patch));
+      return status;
+    }, {
+      send,
+      isStopped: () => stopTokens.tasks !== myToken,
+      maxParallel: dag.dagMaxParallel('AGENTS_CHAT_DAG_MAX_PARALLEL_GROUP', 1),
+      onTerminal: (id, s) => { if (s === 'blocked') store.updateTask(id, { status: 'blocked', result: '前置任务未完成，已被阻塞' }); }
+    });
+    if (r.blocked) send({ type: 'notice', content: `⛓ 本批次 ${r.blocked} 个任务因依赖前置失败被阻塞` });
+    return; // all_done 由 runDagBatch 统一发出
+  }
+
   await runTasks(
     selected, butler, subAgents,
-    { getHistory: (tid) => buildHistoryText(tid), resolveAssign, scope: 'tasks', isStopped: () => stopTokens.tasks !== myToken, approval: approvalSetting(), requestApproval: makeRequestApproval(() => send), cancelApproval, taskCwd: (task) => (task.worktree && task.worktree.dir) || '' },
+    sharedOpts,
     send, persist,
     // 任务会话首条消息：任务本身（用户视角）
-    (task) => {
-      if (store.getMessages(task.id).length === 0) {
-        store.addMessage({
-          role: 'user',
-          content: `任务：${task.title}${task.notes ? `\n补充说明：${task.notes}` : ''}`,
-          taskId: task.id,
-          timestamp: new Date().toISOString()
-        });
-      }
-    },
+    firstMsg,
     (taskId, patch) => store.updateTask(taskId, patch)
   );
 }
@@ -2495,8 +2528,27 @@ async function executeSoloTaskBatch(selected, send, myToken) {
     return stopped ? '' : sesId;
   };
 
-  // 编排：串行任务（new/continue）按序执行，continue 复用串行链会话；
+  // 编排：批次含 DAG 依赖（← 语法）时走依赖驱动调度器（事件驱动解锁，可并行）；
+  // 否则保持原顺序逻辑：串行任务（new/continue）按序执行，continue 复用串行链会话；
   // 连续 parallel 任务聚成一块同时执行（各独立会话），并行块等待前序串行任务完成
+  const hasDag = list.some(t => Array.isArray(t.dependsOn) && t.dependsOn.length > 0);
+  if (hasDag) {
+    let lastChainSession = '';
+    const r = await dag.runDagBatch(list, async (task) => {
+      const ses = task.link === 'continue' ? lastChainSession : '';
+      const ret = await runOne(task, ses); // 返回本次会话 id（'' = 停止/失败）
+      if (ret) lastChainSession = ret;
+      const now = store.getTask(task.id);
+      return now && now.status === 'done' ? 'done' : (now && now.status === 'failed' ? 'failed' : 'stopped');
+    }, {
+      send,
+      isStopped: () => stopTokens.tasks !== myToken,
+      maxParallel: dag.dagMaxParallel('AGENTS_CHAT_DAG_MAX_PARALLEL_SOLO', 4),
+      onTerminal: (id, s) => { if (s === 'blocked') store.updateTask(id, { status: 'blocked', result: '前置任务未完成，已被阻塞' }); }
+    });
+    if (r.blocked) send({ type: 'notice', content: `⛓ 本批次 ${r.blocked} 个任务因依赖前置失败被阻塞` });
+    return; // all_done 由 runDagBatch 统一发出（含 dag 统计）
+  }
   let lastChainSession = '';
   for (let i = 0; i < list.length; i++) {
     if (stopTokens.tasks !== myToken) break;

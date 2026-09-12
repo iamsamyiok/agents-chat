@@ -467,8 +467,15 @@ function parseTasksFromText(text, mode, runner, model) {
 
     // 列表符剥离：仅「1. / 1、 / 1)」编号格式（顺序与定时模式一致）
     // 单聊模式编号后空白可省略（1.写xxx 2.-xxx 3.//xxx）；群聊保持编号后须有空白
+    // 编号同时捕获（lineNo），供 DAG 依赖 ←N 引用
     const soloRun = runner === 'solo';
-    line = line.replace(soloRun ? /^(\d+[.、)])\s*/ : /^(\d+[.、)])\s+/, '').trim();
+    let lineNo = null;
+    const stripRe = soloRun ? /^(\d+)([.、)])\s*/ : /^(\d+)([.、)])\s+/;
+    const nm = line.match(stripRe);
+    if (nm) {
+      lineNo = Number(nm[1]);
+      line = line.slice(nm[0].length).trim();
+    }
     if (!line) continue;
 
     // 单聊执行链前缀（编号剥离后识别）：
@@ -482,6 +489,20 @@ function parseTasksFromText(text, mode, runner, model) {
       line = line.trim();
       if (!line) continue;
     }
+
+    // DAG 依赖声明：行尾 ←1,2 或 <-1,2（引用本批次编号），剥离出依赖编号列表
+    let depNos = null;
+    const dm = line.match(/\s*(?:←|<-)\s*([0-9,，、\s]+)\s*$/);
+    if (dm) {
+      depNos = dm[1].split(/[,，、\s]+/).map(Number).filter(n => Number.isInteger(n) && n > 0);
+      line = line.slice(0, dm.index).trim();
+      if (!depNos.length) { depNos = null; warnings.push(`任务「${line.slice(0, 20)}」的依赖声明为空，已忽略`); }
+      else if (lineNo === null) {
+        warnings.push(`「${line.slice(0, 20)}」未写编号，依赖声明 ←${depNos.join(',')} 无法引用，已忽略`);
+        depNos = null;
+      }
+    }
+    if (!line) continue;
 
     if (createdAt === null) {
       createdAt = baseTs + fallbackIdx * 1000;
@@ -499,15 +520,88 @@ function parseTasksFromText(text, mode, runner, model) {
       kind: mode,
       runner: runner === 'solo' ? 'solo' : ''
     };
+    rec._lineNo = lineNo; // 内部字段：DAG 编号映射用，返回前删除
     if (soloRun) rec.link = link; // new=独立新会话 | continue=接续上一任务会话 | parallel=并行独立会话
+    if (depNos) rec.depNos = depNos; // 展示用原始编号；dependsOn（id 引用）在下方二遍处理填充
     if (mode === 'scheduled') rec.scheduledAt = scheduledAt !== null ? scheduledAt : createdAt;
     parsed.push(rec);
   }
-  return { tasks: parsed, warnings };
+
+  // DAG 二遍处理：编号→任务映射；缺失编号校验；Kahn 拓扑查环；depNos → dependsOn（id 引用）
+  const errors = [];
+  const byNo = new Map();
+  for (const t of parsed) if (t._lineNo !== null && !byNo.has(t._lineNo)) byNo.set(t._lineNo, t);
+  const hasDagDep = parsed.some(t => Array.isArray(t.depNos) && t.depNos.length > 0);
+  for (const t of parsed) {
+    if (!t.depNos) continue;
+    const missing = t.depNos.filter(n => !byNo.has(n));
+    if (missing.length) {
+      errors.push({ line: t._lineNo, message: `任务「${t.title.slice(0, 30)}」依赖的编号 ${missing.join(',')} 在本批次中不存在` });
+      continue;
+    }
+    t.dependsOn = t.depNos.map(n => byNo.get(n).id);
+  }
+  // 续聊（-）与依赖混用提示：DAG 并行下续聊链的前序完成顺序需显式依赖保证
+  if (hasDagDep && runner === 'solo') {
+    for (const t of parsed) {
+      if (t.link === 'continue' && !(Array.isArray(t.depNos) && t.depNos.length)) {
+        warnings.push(`任务「${t.title.slice(0, 20)}」使用续聊（-）但未声明依赖（←N），并行调度下其前序会话可能尚未就绪，建议补充依赖声明`);
+      }
+    }
+  }
+  // 环检测（仅对依赖声明成功的子图做 Kahn 拓扑排序，DFS 还原环路路径）
+  if (!errors.length) {
+    const indeg = new Map();
+    const adj = new Map();
+    for (const t of parsed) {
+      if (!t.dependsOn) continue;
+      indeg.set(t.id, (t.dependsOn || []).length);
+      for (const d of t.dependsOn) {
+        if (!adj.has(d)) adj.set(d, []);
+        adj.get(d).push(t.id);
+      }
+    }
+    const q = parsed.filter(t => (indeg.get(t.id) || 0) === 0).map(t => t.id);
+    const idToNo = new Map(parsed.map(t => [t.id, t._lineNo]));
+    let visited = 0;
+    while (q.length) {
+      const id = q.shift();
+      visited++;
+      for (const nx of (adj.get(id) || [])) {
+        indeg.set(nx, indeg.get(nx) - 1);
+        if (indeg.get(nx) === 0) q.push(nx);
+      }
+    }
+    if (visited < [...indeg.keys()].length) {
+      // 存在环：从仍入度 >0 的节点 DFS 找一条具体环路路径
+      const remain = parsed.filter(t => (indeg.get(t.id) || 0) > 0);
+      const path = [];
+      const seen = new Set();
+      const dfs = (id) => {
+        if (seen.has(id)) return path.slice(path.indexOf(id));
+        seen.add(id); path.push(id);
+        for (const d of (byIdOf(id).dependsOn || [])) {
+          if ((indeg.get(d) || 0) > 0 || remain.some(t => t.id === d)) {
+            const r = dfs(d);
+            if (r) return r;
+          }
+        }
+        path.pop();
+        seen.delete(id);
+        return null;
+      };
+      const byIdOf = (id) => parsed.find(t => t.id === id);
+      const cycle = dfs(remain[0].id) || remain.map(t => t.id);
+      errors.push({ line: idToNo.get(cycle[0]), message: `任务依赖存在环路：${cycle.map(id => idToNo.get(id)).join(' → ')} → ${idToNo.get(cycle[0])}` });
+    }
+  }
+  for (const t of parsed) delete t._lineNo;
+  return { tasks: parsed, warnings, errors };
 }
 
 function importTasks(text, mode, runner, model, refs) {
-  const { tasks: parsed, warnings } = parseTasksFromText(text, mode, runner);
+  const { tasks: parsed, warnings, errors } = parseTasksFromText(text, mode, runner);
+  if (errors && errors.length) return { added: 0, warnings, errors, addedTasks: [] };
   const refList = Array.isArray(refs) ? refs.map(r => String(r || '').trim()).filter(Boolean) : [];
   const tasks = getTasks();
   // 若存在无 seq 的旧任务，先按现有顺序（createdAt）补齐
@@ -515,7 +609,7 @@ function importTasks(text, mode, runner, model, refs) {
   for (const t of tasks) { if (t.seq === undefined) t.seq = next++; else next = Math.max(next, t.seq + 1); }
   for (const t of parsed) { t.seq = next++; if (runner === 'solo' && model) t.model = String(model); if (refList.length) t.refs = refList.slice(); }
   saveTasks(tasks.concat(parsed));
-  return { added: parsed.length, warnings, addedTasks: parsed };
+  return { added: parsed.length, warnings, errors: [], addedTasks: parsed };
 }
 
 // 拖拽排序：按给定 id 顺序重编 seq（ids 应为全量，未包含的追加在末尾）
