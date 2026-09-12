@@ -65,7 +65,7 @@ function startServer() {
   if (check.running) {
     console.log(`服务已在运行 (PID: ${check.pid})`);
     console.log(`访问 http://localhost:${PORT}`);
-    openBrowser();
+    openBrowserOnce();
     return;
   }
 
@@ -126,7 +126,7 @@ function startServer() {
       clearInterval(poll);
       console.log('服务已就绪!');
       console.log(`访问 http://localhost:${PORT}`);
-      openBrowser();
+      openBrowserOnce();
     } else if (retries <= 0) {
       clearInterval(poll);
       console.error('服务启动超时，请查看日志:');
@@ -152,7 +152,7 @@ function probeHealth(port, timeoutMs) {
 function startForeground() {
   if (isRunning().running) {
     console.log(`服务已在后台运行 (PID: ${isRunning().pid}), 直接打开页面:`);
-    openBrowser();
+    openBrowserOnce();
     return;
   }
   const env = { ...process.env, AGENTS_CHAT_DATA: DATA_DIR };
@@ -182,7 +182,7 @@ function startForeground() {
     if (await probeHealth(PORT)) {
       clearInterval(poll);
       console.log(`服务已就绪: http://localhost:${PORT}`);
-      openBrowser();
+      openBrowserOnce();
     }
   }, 500);
   setTimeout(() => clearInterval(poll), 30000);
@@ -265,6 +265,24 @@ function openBrowser() {
     }
   } catch {
     console.log(`请手动访问: ${url}`);
+  }
+}
+
+// 自动打开浏览器（去重）：同一服务进程生命周期内只弹一次；
+// 标记文件记录已弹过窗的服务 PID，服务重启后 PID 变化会重新弹。
+// start/fg 等自动场景用此函数；agents-chat open 仍强制打开。
+function openBrowserOnce() {
+  try {
+    const check = isRunning();
+    const flag = path.join(DATA_DIR, '.ui-opened');
+    if (check.running && check.pid && fs.existsSync(flag) && fs.readFileSync(flag, 'utf8').trim() === String(check.pid)) {
+      console.log(`页面此前已打开，如需重新打开请执行: agents-chat open`);
+      return;
+    }
+    openBrowser();
+    if (check.running && check.pid) fs.writeFileSync(flag, String(check.pid));
+  } catch {
+    openBrowser();
   }
 }
 
