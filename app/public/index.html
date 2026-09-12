@@ -165,10 +165,11 @@
   @keyframes blink { 0%,80%,100% { opacity: .25; } 40% { opacity: 1; } }
 
   .composer { background: #fff; border-top: 1px solid #e7e7e7; padding: 12px 14px; position: relative; }
-  .input-row { display: flex; gap: 10px; }
-  #input, #soloInput { flex: 1; border: 1px solid #e2e2e2; border-radius: 6px; padding: 10px 12px; font-size: 14px; outline: none; transition: border-color .15s, box-shadow .15s; background: #fff; }
+  .input-row { display: flex; gap: 10px; align-items: stretch; }
+  .input-row > button { min-height: 40px; }
+  #input, #soloInput { flex: 1; min-width: 0; border: 1px solid #e2e2e2; border-radius: 6px; padding: 10px 12px; font-size: 14px; outline: none; transition: border-color .15s, box-shadow .15s; background: #fff; }
   #input:focus, #soloInput:focus { border-color: #07c160; box-shadow: 0 0 0 3px rgba(7,193,96,.12); }
-  #sendBtn, #soloSendBtn { background: #07c160; color: #fff; border: none; border-radius: 6px; padding: 0 22px; font-size: 14px; cursor: pointer; }
+  #sendBtn, #soloSendBtn { background: #07c160; color: #fff; border: none; border-radius: 6px; padding: 0 22px; font-size: 14px; cursor: pointer; white-space: nowrap; }
   #rtBtn { background: #f2f3f5; color: #555; border: none; border-radius: 6px; padding: 0 14px; font-size: 13px; cursor: pointer; white-space: nowrap; }
   #rtBtn:hover { background: #e8eaee; }
   #rtBtn.on { background: #8a6fe8; color: #fff; }
@@ -402,11 +403,14 @@
     .msg-body { max-width: 72%; }
   }
   /* 窄屏：隐藏中栏任务列表（操作入口仍在批量管理弹窗可达），左栏抽屉化 */
+  /* 手机端抽屉遮罩：宽屏恒隐藏，窄屏抽屉开时显示（基础样式必须在媒体查询外，否则宽屏下是裸按钮占位） */
+  #drawerMask { display: none; position: fixed; inset: 0; z-index: 69; background: rgba(0,0,0,.35); border: none; padding: 0; }
   @media (max-width: 860px) {
     #taskbar { display: none; }
     #taskExpand { display: none !important; }
     #sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 70; transform: translateX(-100%); transition: transform .2s; box-shadow: 0 0 24px rgba(0,0,0,.18); }
     #sidebar.open { transform: none; }
+    #drawerMask.show { display: block; }
     body.coll-left #sidebar { display: flex; } /* 窄屏不用 coll-left，抽屉态优先 */
     #menuBtn { display: block !important; }
   }
@@ -532,6 +536,8 @@
 </head>
 <body>
 <div id="app">
+  <!-- 手机端抽屉遮罩：点按关闭抽屉（仅窄屏显示） -->
+  <button id="drawerMask" aria-label="关闭侧栏" onclick="closeSidebarDrawer()" tabindex="-1"></button>
   <!-- 左栏：模式切换 + 会话列表 -->
   <aside id="sidebar">
     <div id="topTabs">
@@ -1207,6 +1213,7 @@ const unreadSess = new Set();        // 会话 key 集合：有未查看的完�
 function setChatMode(mode) {
   chatMode = ['solo', 'divide', 'cards'].includes(mode) ? mode : 'group';
   try { localStorage.setItem(MODE_STORE_KEY, chatMode); } catch { /* ignore */ }
+  closeSidebarDrawer(); // 手机端：切模式后抽屉自动收起，避免遮住新视图
   if (chatMode === 'group' || chatMode === 'divide') groupMsgUnread = 0; // 回到聊天视图即视为已读主会话
   document.body.classList.toggle('mode-cards', chatMode === 'cards'); // 编排模式：聊天相关区域隐藏
   document.body.classList.toggle('mode-divide', chatMode === 'divide'); // 分工模式：会话/任务面板自动隐藏
@@ -1265,9 +1272,26 @@ function setChatMode(mode) {
 // ---------- 面板折叠：左栏（☰，宽屏收起/窄屏抽屉）与中栏（⟨/⟩，任务面板） ----------
 function toggleSidebar() {
   const sb = document.getElementById('sidebar');
-  if (window.matchMedia('(max-width: 860px)').matches) sb.classList.toggle('open');
-  else document.body.classList.toggle('coll-left');
+  if (window.matchMedia('(max-width: 860px)').matches) {
+    sb.classList.toggle('open');
+    syncSidebarDrawer();
+  } else {
+    document.body.classList.toggle('coll-left');
+    try { localStorage.setItem('ac.collLeft', document.body.classList.contains('coll-left') ? '1' : ''); } catch { }
+  }
 }
+// 手机端抽屉：遮罩显隐随抽屉态联动
+function syncSidebarDrawer() {
+  const sb = document.getElementById('sidebar');
+  const mask = document.getElementById('drawerMask');
+  if (mask) mask.classList.toggle('show', sb.classList.contains('open'));
+}
+function closeSidebarDrawer() {
+  const sb = document.getElementById('sidebar');
+  if (sb.classList.contains('open')) { sb.classList.remove('open'); syncSidebarDrawer(); }
+}
+// 宽屏启动时恢复上次折叠态（窄屏抽屉态由媒体查询接管，无需恢复）
+try { if (localStorage.getItem('ac.collLeft') === '1' && !window.matchMedia('(max-width: 860px)').matches) document.body.classList.add('coll-left'); } catch { }
 function toggleTaskbar() {
   const opened = !document.body.classList.contains('coll-task');
   document.body.classList.toggle('coll-task');
