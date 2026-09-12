@@ -401,7 +401,7 @@
 
 <script>
 const $ = s => document.querySelector(s);
-const api = async (url, opt) => { const r = await fetch(url, opt); return r.json(); };
+const api = async (url, opt) => { const r = await fetch(url, opt); if (r.status === 401) { location.href = '/login'; throw new Error('未登录'); } return r.json(); };
 const post = (url, body) => api(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})});
 function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML.replace(/"/g,'&quot;').replace(/'/g,'&#39;');}

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Agents Chat - 访问验证</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #0f1519; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .card { background: #fff; border-radius: 14px; padding: 36px 32px; width: 100%; max-width: 380px; box-shadow: 0 8px 40px rgba(0,0,0,.4); }
+  h1 { font-size: 19px; color: #222; text-align: center; margin-bottom: 6px; }
+  .tip { font-size: 13px; color: #888; text-align: center; margin-bottom: 22px; line-height: 1.6; }
+  input { width: 100%; border: 1px solid #e2e2e2; border-radius: 8px; padding: 11px 13px; font-size: 15px; outline: none; transition: border-color .15s; }
+  input:focus { border-color: #07c160; box-shadow: 0 0 0 3px rgba(7,193,96,.12); }
+  button { width: 100%; margin-top: 14px; background: #07c160; color: #fff; border: none; border-radius: 8px; padding: 12px; font-size: 15px; cursor: pointer; }
+  button:hover { background: #06ad56; }
+  .msg { margin-top: 12px; font-size: 13px; text-align: center; min-height: 18px; }
+  .msg.err { color: #fa5151; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🔒 Agents Chat</h1>
+  <div class="tip">本服务已开启访问验证，请输入访问密码<br><span id="ver"></span></div>
+  <input id="pw" type="password" placeholder="访问密码" autocomplete="current-password" autofocus>
+  <button id="go">进入</button>
+  <div class="msg" id="msg"></div>
+</div>
+<script>
+fetch('/api/health').then(r => r.json()).then(h => { document.getElementById('ver').textContent = 'v' + (h.version || ''); }).catch(() => {});
+async function login() {
+  const pw = document.getElementById('pw').value;
+  const msg = document.getElementById('msg');
+  if (!pw) { msg.textContent = '请输入密码'; msg.className = 'msg err'; return; }
+  try {
+    const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) });
+    const j = await r.json();
+    if (j.success) { location.href = '/'; return; }
+    msg.textContent = j.error || '密码错误'; msg.className = 'msg err';
+  } catch { msg.textContent = '网络错误'; msg.className = 'msg err'; }
+}
+document.getElementById('go').onclick = login;
+document.getElementById('pw').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+// 已登录则直接进入
+fetch('/api/auth/check').then(r => r.json()).then(j => { if (j.enabled && j.ok) location.href = '/'; }).catch(() => {});
+</script>
+</body>
+</html>

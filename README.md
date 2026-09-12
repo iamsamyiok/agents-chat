@@ -51,10 +51,9 @@ npm install -g agents-chat-cli
 
 ### 免安装单文件 exe
 
-从 [Releases](https://github.com/iamsamyiok/agents-chat/releases) 下载对应平台文件（Windows / Linux / macOS Intel / Apple Silicon），双击即用，数据保存在 exe 旁 `.data/` 目录。SHA-256 校验值见 checksums.txt。
+从 [Releases](https://github.com/iamsamyiok/agents-chat/releases) 下载 `AgentsChat-Portable-*.exe`（Windows 免安装版），双击即用，数据保存在 exe 旁 `.data/` 目录。exe 内置自动更新（`agents-chat update` 或页面更新提示），Linux / macOS 用户请用 npm 方式安装。
 
 - Windows SmartScreen 提示「已保护你的电脑」→「更多信息」→「仍要运行」
-- macOS 首次运行：`xattr -d com.apple.quarantine agents-chat-darwin-*`
 
 ## 常用命令
 

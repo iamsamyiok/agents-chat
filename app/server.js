@@ -3,6 +3,7 @@
 const APP_VERSION = require('../package.json').version; // 单源版本：与 package.json 始终一致（页面互检/更新检查共用）
 const { checkLatest, UPDATE_COMMAND } = require('./lib/updatecheck');
 const { notifyDone } = require('./lib/notify');
+const auth = require('./lib/auth');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -427,12 +428,44 @@ function buildHistoryText(taskId) {
   return recent.map(m => `${m.role === 'user' ? '用户' : (m.agentName || '智能体')}：${String(m.content).slice(0, 1000)}`).join('\n');
 }
 
+// 诊断错误环形缓冲：最近 20 条路由/运行错误，供 /api/diagnostics 展示（用户报障一键复制）
+const diagErrors = [];
+function recordDiagError(scope, err) {
+  diagErrors.push({ t: new Date().toISOString(), scope, msg: String((err && err.message) || err || '').slice(0, 300) });
+  if (diagErrors.length > 20) diagErrors.shift();
+}
+
 const server = http.createServer(async (req, res) => {
   try {
   const parsed = url.parse(req.url, true);
   const p = parsed.pathname;
   // 页面存活感知：任何请求都视为「有客户端在看」，供自动退出判断
   touchClient();
+
+  // ---------- 访问鉴权（AGENTS_CHAT_PASSWORD 配置后生效） ----------
+  if (!auth.isPublicPath(p)) {
+    if (!auth.hasAccess(req, process.env)) {
+      if (p.startsWith('/api/')) {
+        json(res, 401, { success: false, error: '未登录或密码已变更', authRequired: true });
+      } else {
+        res.writeHead(302, { Location: '/login' });
+        res.end();
+      }
+      return;
+    }
+  } else if (p === '/api/auth/login' && req.method === 'POST') {
+    const body = await readBody(req);
+    const pw = String(body.password || '');
+    if (!auth.isAuthEnabled(process.env)) { json(res, 400, { success: false, error: '服务端未配置 AGENTS_CHAT_PASSWORD，无需登录' }); return; }
+    if (pw && pw === String(process.env.AGENTS_CHAT_PASSWORD).trim()) {
+      const token = auth.expectedToken(process.env);
+      res.setHeader('Set-Cookie', `ac_auth=${token}; HttpOnly; SameSite=Lax; Max-Age=${30 * 86400}; Path=/`);
+      json(res, 200, { success: true });
+    } else {
+      json(res, 401, { success: false, error: '密码错误' });
+    }
+    return;
+  }
 
   // ---------- 静态 ----------
   if (req.method === 'GET' && (p === '/' || p === '/index.html')) {
@@ -442,6 +475,51 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && (p === '/cards' || p === '/cards.html')) {
     serveStatic(res, path.join(PUBLIC_DIR, 'cards.html'));
+    return;
+  }
+  if (req.method === 'GET' && (p === '/login' || p === '/login.html')) {
+    serveStatic(res, path.join(PUBLIC_DIR, 'login.html'));
+    return;
+  }
+  if (req.method === 'GET' && p === '/api/diagnostics') {
+    // 诊断信息：用户报障时在「帮助」一键复制（含版本/形态/内核/监听/最近错误，不含会话内容与密钥）
+    const detected = require('./lib/agent').detectKernels();
+    json(res, 200, {
+      success: true,
+      diag: {
+        version: APP_VERSION,
+        node: process.version,
+        platform: `${process.platform} ${process.arch}`,
+        form: IS_DESKTOP ? 'desktop' : (process.env.AGENTS_CHAT_STANDALONE === '1' || process.versions.bun) ? 'standalone' : 'npm',
+        listen: LISTEN_HOST === '127.0.0.1' ? '127.0.0.1（仅本机）' : '全部接口',
+        authEnabled: auth.isAuthEnabled(process.env),
+        mock: process.env.AGENTS_CHAT_MOCK === '1',
+        uptimeSec: Math.round(process.uptime()),
+        dataDir: store.DATA_DIR,
+        kernels: Object.entries(detected).map(([id, k]) => ({ id, ok: k.ok, cmd: k.cmd || '' })),
+        recentErrors: diagErrors,
+      },
+    });
+    return;
+  }
+
+  if (req.method === 'GET' && p === '/api/auth/check') {
+    json(res, 200, { success: true, enabled: auth.isAuthEnabled(process.env), ok: auth.hasAccess(req, process.env) });
+    return;
+  }
+  if (req.method === 'POST' && p === '/api/kernel/install') {
+    // 自检面板「一键安装」：耗时 1-2 分钟，全局锁防并发重复安装
+    if (server._kernelInstalling) { json(res, 409, { success: false, error: '已有安装任务进行中，请稍候' }); return; }
+    const body = await readBody(req);
+    const id = String(body.id || '');
+    server._kernelInstalling = true;
+    try {
+      const { installKernel } = require('./lib/kernel-setup');
+      const r = installKernel(id);
+      json(res, r.installed ? 200 : 500, { success: r.installed, error: r.error || '' });
+    } finally {
+      server._kernelInstalling = false;
+    }
     return;
   }
   if (req.method === 'GET' && p === '/manifest.json') {
@@ -1960,6 +2038,7 @@ ${need}
   res.end('Not Found');
   } catch (err) {
     // 路由级兜底：数据文件损坏（safejson 只读保护）等意外异常时返回 500，避免响应悬挂
+    recordDiagError(`${req.method} ${req.url}`, err);
     console.error('[route error]', req.method, req.url, err && (err.stack || err));
     try {
       if (!res.headersSent) json(res, 500, { success: false, error: '服务内部错误：' + (err && err.message || err) });
@@ -2222,8 +2301,13 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-// 桌面形态仅本机窗口访问：绑回环地址，避免 Windows 防火墙弹授权框；其余形态保持全接口（局域网/预览）
-const LISTEN_HOST = IS_DESKTOP ? '127.0.0.1' : undefined;
+// 监听范围（安全默认）：桌面形态恒回环；npm/cli 形态配置了访问密码或显式 AGENTS_CHAT_LAN=1
+// 才绑全接口（局域网/远程可访问），否则默认回环，防止无鉴权暴露到局域网
+const LISTEN_HOST = auth.resolveListenHost({
+  isDesktop: IS_DESKTOP,
+  hasPassword: auth.isAuthEnabled(process.env),
+  lan: process.env.AGENTS_CHAT_LAN,
+});
 server.listen(PORT, LISTEN_HOST, () => {
   const realPort = (server.address() && server.address().port) || PORT; // PORT=0 随机分配时取实际端口
   const { resolveRunner, detectKernels, KERNEL_DEFS } = require('./lib/agent');
@@ -2246,6 +2330,9 @@ server.listen(PORT, LISTEN_HOST, () => {
   startAutoStop();
   startPruneTimer();
   console.log(`Agents Chat v${APP_VERSION} 已启动: http://localhost:${realPort}`);
+  console.log(LISTEN_HOST === '127.0.0.1'
+    ? '监听范围: 仅本机 (127.0.0.1)。局域网访问：配置 AGENTS_CHAT_PASSWORD（带鉴权）或 AGENTS_CHAT_LAN=1（无鉴权，有风险）后重启'
+    : `监听范围: 全部接口${auth.isAuthEnabled(process.env) ? '（已开启密码验证）' : '（⚠ 无鉴权，局域网内任何人可访问）'}`);
   console.log(`运行内核: ${kindText}`);
   console.log('退出提示: 请用 Ctrl+C（或 agents-chat stop）退出，会自动清理执行中的 AI 子进程；直接关闭窗口可能残留正在执行的进程');
   console.log(`本机可用内核: ${avail}（配置页可切换）`);

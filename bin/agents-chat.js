@@ -32,6 +32,9 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
+// exe 自更新遗留的旧版清理（无 args 时才做，避免 update 子命令场景重复 IO）
+if (process.argv.length <= 2) cleanupStaleExe();
+
 function isRunning() {
   try {
     const pid = fs.readFileSync(PID_FILE, 'utf8').trim();
@@ -291,6 +294,10 @@ function showStatus() {
 
 // 一键升级：检测新版 → 停服务（避免文件占用/旧进程残留）→ npm 全局安装最新版
 async function updateSelf() {
+  // 单文件 exe：npm 不可用，从 GitHub Releases 下载新 exe 原地替换
+  if (process.env.AGENTS_CHAT_STANDALONE === '1' || process.versions.bun) {
+    return updateSelfStandalone();
+  }
   console.log(`当前版本: v${PKG.version}`);
   console.log('正在检查 npm 最新版本...');
   const upd = await checkLatest({ force: true });
@@ -320,6 +327,75 @@ async function updateSelf() {
     console.log(`  ${UPDATE_COMMAND}`);
     process.exit(1);
   }
+}
+
+// exe 自更新：下载新版 → 旧 exe 改名让位（绕开运行中文件占用）→ 写入新 exe → 提示重启
+// 遗留 .old 在下次启动时清理（cleanupStaleExe）
+async function updateSelfStandalone() {
+  console.log(`当前版本: v${PKG.version}（单文件版）`);
+  console.log('正在检查最新版本...');
+  const upd = await checkLatest({ force: true });
+  if (!upd) {
+    console.error('无法访问更新源（网络超时或离线），请稍后重试，或到 GitHub Releases 手动下载:');
+    console.log('  https://github.com/iamsamyiok/agents-chat/releases/latest');
+    process.exit(1);
+  }
+  if (!upd.updateAvailable) {
+    console.log(`已是最新版本 v${upd.latest}，无需升级`);
+    return;
+  }
+  // 目前 CI 仅构建 Windows portable；其余平台提示手动下载（构建矩阵扩展后此处同步映射文件名）
+  if (process.platform !== 'win32') {
+    console.log(`发现新版本 v${upd.latest}，但单文件自动更新暂只支持 Windows，请手动下载:`);
+    console.log('  https://github.com/iamsamyiok/agents-chat/releases/latest');
+    return;
+  }
+  const asset = `AgentsChat-Portable-v${upd.latest}.exe`;
+  const url = `https://github.com/iamsamyiok/agents-chat/releases/download/v${upd.latest}/${asset}`;
+  const self = process.execPath;
+  const oldPath = self + '.old';
+  console.log(`发现新版本 v${upd.latest}，开始下载（约 74MB）...`);
+  try {
+    const res = await fetch(url, { redirect: 'follow' });
+    if (!res.ok) throw new Error(`下载失败 HTTP ${res.status}`);
+    const total = Number(res.headers.get('content-length') || 0);
+    const chunks = [];
+    let got = 0, lastPct = -10;
+    for await (const chunk of res.body) {
+      chunks.push(chunk);
+      got += chunk.length;
+      if (total) {
+        const pct = Math.floor((got / total) * 10) * 10;
+        if (pct >= lastPct + 10) { lastPct = pct; console.log(`  ${pct}%`); }
+      }
+    }
+    // 旧 exe 让位：Windows 运行中文件不可覆盖但可改名；改名失败（被占用异常）则中止不破坏现有程序
+    try { fs.renameSync(self, oldPath); } catch (e) {
+      throw new Error(`无法让位旧文件（${e.message}），请关闭所有 Agents Chat 后重试`);
+    }
+    try {
+      fs.writeFileSync(self, Buffer.concat(chunks));
+    } catch (e) {
+      fs.renameSync(oldPath, self); // 写入失败回滚，保证程序仍可用
+      throw new Error(`写入新版本失败（${e.message}）`);
+    }
+    console.log('');
+    console.log(`下载完成: v${PKG.version} -> v${upd.latest}`);
+    console.log('重新启动 Agents Chat 即使用新版本（旧文件将自动清理）');
+  } catch (err) {
+    console.error('升级失败:', err.message);
+    process.exit(1);
+  }
+}
+
+// 清理上次自更新遗留的旧 exe（启动时调用，静默失败）
+function cleanupStaleExe() {
+  try {
+    if (process.env.AGENTS_CHAT_STANDALONE === '1' || process.versions.bun) {
+      const oldPath = process.execPath + '.old';
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+  } catch { /* Windows 下若旧 exe 仍被占用（用户开了多个实例），下次再清 */ }
 }
 
 function showVersion() {

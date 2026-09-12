@@ -40,4 +40,30 @@ function ensureDefaultKernel({ log = console.log, standalone = !!process.version
   }
 }
 
-module.exports = { shouldAutoInstall, ensureDefaultKernel };
+// 手动安装指定内核（自检面板「一键安装」）：
+// npm 形态走内核官方 npm 包；exe 形态无 npm，仅 opencode 有官方独立安装脚本（其余内核提示手动）
+// 返回 {installed, error}，绝不抛错（前端按结果刷新）
+function installKernel(id, { standalone = !!process.versions.bun || process.env.AGENTS_CHAT_STANDALONE === '1' } = {}) {
+  const { KERNEL_DEFS } = require('./agent');
+  const def = KERNEL_DEFS.find(k => k.id === id);
+  if (!def) return { installed: false, error: `未知内核: ${id}` };
+  try {
+    if (standalone) {
+      if (id !== 'opencode') {
+        return { installed: false, error: `单文件版暂只支持一键安装 opencode，${def.label} 请手动在终端执行：${def.install}` };
+      }
+      const cmd = process.platform === 'win32'
+        ? 'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://opencode.ai/install.ps1 | iex"'
+        : 'bash -c "curl -fsSL https://opencode.ai/install | bash"';
+      execSync(cmd, { stdio: 'pipe', timeout: 300000 });
+    } else {
+      execSync(def.install, { stdio: 'pipe', timeout: 300000 });
+    }
+    try { require('./agent').resetDetectCache(); } catch { /* ignore */ }
+    return { installed: true };
+  } catch (err) {
+    return { installed: false, error: (err && err.message) || '安装失败' };
+  }
+}
+
+module.exports = { shouldAutoInstall, ensureDefaultKernel, installKernel };

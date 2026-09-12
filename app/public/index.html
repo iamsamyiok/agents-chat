@@ -45,8 +45,11 @@
   .badge { font-size: 11px; background: #fa5151; color: #fff; border-radius: 8px; padding: 0 6px; line-height: 16px; }
   .mini-btn { font-size: 12px; color: #07c160; border: 1px solid #07c160; background: #fff; border-radius: 6px; padding: 3px 8px; cursor: pointer; transition: background .15s, opacity .15s; }
   .mini-btn.gray { color: #888; border-color: #ddd; }
+  .mini-btn.primary { background: #07c160; color: #fff; }
+  .mini-btn.primary:hover { background: #06ad56; opacity: 1; }
   .mini-btn:hover { opacity: .85; background: #f0faf4; }
   .mini-btn:disabled { opacity: .5; cursor: not-allowed; }
+  input::placeholder, textarea::placeholder { color: #767676; opacity: 1; } /* WCAG AA 4.5:1 */
 
   /* ---------- 中栏：任务管理（操作与列表同区，就近操作） ---------- */
   #taskbar { width: 270px; flex-shrink: 0; background: #fafbfa; border-right: 1px solid #e7e7e7; display: flex; flex-direction: column; min-height: 0; }
@@ -721,7 +724,7 @@
     <div id="scBody" style="text-align:left;font-size:13px;line-height:1.9;max-height:52vh;overflow:auto">检测中…</div>
     <div class="modal-actions">
       <button onclick="closeSelfCheck()">全部跳过</button>
-      <button onclick="renderSelfCheck()" style="margin-left:8px">重新检测</button>
+      <button onclick="renderSelfCheck()">重新检测</button>
     </div>
   </div>
 </div>
@@ -950,6 +953,7 @@
     <div id="helpBody"></div>
     <div class="modal-actions">
       <button class="mini-btn" onclick="closeHelp(); openSelfCheck()">🔍 重新运行自检</button>
+      <button class="mini-btn gray" onclick="copyDiagnostics(this)">📋 复制诊断信息</button>
       <span style="flex:1"></span>
       <button class="primary" onclick="closeHelp()">关闭</button>
     </div>
@@ -996,7 +1000,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.44.2'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.45.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -1075,6 +1079,7 @@ function agentIcon(agentId, name) {
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
+  if (r.status === 401) { location.href = '/login'; throw new Error('未登录'); } // 密码鉴权：会话失效跳登录页
   return r.json();
 }
 
@@ -3526,10 +3531,10 @@ async function renderSelfCheck() {
   }
   for (const k of ks) {
     if (k.ok) {
-      html += `<div>✅ <b>${k.label}</b> 已安装 <span style="color:#888">（${k.cmd}）</span></div>`;
+      html += `<div>✅ <b>${k.label}</b> 已安装 <code style="background:#f5f7fa;padding:2px 6px;border-radius:5px">${k.cmd}</code></div>`;
     } else {
       const cmd = k.install || SC_INSTALL_FALLBACK[k.id] || ('npm install -g ' + k.id);
-      html += `<div>❌ <b>${k.label}</b> 未安装　<code style="background:#f5f7fa;padding:2px 6px;border-radius:5px">${cmd}</code> <button class="mini-btn" onclick="copyText('${cmd}', this)">复制命令</button></div>`;
+      html += `<div>❌ <b>${k.label}</b> 未安装　<code style="background:#f5f7fa;padding:2px 6px;border-radius:5px">${cmd}</code> <button class="mini-btn primary" onclick="installKernelBtn('${k.id}', this)">一键安装</button> <button class="mini-btn" onclick="copyText('${cmd}', this)">复制命令</button></div>`;
     }
   }
   // 2. LLM 配置状态
@@ -3557,12 +3562,52 @@ async function renderSelfCheck() {
 function SC_FORM(c) {
   const cu = (c && c.custom) || {};
   return `
-  <div style="display:grid;grid-template-columns:86px 1fr;gap:6px;margin-top:6px;align-items:center">
+  <style>.sc-form{display:grid;grid-template-columns:86px 1fr;gap:6px;margin-top:6px;align-items:center}.sc-form span{text-align:right;color:#555}</style>
+  <div class="sc-form">
     <span>Base URL</span><input id="scBaseURL" placeholder="https://api.example.com/v1" value="${cu.baseURL || ''}" style="padding:5px 8px;border:1px solid #ddd;border-radius:6px">
     <span>API Key</span><input id="scApiKey" type="password" placeholder="sk-..." value="${cu.apiKey || ''}" style="padding:5px 8px;border:1px solid #ddd;border-radius:6px">
     <span>模型</span><input id="scModel" placeholder="provider/model（例 openai/gpt-4o-mini）" value="${cu.model || ''}" style="padding:5px 8px;border:1px solid #ddd;border-radius:6px">
   </div>
   <div style="margin-top:8px"><button class="mini-btn primary" onclick="saveSelfCfg(this)">保存配置</button> <span id="scMsg" style="font-size:12px;color:#888"></span></div>`;
+}
+// 报障辅助：拉取诊断信息（版本/形态/内核/最近错误）格式化后复制到剪贴板
+async function copyDiagnostics(btn) {
+  const old = btn.textContent;
+  try {
+    const r = await api('/api/diagnostics');
+    if (!r.success) throw new Error(r.error || '读取失败');
+    const d = r.diag;
+    const text = [
+      'Agents Chat 诊断信息',
+      `版本: v${d.version}（${d.form}）`,
+      `运行环境: Node ${d.node} / ${d.platform}`,
+      `监听: ${d.listen} | 鉴权: ${d.authEnabled ? '开' : '关'} | 演示模式: ${d.mock ? '是' : '否'}`,
+      `运行时长: ${d.uptimeSec}s | 数据目录: ${d.dataDir}`,
+      '内核: ' + d.kernels.map(k => `${k.id}${k.ok ? '✓' : '✗'}`).join(' '),
+      d.recentErrors.length ? '最近错误:\n' + d.recentErrors.map(e => `- [${e.t}] ${e.scope}: ${e.msg}`).join('\n') : '最近错误: 无',
+    ].join('\n');
+    await navigator.clipboard.writeText(text);
+    btn.textContent = '✓ 已复制';
+  } catch (e) {
+    btn.textContent = '复制失败';
+  }
+  setTimeout(() => { btn.textContent = old; }, 2000);
+}
+// 一键安装内核：约 1-2 分钟（npm/exe 形态由服务端自动分派），完成自动重跑自检
+async function installKernelBtn(id, btn) {
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '安装中…（约 1-2 分钟）';
+  try {
+    const r = await api('/api/kernel/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    if (r.success) { await renderSelfCheck(); return; }
+    btn.textContent = '安装失败';
+    alert('安装失败：' + (r.error || '未知错误') + '\n可改用「复制命令」在终端手动安装');
+  } catch (e) {
+    btn.textContent = '安装失败';
+  }
+  btn.disabled = false;
+  setTimeout(() => { btn.textContent = old; }, 2500);
 }
 async function saveSelfCfg(btn) {
   const msg = document.getElementById('scMsg');
