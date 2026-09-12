@@ -239,6 +239,113 @@ async function notify(text) {
   }
 }
 
+// ---------- 交互卡片（WS 长连接回调：EventDispatcher 注册 card.action.trigger） ----------
+// 卡片按钮 value 携带 { act, ... }，回调时按 act 分发到 hooks.cardAction
+function buildCard(header) {
+  return { header, elements: [] };
+}
+// 通用元素快捷方式
+function mdEl(content) { return { tag: 'div', text: { tag: 'lark_md', content } }; }
+function btnEl(text, value, type) {
+  return { tag: 'button', text: { tag: 'plain_text', content: text }, type: type || 'default', value };
+}
+
+// 审批请求卡片：橙头 + 编号/类型/内容 + 批准/驳回按钮（value={act,n}）
+function buildApprovalCard({ seq, kind, label, timeoutMin }) {
+  const md = [
+    `**类型**：${kind === 'plan' ? '方案确认' : kind === 'delivery' ? '交付验收' : (kind || '审批')}`,
+    `**内容**：${String(label || '').slice(0, 300) || '（无描述）'}`,
+    `**超时**：${timeoutMin || 10} 分钟未处理视为驳回`
+  ].join('\n');
+  return {
+    config: { update_multi: true },
+    header: { title: { tag: 'plain_text', content: `⏸ 审批请求 #${seq}` }, template: 'orange' },
+    elements: [
+      mdEl(md),
+      { tag: 'hr' },
+      { tag: 'action', actions: [
+        btnEl('✅ 批准', { act: 'approve', n: seq }, 'primary'),
+        btnEl('✖ 驳回', { act: 'reject', n: seq }, 'danger')
+      ] },
+      { tag: 'note', elements: [{ tag: 'plain_text', content: `也可回复文本指令：/approve ${seq} 或 /reject ${seq}` }] }
+    ]
+  };
+}
+
+// 批次完成卡片：全成功绿头 / 有失败·阻塞橙头；统计 + 清单 + 查状态按钮
+function buildBatchDoneCard({ scope, total, done, failed, blocked, titles }) {
+  const bad = (failed || 0) + (blocked || 0) > 0;
+  const lines = [
+    `**结果**：✅ 完成 ${done || 0}` +
+      (failed ? ` · ❌ 失败 ${failed}` : '') +
+      (blocked ? ` · ⛔ 阻塞 ${blocked}` : '') +
+      ` / 共 ${total || 0} 个`
+  ];
+  const list = (titles || []).slice(0, 10).map(t => '· ' + String(t).slice(0, 40)).join('\n');
+  if (list) lines.push(list);
+  if ((titles || []).length > 10) lines.push(`…等共 ${titles.length} 个任务`);
+  return {
+    config: { update_multi: true },
+    header: { title: { tag: 'plain_text', content: `${bad ? '⚠️' : '✅'} ${scope || ''}任务批次完成`.trim() }, template: bad ? 'orange' : 'green' },
+    elements: [
+      mdEl(lines.join('\n')),
+      { tag: 'hr' },
+      { tag: 'action', actions: [btnEl('📋 任务状态', { act: 'status' }, 'default')] },
+      { tag: 'note', elements: [{ tag: 'plain_text', content: '失败任务可在网页端重跑；发送 /status 可随时查看运行状态' }] }
+    ]
+  };
+}
+
+// 卡片动作分发（独立导出便于单测）：白名单校验 → 去重 → hooks.cardAction 分发 → toast 响应
+// 返回 { ok, toast }；toast 结构可直接作为回调响应
+async function dispatchCardAction(data, hooks, opts) {
+  const o = opts || {};
+  const allowedChats = o.allowedChats || [];
+  const event = data || {};
+  const ctx = event.context || {};
+  const chatId = ctx.open_chat_id || event.open_chat_id || '';
+  const messageId = ctx.open_message_id || event.open_message_id || '';
+  const operator = ((event.operator || {}).open_id) || '';
+  const val = (event.action || {}).value || {};
+  if (!chatId || !allowedChats.includes(chatId)) {
+    return { ok: false, toast: { type: 'error', content: '当前会话不在白名单内' } };
+  }
+  const dedupeKey = 'act-' + crypto.createHash('sha256')
+    .update(`${messageId}|${operator}|${JSON.stringify(val)}`).digest('hex').slice(0, 24);
+  if (!rememberKey(dedupeKey)) return { ok: false, toast: null }; // 重投/重复点击：静默
+  let reply = '';
+  let toastType = 'success';
+  try {
+    reply = String((await hooks.cardAction(val)) || '');
+  } catch (e) {
+    log('卡片动作处理失败:', e && (e.message || e));
+    reply = '处理失败：' + (e && e.message || e);
+    toastType = 'error';
+  }
+  if (/失败|未找到|不存在|错误/.test(reply)) toastType = 'error';
+  else if (val.act === 'status') toastType = 'info';
+  // 结果留痕（详细文本）；toast 仅即时反馈
+  try { await sendText(chatId, reply); } catch { /* 留痕失败不影响响应 */ }
+  return { ok: true, toast: { type: toastType, content: reply.slice(0, 60) } };
+}
+
+async function sendCard(chatId, card, replyToMessageId) {
+  if (!state || !chatId || !card) return false;
+  const content = JSON.stringify(card);
+  const resp = await sendReplyOrDirect(chatId, replyToMessageId, 'interactive', content);
+  return !!resp;
+}
+
+// 卡片广播：返回成功送达的会话数（0 = 未启用/全失败，调用方可文本兜底）
+async function notifyCard(card) {
+  if (!state || !state.cfg.pushEnabled || !Array.isArray(state.cfg.allowedChats)) return 0;
+  let sent = 0;
+  for (const chatId of state.cfg.allowedChats) {
+    try { if (await sendCard(chatId, card)) sent++; } catch { /* 单群失败不影响其余 */ }
+  }
+  return sent;
+}
+
 // ---------- 命令与派活 ----------
 function helpText() {
   return [
@@ -249,6 +356,7 @@ function helpText() {
     '/approvals — 查看待审批',
     '/approve <编号> — 通过审批',
     '/reject <编号> — 驳回审批',
+    '审批与批次完成会推送交互卡片，可直接点按钮处理',
     '其他任意文字 = 直接派活给团队（群聊里请 @ 机器人）'
   ].join('\n');
 }
@@ -356,6 +464,21 @@ function start(cfg, hooks) {
           }
           await handleMessage(data);
         } catch (e) { log('事件处理异常:', e && (e.message || e)); }
+      },
+      // 卡片按钮点击回调（WS 长连接直收，无需公网 HTTP）：toast 即时反馈 + 文本留痕
+      'card.action.trigger': async (data) => {
+        try {
+          if (!state || !state.hooks || !state.hooks.cardAction) {
+            return { toast: { type: 'error', content: '卡片回调未配置' } };
+          }
+          const r = await dispatchCardAction(data, state.hooks, {
+            allowedChats: state.cfg.allowedChats || []
+          });
+          return r.toast || {};
+        } catch (e) {
+          log('卡片回调异常:', e && (e.message || e));
+          return { toast: { type: 'error', content: '处理失败，请稍后重试' } };
+        }
       }
     });
     const ws = new Lark.WSClient({
@@ -408,6 +531,7 @@ function getConfig() { return state ? { ...state.cfg, appSecret: '' } : null; }
 
 module.exports = {
   start, stop, notify, reloadConfig, isRunning, getConfig,
+  sendCard, notifyCard, dispatchCardAction, buildApprovalCard, buildBatchDoneCard,
   splitSegments, extractText, rememberEvent,
   dedupeKeyOf, wantsCard, buildCardContent, buildPostContent, postToText, cardToText
 };

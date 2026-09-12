@@ -246,14 +246,14 @@
   .at-tx i { font-style: normal; color: #999; font-size: 11px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 380px; }
 
   /* ---------- 弹窗 ---------- */
-  #modalMask, #batchMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask, #memMask, #diffMask, #welcomeMask, #suggestMask, #staffMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
+  #modalMask, #batchMask, #agentsMask, #historyMask, #helpMask, #flowMask, #cardMask, #teamsMask, #memMask, #diffMask, #welcomeMask, #suggestMask, #staffMask, #dagMask { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; z-index: 51; }
   /* 弹窗出现动画：遮罩淡入（含毛玻璃）+ 内容上浮，全站弹窗统一节奏 */
   div[id$="Mask"] { backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
   div[id$="Mask"].show { animation: fade-in .18s ease; }
   .modal, .preview-card { animation: modal-in .24s cubic-bezier(.2,.7,.3,1); }
   @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
   @keyframes modal-in { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
-  #modalMask.show, #batchMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show, #memMask.show, #diffMask.show, #welcomeMask.show, #suggestMask.show, #staffMask.show { display: flex; }
+  #modalMask.show, #batchMask.show, #agentsMask.show, #historyMask.show, #helpMask.show, #flowMask.show, #cardMask.show, #teamsMask.show, #memMask.show, #diffMask.show, #welcomeMask.show, #suggestMask.show, #staffMask.show, #dagMask.show { display: flex; }
   /* 团队仓库卡片 */
   .team-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
   .team-card .tc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -291,6 +291,40 @@
   .flow-detail b { color: #333; }
   .flow-detail .fd-title { font-weight: 600; margin-bottom: 6px; }
   .flow-detail .fd-files { color: #7d5ac8; }
+  /* 可视化依赖编排画布 */
+  #dagMask .dag-modal { background: #fff; border-radius: 10px; width: min(1180px, 96vw); height: min(860px, 92vh); display: flex; flex-direction: column; overflow: hidden; animation: modal-in .24s cubic-bezier(.2,.7,.3,1); }
+  .dag-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #eee; flex: none; flex-wrap: wrap; }
+  .dag-toolbar h3 { margin: 0; font-size: 15px; flex: none; }
+  .dag-hint { font-size: 11px; color: #888; }
+  .dag-toolbar button { font-size: 12px; padding: 5px 12px; border-radius: 6px; border: 1px solid #d7dce8; background: #fff; cursor: pointer; }
+  .dag-toolbar button:hover { background: #f2f5fa; }
+  .dag-toolbar button.primary { background: #10aeff; border-color: #10aeff; color: #fff; }
+  .dag-toolbar button.primary:hover { background: #0d9ae4; }
+  #dagCanvasWrap { flex: 1; min-height: 0; position: relative; overflow: auto; background: #fbfcfe; background-image: radial-gradient(#e6eaf2 1px, transparent 1px); background-size: 22px 22px; }
+  #dagInner { position: relative; }
+  #dagEdges { position: absolute; top: 0; left: 0; pointer-events: none; }
+  #dagEdges .dg-edge { stroke: #8fa3c8; stroke-width: 1.6; fill: none; }
+  #dagEdges .dg-edge-hit { stroke: transparent; stroke-width: 16; fill: none; pointer-events: stroke; cursor: pointer; }
+  #dagEdges .dg-del { pointer-events: all; cursor: pointer; }
+  #dagEdges .dg-tmp { stroke: #4a6cf7; stroke-width: 1.8; stroke-dasharray: 6 4; fill: none; }
+  .dag-node { position: absolute; width: 216px; height: 52px; box-sizing: border-box; background: #fff; border: 1.5px solid #d7dce8; border-radius: 9px; padding: 6px 12px; box-shadow: 0 1px 4px rgba(30,50,90,.08); cursor: grab; user-select: none; -webkit-user-select: none; }
+  .dag-node.dragging { cursor: grabbing; box-shadow: 0 4px 14px rgba(30,50,90,.18); z-index: 5; }
+  .dag-node.linking-target { border-color: #4a6cf7; box-shadow: 0 0 0 3px rgba(74,108,247,.16); }
+  .dag-node .dg-no { position: absolute; top: -9px; left: -9px; width: 20px; height: 20px; border-radius: 50%; background: #10aeff; color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
+  .dag-node .dg-title { font-size: 13px; line-height: 1.45; word-break: break-all; min-height: 19px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .dag-node .dg-title-input { width: 100%; box-sizing: border-box; border: 1px solid #4a6cf7; border-radius: 5px; font-size: 13px; padding: 2px 4px; font-family: inherit; outline: none; }
+  .dag-node .dg-handle { position: absolute; right: -9px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; border-radius: 50%; background: #4a6cf7; border: 2.5px solid #fff; box-shadow: 0 0 0 1.5px #4a6cf7; cursor: crosshair; box-sizing: border-box; }
+  .dag-node .dg-handle:hover { transform: translateY(-50%) scale(1.3); }
+  .dag-node .dg-del { position: absolute; top: -8px; right: -8px; width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 1px solid #e3e3e3; color: #c0392b; font-size: 11px; line-height: 16px; text-align: center; cursor: pointer; display: none; z-index: 2; }
+  .dag-node:hover .dg-del { display: block; }
+  .dag-node.locked { border-color: #e2e6ee; background: #f5f7fb; cursor: default; }
+  .dag-node.locked .dg-handle { display: none; }
+  .dag-node.locked:hover .dg-del { display: none; }
+  .dag-node .dg-status { position: absolute; bottom: -9px; right: 8px; font-size: 10px; border-radius: 8px; padding: 1px 7px; background: #fff; border: 1px solid #e3e3e3; color: #666; }
+  .dag-node.locked .dg-status { color: #999; }
+  .dag-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: #98a2b8; font-size: 13px; pointer-events: none; }
+  #dagPasteBox { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; border: 1px solid #d7dce8; border-radius: 10px; box-shadow: 0 8px 30px rgba(30,50,90,.2); padding: 14px; width: 420px; max-width: 90%; z-index: 10; }
+  #dagPasteBox textarea { width: 100%; box-sizing: border-box; height: 130px; border: 1px solid #e2e2e2; border-radius: 8px; padding: 8px; font-size: 13px; font-family: inherit; resize: vertical; }
   .modal { background: #fff; border-radius: 10px; width: 560px; max-width: 92vw; max-height: 88vh; overflow-y: auto; padding: 20px; }
   /* 全屏遮罩层：弹窗内容盒水平垂直居中（.modal 是内容盒样式，勿直接用作遮罩，否则 width 污染导致弹窗偏左） */
   .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 90; display: none; align-items: center; justify-content: center; }
@@ -464,9 +498,6 @@
     #dvRosterBar .dv-chip .dv-x:hover { color: #fa5151; }
     #dvRosterBar .dv-add { border: 1px dashed #bbb; background: #fff; color: #666; border-radius: 12px; padding: 2px 8px; font-size: 12px; cursor: pointer; }
     #dvRosterBar .dv-label { color: #999; }
-
-   /* ---------- 版本角标：页面右下角（次要信息） ---------- */
-   .ver-chip { position: fixed; right: 10px; bottom: 8px; z-index: 55; font-size: 11px; color: #aaa; background: rgba(255,255,255,.85); border: 1px solid #eee; border-radius: 10px; padding: 1px 8px; white-space: nowrap; pointer-events: none; }
 
    /* ---------- 报错消息：浅红底强标识（区别普通系统提示） ---------- */
    .sys-tip.msg-err { background: #fdf1f0; border-left: 3px solid #fa5151; color: #c0392b; border-radius: 4px; padding: 6px 10px; }
@@ -669,6 +700,7 @@
   <aside id="taskbar">
     <div class="task-actions">
       <button class="mini-btn" onclick="openImport()" title="从文本导入顺序任务">导入</button>
+      <button class="mini-btn" onclick="openDagEditor()" title="可视化编排：拖拽连线调整待办任务的依赖关系">⛓ 编排</button>
       <button class="mini-btn gray" onclick="openBatchMgr()" title="批量管理全部顺序任务与定时任务（删除/执行）">批量</button>
       <button class="mini-btn gray" onclick="clearTasks()" title="清空全部任务">清空</button>
       <button class="mini-btn gray" onclick="toggleTaskbar()" title="收起任务面板（聊天区占满）">⟨</button>
@@ -748,8 +780,6 @@
 </div>
 <!-- 任务面板收起后的展开按钮（浮动于聊天区左缘） -->
 <button id="taskExpand" onclick="toggleTaskbar()" title="展开任务面板">任<br>务<br>⟩</button>
-<!-- 版本号：页面右下角角落（次要信息，不与操作按钮混排） -->
-<span class="ver-chip" id="verChip" title="当前版本"></span>
 
 <!-- 批量管理任务弹窗 -->
 <div id="batchMask">
@@ -817,7 +847,43 @@
     </div>
     <div class="modal-actions">
       <button onclick="closeImport()">取消</button>
+      <button onclick="openDagFromImport()" title="可视化画布编排：节点=任务，连线=依赖，保存即生成任务">⛓ 可视化编排</button>
       <button class="primary" onclick="doImport()">提取任务</button>
+    </div>
+  </div>
+</div>
+
+<!-- 可视化依赖编排画布 -->
+<div id="dagMask">
+  <div class="dag-modal">
+    <div class="dag-toolbar">
+      <h3 id="dagTitle">⛓ 可视化依赖编排</h3>
+      <button id="dagAddBtn" onclick="dagAddNode()">＋ 添加任务</button>
+      <button id="dagPasteBtn" onclick="dagOpenPaste()">📋 批量粘贴</button>
+      <button onclick="dagAutoLayout()" title="按依赖关系自动分层排列（左 → 右为执行方向）">🧭 自动整理</button>
+      <span class="dag-hint" id="dagHint">拖节点右侧 ● 到另一节点 = 建立依赖（被连线者等前置完成）；点连线上的 ✕ 删除依赖；节点可拖动摆位，双击空白新增</span>
+      <span style="flex:1"></span>
+      <button onclick="closeDag()">取消</button>
+      <button class="primary" onclick="dagSave()">保存</button>
+    </div>
+    <div id="dagCanvasWrap">
+      <div id="dagInner">
+        <svg id="dagEdges"></svg>
+        <div id="dagNodes"></div>
+      </div>
+      <div class="dag-empty" id="dagEmpty">
+        <div style="font-size:34px">⛓</div>
+        <div>画布还是空的：点「＋ 添加任务」或「📋 批量粘贴」开始编排</div>
+        <div style="font-size:11px">箭头方向 = 执行方向：A → B 表示 B 等 A 完成后才执行</div>
+      </div>
+      <div id="dagPasteBox" style="display:none">
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">批量粘贴任务（每行一个）</div>
+        <textarea id="dagPasteText" placeholder="调研竞品并输出报告&#10;收集素材与数据&#10;撰写分析初稿"></textarea>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+          <button onclick="dagClosePaste()" style="font-size:12px;padding:5px 12px;border-radius:6px;border:1px solid #d7dce8;background:#fff;cursor:pointer">取消</button>
+          <button onclick="dagConfirmPaste()" style="font-size:12px;padding:5px 12px;border-radius:6px;border:1px solid #10aeff;background:#10aeff;color:#fff;cursor:pointer">生成节点</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1055,7 +1121,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.51.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.52.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -3718,6 +3784,350 @@ async function doImport() {
   } else toast(data.errors && data.errors.length ? `依赖校验失败：${data.errors.map(e => e.message).join('；')}` : (data.error || '导入失败'));
 }
 
+// ---------- 可视化依赖编排画布：节点=任务，连线=依赖（A→B 表示 B 等 A 完成） ----------
+const DAG_W = 216, DAG_H = 52, DAG_GX = 64, DAG_GY = 26, DAG_M = 24;
+let dag = null;        // {mode:'new'|'edit', runner:'solo'|'', nodes:[{nid,id,title,deps:[nid],x,y,status?}]}
+let dagNidSeq = 1;
+let dagLinking = null; // 连线进行中 {from, x, y}
+let dagDrag = null;    // 节点拖动中 {nid, ox, oy, moved, el}
+
+function openDagFromImport() { closeImport(); startDag('new'); }
+function openDagEditor() { startDag('edit'); }
+
+function startDag(mode) {
+  const runner = chatMode === 'solo' ? 'solo' : '';
+  if (mode === 'edit') {
+    // 编排视图：当前模式下待执行/已阻塞的顺序任务（执行中/已完成的依赖不可再改，灰底展示）
+    const editable = tasks.filter(t => (t.runner === 'solo') === (runner === 'solo') && (t.status === 'pending' || t.status === 'blocked'));
+    if (!editable.length) { toast('当前模式没有可编排的待办任务（仅待执行/已阻塞任务可调整依赖）'); return; }
+    dag = { mode, runner, nodes: editable.map(t => ({ nid: t.id, id: t.id, title: t.title, status: t.status, deps: [...(t.dependsOn || [])], x: 0, y: 0 })) };
+  } else {
+    dag = { mode, runner, nodes: [] };
+  }
+  document.getElementById('dagTitle').textContent = mode === 'edit' ? '⛓ 编排视图 · 调整任务依赖' : '⛓ 可视化依赖编排';
+  document.getElementById('dagAddBtn').style.display = mode === 'edit' ? 'none' : '';
+  document.getElementById('dagPasteBtn').style.display = mode === 'edit' ? 'none' : '';
+  document.getElementById('dagHint').textContent = mode === 'edit'
+    ? '从节点右侧 ● 拖到另一节点 = 建立依赖；点连线 ✕ 删除；灰底任务已锁定（已执行/执行中依赖不可改）'
+    : '拖节点右侧 ● 到另一节点 = 建立依赖（被连线者等前置完成）；点连线上的 ✕ 删除依赖；节点可拖动摆位，双击空白新增';
+  document.getElementById('dagMask').classList.add('show');
+  dagClosePaste();
+  if (mode === 'edit') dagAutoLayout();
+  renderDag();
+}
+function closeDag() { document.getElementById('dagMask').classList.remove('show'); dag = null; }
+
+function dagAddNode(x, y, title) {
+  const n = dag.nodes.length;
+  if (x === undefined) {
+    const wrap = document.getElementById('dagCanvasWrap');
+    x = wrap.scrollLeft + 60 + (n % 4) * (DAG_W + DAG_GX);
+    y = wrap.scrollTop + 50 + Math.floor(n / 4) * (DAG_H + DAG_GY);
+  }
+  const node = { nid: 'n' + (dagNidSeq++), id: null, title: title || ('新任务 ' + (n + 1)), deps: [], x, y };
+  dag.nodes.push(node);
+  renderDag();
+  if (!title) dagEditTitle(node.nid);
+  return node;
+}
+
+// 自动布局：拓扑分层（左→右为执行方向），同层按当前纵向顺序排列
+function dagAutoLayout() {
+  if (!dag) return;
+  const byNid = new Map(dag.nodes.map(n => [n.nid, n]));
+  const layer = new Map();
+  const depth = nid => {
+    if (layer.has(nid)) return layer.get(nid);
+    const n = byNid.get(nid);
+    const ds = (n.deps || []).filter(d => byNid.has(d));
+    const d = ds.length ? Math.max(...ds.map(depth)) + 1 : 0;
+    layer.set(nid, d);
+    return d;
+  };
+  dag.nodes.forEach(n => depth(n.nid));
+  const cols = new Map();
+  for (const n of dag.nodes) {
+    const l = layer.get(n.nid);
+    if (!cols.has(l)) cols.set(l, []);
+    cols.get(l).push(n);
+  }
+  for (const [l, list] of cols) {
+    list.sort((a, b) => a.y - b.y || a.x - b.x);
+    list.forEach((n, i) => { n.x = DAG_M + l * (DAG_W + DAG_GX); n.y = DAG_M + i * (DAG_H + DAG_GY); });
+  }
+  renderDag();
+}
+
+function renderDag() {
+  if (!dag) return;
+  const inner = document.getElementById('dagInner');
+  const nodesEl = document.getElementById('dagNodes');
+  const svg = document.getElementById('dagEdges');
+  const has = dag.nodes.length > 0;
+  document.getElementById('dagEmpty').style.display = has ? 'none' : 'flex';
+  const noOf = new Map(dag.nodes.map((n, i) => [n.nid, i + 1]));
+  nodesEl.innerHTML = dag.nodes.map((n, i) => {
+    // 锁定 = 已执行/执行中（依赖不可改）：灰底、无连线手柄；删除节点仅新建模式可用
+    const lock = n.status === 'running' || n.status === 'done' || n.status === 'failed';
+    const stMap = { pending: '待执行', blocked: '已阻塞' };
+    return `<div class="dag-node${lock ? ' locked' : ''}" data-nid="${n.nid}" style="left:${n.x}px;top:${n.y}px">
+      <span class="dg-no">${i + 1}</span>
+      <div class="dg-title" title="${escAttr(n.title)}">${esc(n.title)}</div>
+      ${n.status ? `<span class="dg-status">${stMap[n.status] || n.status}</span>` : ''}
+      ${dag.mode === 'new' ? `<span class="dg-del" data-del="${n.nid}" title="删除节点">✕</span>` : ''}
+      ${lock ? '' : `<span class="dg-handle" data-handle="${n.nid}"></span>`}
+    </div>`;
+  }).join('');
+  const maxX = Math.max(400, ...dag.nodes.map(n => n.x + DAG_W + 80));
+  const maxY = Math.max(320, ...dag.nodes.map(n => n.y + DAG_H + 80));
+  inner.style.width = maxX + 'px'; inner.style.height = maxY + 'px';
+  svg.setAttribute('width', maxX); svg.setAttribute('height', maxY);
+  renderDagEdges(svg, noOf);
+}
+
+function renderDagEdgesOnly() {
+  if (!dag) return;
+  renderDagEdges(document.getElementById('dagEdges'), new Map(dag.nodes.map((n, i) => [n.nid, i + 1])));
+}
+
+function renderDagEdges(svg, noOf) {
+  const byNid = new Map(dag.nodes.map(n => [n.nid, n]));
+  const locked = n => n.status === 'running' || n.status === 'done' || n.status === 'failed';
+  const end = nid => { const n = byNid.get(nid); return { sx: n.x + DAG_W, sy: n.y + DAG_H / 2, tx: n.x, ty: n.y + DAG_H / 2 }; };
+  let html = '<defs><marker id="dgArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8fa3c8"/></marker></defs>';
+  for (const n of dag.nodes) {
+    for (const d of n.deps) {
+      const from = byNid.get(d);
+      if (!from) continue;
+      const p = end(d), q = end(n.nid);
+      const sx = p.sx, sy = p.sy, tx = q.tx - 6, ty = q.ty;
+      const mid = (sx + tx) / 2;
+      const dPath = `M${sx},${sy} C${mid},${sy} ${mid},${ty} ${tx},${ty}`;
+      html += `<path class="dg-edge" d="${dPath}" marker-end="url(#dgArrow)"/>`;
+      if (!locked(from) && !locked(n)) {
+        html += `<path class="dg-edge-hit" data-del-edge="${d}|${n.nid}" d="${dPath}"/>`
+          + `<circle class="dg-del" data-del-edge="${d}|${n.nid}" cx="${mid}" cy="${(sy + ty) / 2}" r="8" fill="#fff" stroke="#e3e3e3"/>`
+          + `<text x="${mid}" y="${(sy + ty) / 2 + 3.5}" text-anchor="middle" font-size="9" fill="#c0392b" style="pointer-events:none">✕</text>`;
+      }
+    }
+  }
+  if (dagLinking) {
+    const f = byNid.get(dagLinking.from);
+    if (f) {
+      const sx = f.x + DAG_W, sy = f.y + DAG_H / 2;
+      html += `<path class="dg-tmp" d="M${sx},${sy} L${dagLinking.x},${dagLinking.y}"/>`;
+    }
+  }
+  svg.innerHTML = html;
+}
+
+// 环检测：从 from 沿依赖链（deps 方向）可达 to，则新增「to 依赖 from」会成环
+function dagReachable(from, to) {
+  const byNid = new Map(dag.nodes.map(n => [n.nid, n]));
+  const seen = new Set();
+  const stack = [from];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (cur === to) return true;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    const n = byNid.get(cur);
+    if (n) stack.push(...(n.deps || []));
+  }
+  return false;
+}
+
+function dagAddDep(from, to) {
+  if (from === to) { renderDagEdgesOnly(); return; }
+  const toN = dag.nodes.find(n => n.nid === to);
+  const fromN = dag.nodes.find(n => n.nid === from);
+  if (!toN || !fromN) { renderDagEdgesOnly(); return; }
+  if (toN.deps.includes(from)) { renderDagEdgesOnly(); return; }
+  if (toN.status === 'running' || toN.status === 'done' || toN.status === 'failed') { toast('该任务已执行/执行中，依赖不可修改'); renderDagEdgesOnly(); return; }
+  if (dagReachable(from, to)) { toast('无法建立依赖：会形成循环依赖'); renderDagEdgesOnly(); return; }
+  toN.deps.push(from);
+  renderDag();
+}
+
+function dagRemoveNode(nid) {
+  dag.nodes = dag.nodes.filter(n => n.nid !== nid);
+  for (const n of dag.nodes) n.deps = n.deps.filter(d => d !== nid);
+  renderDag();
+}
+
+function dagEditTitle(nid) {
+  const titleEl = document.querySelector(`.dag-node[data-nid="${nid}"] .dg-title`);
+  const n = dag.nodes.find(x => x.nid === nid);
+  if (!titleEl || !n) return;
+  const input = document.createElement('input');
+  input.className = 'dg-title-input';
+  input.value = n.title;
+  titleEl.replaceWith(input);
+  input.focus(); input.select();
+  let done = false;
+  const commit = () => {
+    if (done) return;
+    done = true;
+    const v = input.value.trim();
+    if (v) n.title = v.slice(0, 500);
+    renderDag();
+  };
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', ev => {
+    ev.stopPropagation();
+    if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+    else if (ev.key === 'Escape') { done = true; renderDag(); }
+  });
+}
+
+// 批量粘贴：每行一个任务标题，生成节点后自动分层
+function dagOpenPaste() { document.getElementById('dagPasteBox').style.display = 'block'; document.getElementById('dagPasteText').focus(); }
+function dagClosePaste() {
+  const b = document.getElementById('dagPasteBox');
+  if (b) { b.style.display = 'none'; document.getElementById('dagPasteText').value = ''; }
+}
+function dagConfirmPaste() {
+  const lines = document.getElementById('dagPasteText').value.split('\n').map(s => s.trim()).filter(Boolean);
+  if (!lines.length) { toast('请先粘贴任务文本'); return; }
+  lines.forEach(t => dagAddNode(undefined, undefined, t.slice(0, 500)));
+  dagClosePaste();
+  dagAutoLayout();
+}
+
+// 画布指针交互（事件委托）：手柄连线 / 节点拖动 / 删线删点
+const dagWrap = document.getElementById('dagCanvasWrap');
+dagWrap.addEventListener('pointerdown', e => {
+  if (!dag) return;
+  const delEdge = e.target.closest('[data-del-edge]');
+  if (delEdge) {
+    const [from, to] = delEdge.getAttribute('data-del-edge').split('|');
+    const toN = dag.nodes.find(n => n.nid === to);
+    if (toN) { toN.deps = toN.deps.filter(d => d !== from); renderDag(); }
+    return;
+  }
+  const handle = e.target.closest('[data-handle]');
+  if (handle) {
+    e.preventDefault();
+    const inner = document.getElementById('dagInner');
+    const r = inner.getBoundingClientRect();
+    dagLinking = { from: handle.getAttribute('data-handle'), x: e.clientX - r.left, y: e.clientY - r.top };
+    handle.setPointerCapture(e.pointerId);
+    return;
+  }
+  if (e.target.closest('[data-del]')) { dagRemoveNode(e.target.closest('[data-del]').getAttribute('data-del')); return; }
+  const nodeEl = e.target.closest('.dag-node');
+  if (nodeEl) {
+    const n = dag.nodes.find(x => x.nid === nodeEl.dataset.nid);
+    if (!n) return;
+    const r = document.getElementById('dagInner').getBoundingClientRect();
+    dagDrag = { nid: n.nid, ox: e.clientX - r.left - n.x, oy: e.clientY - r.top - n.y, moved: false, el: nodeEl };
+    nodeEl.setPointerCapture(e.pointerId);
+    nodeEl.classList.add('dragging');
+  }
+});
+dagWrap.addEventListener('pointermove', e => {
+  if (!dag) return;
+  const inner = document.getElementById('dagInner');
+  const r = inner.getBoundingClientRect();
+  if (dagLinking) {
+    dagLinking.x = e.clientX - r.left; dagLinking.y = e.clientY - r.top;
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const nodeEl = el && el.closest ? el.closest('.dag-node') : null;
+    document.querySelectorAll('.dag-node.linking-target').forEach(x => x.classList.remove('linking-target'));
+    if (nodeEl && nodeEl.dataset.nid !== dagLinking.from) nodeEl.classList.add('linking-target');
+    renderDagEdgesOnly();
+    return;
+  }
+  if (!dagDrag) return;
+  const n = dag.nodes.find(x => x.nid === dagDrag.nid);
+  if (!n) return;
+  const nx = Math.max(0, e.clientX - r.left - dagDrag.ox);
+  const ny = Math.max(0, e.clientY - r.top - dagDrag.oy);
+  if (Math.abs(nx - n.x) > 3 || Math.abs(ny - n.y) > 3) dagDrag.moved = true;
+  n.x = nx; n.y = ny;
+  dagDrag.el.style.left = nx + 'px'; dagDrag.el.style.top = ny + 'px';
+  renderDagEdgesOnly();
+});
+dagWrap.addEventListener('pointerup', e => {
+  if (!dag) return;
+  if (dagLinking) {
+    document.querySelectorAll('.dag-node.linking-target').forEach(x => x.classList.remove('linking-target'));
+    const from = dagLinking.from;
+    dagLinking = null;
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const nodeEl = el && el.closest ? el.closest('.dag-node') : null;
+    if (nodeEl) dagAddDep(from, nodeEl.dataset.nid);
+    else renderDagEdgesOnly();
+    return;
+  }
+  if (!dagDrag) return;
+  const { nid, moved, el } = dagDrag;
+  el.classList.remove('dragging');
+  dagDrag = null;
+  if (moved) { renderDagEdgesOnly(); return; }
+  if (dag.mode === 'new' && e.target.closest('.dg-title')) dagEditTitle(nid);
+});
+dagWrap.addEventListener('dblclick', e => {
+  if (!dag || dag.mode !== 'new') return;
+  if (e.target.closest('.dag-node') || e.target.closest('#dagPasteBox')) return;
+  const r = document.getElementById('dagInner').getBoundingClientRect();
+  dagAddNode(e.clientX - r.left - DAG_W / 2, e.clientY - r.top - DAG_H / 2);
+});
+
+// 保存：new 模式结构化建任务（import-canvas）；edit 模式仅提交依赖有变化的任务（/api/tasks/deps）
+async function dagSave() {
+  if (!dag) return;
+  if (dag.mode === 'new') {
+    if (!dag.nodes.length) { toast('画布为空，请先添加任务节点'); return; }
+    if (dag.nodes.some(n => !String(n.title).trim())) { toast('有节点的任务标题为空，请点击节点补全'); return; }
+    const noOf = new Map(dag.nodes.map((n, i) => [n.nid, i + 1]));
+    const nodes = dag.nodes.map(n => ({ title: n.title.trim(), deps: [...new Set(n.deps)].map(d => noOf.get(d)).filter(Boolean) }));
+    const data = await api('/api/tasks/import-canvas', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nodes, mode: 'sequential', runner: dag.runner,
+        isolated: !!(document.getElementById('importIsolated') || {}).checked,
+        refs: String((document.getElementById('importRefs') || {}).value || '').split('\n').map(s => s.trim()).filter(Boolean)
+      })
+    });
+    if (data.success) {
+      tasks = data.tasks || [];
+      renderSidebar();
+      const depCnt = nodes.filter(n => n.deps.length).length;
+      (dag.runner === 'solo' ? addSoloSys : addSys)(`⛓ 已通过画布创建 ${data.added} 个任务（${depCnt} 个含依赖编排）`);
+      (data.warnings || []).forEach(w => dag.runner === 'solo' ? addSoloSys('⚠ ' + w) : addSys('⚠ ' + w));
+      closeDag();
+      closeImport();
+      const ir = document.getElementById('importRefs'); if (ir) ir.value = '';
+    } else {
+      toast(data.errors && data.errors.length ? `依赖校验失败：${data.errors.map(e => e.message).join('；')}` : (data.error || '保存失败'));
+    }
+    return;
+  }
+  const updates = [];
+  for (const n of dag.nodes) {
+    const orig = tasks.find(t => t.id === n.id);
+    if (!orig) continue;
+    if (JSON.stringify(orig.dependsOn || []) !== JSON.stringify(n.deps)) updates.push({ id: n.id, deps: n.deps });
+  }
+  if (!updates.length) { toast('依赖没有变化'); return; }
+  const data = await api('/api/tasks/deps', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ updates })
+  });
+  if (data.success) {
+    tasks = data.tasks || [];
+    renderSidebar();
+    addSys(`⛓ 已更新 ${data.updated} 个任务的依赖编排`);
+    closeDag();
+  } else {
+    toast(data.errors && data.errors.length ? `依赖校验失败：${data.errors.map(e => e.message).join('；')}` : (data.error || '保存失败'));
+  }
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('dagMask').classList.contains('show')) closeDag();
+});
+
 // ---------- Git 隔离区改动查看 / 合并 / 丢弃 ----------
 let diffTask = null; // 当前弹窗对应的任务
 function escDiffLine(l) {
@@ -5153,8 +5563,6 @@ function kernelBanner() {
 // 版本徽标与更新提示条（health 下发；无新版静默）
 function renderUpdateInfo(health) {
   if (!health) return;
-  const chip = document.getElementById('verChip');
-  if (chip && health.version) chip.textContent = 'v' + health.version;
   if (!health.updateAvailable || document.getElementById('updateBar')) return;
   const bar = document.createElement('div');
   bar.id = 'updateBar';
@@ -5222,7 +5630,7 @@ function openHelp() {
       <li>左侧任务栏顶部开关：「📋 顺序任务」与「⏰ 定时任务」两个标签页在同一位置切换显示</li>
       <li>顺序任务视图下，底部按钮为「按顺序执行全部待办」（执行中变红色「停止执行」）</li>
       <li>定时任务视图下，底部按钮变为「▶ 启动 / ⏸ 关闭定时任务」（总开关，关闭后到点不再自动执行）</li>
-      <li><b>顺序任务</b>：「导入任务」→ 顺序任务标签，每行 <code>1.</code> <code>2.</code> 编号，行末可 <code>@智能体</code> 指派；任务按编号顺序执行，列表可拖拽调序，每个任务 = 独立会话</li>
+      <li><b>顺序任务</b>：「导入任务」→ 顺序任务标签，每行 <code>1.</code> <code>2.</code> 编号，行末可 <code>@智能体</code> 指派；任务按编号顺序执行，列表可拖拽调序，每个任务 = 独立会话（行尾写 <code>←1,2</code> 可改为依赖驱动执行，见下方「⛓ 任务依赖编排」）</li>
       <li><b>定时任务</b>：「导入任务」→ 定时任务标签，行首写启动时间（<code>20260818-1307</code>），输入 <code>[]</code> 自动填入当前时间；到点自动执行（需程序保持运行）</li>
       <li>定时任务视图显示启动时间与倒计时，支持「立即执行」「重跑」「删除」；点击已触发的任务可查看其会话</li>
       <li><b>单聊任务链式语法</b>（单聊模式导入时生效）：<code>2.-任务</code> <b>-</b> 前缀 = 接续上一任务的会话继续执行（同进程续聊，AI 记得前面的成果）；<code>3.//任务</code> <b>//</b> 前缀 = 并行执行（连续多个 <b>//</b> 任务各自独立进程同时跑）；无前缀 = 新会话独立执行。例：<code>1.写文档</code> → <code>2.-做成网页</code>（同一进程接续）→ <code>3.//查惠州天气</code> + <code>4.//查北京天气</code>（两个进程并行）</li>
@@ -5267,6 +5675,34 @@ function openHelp() {
     <ul>
       <li>侧栏「批量管理」打开任务总览：全部顺序任务与定时任务（含单聊/群聊两类）分组展示</li>
       <li>勾选后可<b>批量删除</b>；顺序任务可<b>批量执行</b>（先群聊后单聊，依次完成）</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>🎤 插话（Steering）</h4>
+    <ul>
+      <li>编排执行中照样可以在输入框打字发送：消息自动排队，本轮结束立即作为新指令续跑，无需停止重来（队列上限 10 条）</li>
+      <li>附件暂不支持插话；插话后提示「编排结束后自动生效」</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>📱 飞书桥接</h4>
+    <ul>
+      <li>「⚙ 智能体配置」填入飞书应用凭证并启用，即获一台飞书机器人：在飞书发消息即可远程派活、追进度、收成果</li>
+      <li>支持 <code>@管家</code> 派任务、查进度、审批请求推送（回复短编号即可通过/拒绝）；白名单为空时首条消息会引导你回填会话 ID</li>
+      <li>长连接实时收发，断线自动重连；同一图片/消息自动去重防刷屏</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>🔧 MCP 工具 + 📎 任务参考资料</h4>
+    <ul>
+      <li><b>MCP 工具</b>：配置页「MCP 工具服务器」可挂载外部工具（如 Playwright 浏览器、Fetch 抓取），保存即生效，所有智能体立即可用；密钥打码显示，留空即沿用</li>
+      <li><b>任务参考资料</b>：导入任务时在「📎 参考资料」填本地路径或 URL（每行一条，上限 10 条），执行时自动注入给 AI，它会自行读取后干活</li>
+    </ul>
+  </div>
+  <div class="help-sec"><h4>⛓ 任务依赖编排（DAG）</h4>
+    <ul>
+      <li>「导入任务」弹窗点 <b>⛓ 可视化编排</b> 进入画布：节点卡片 = 任务，箭头连线 = 依赖（A → B 表示 B 等 A 完成后才执行）；从节点右侧 ● 拖到另一节点建立依赖，点连线 ✕ 删除，双击空白或「批量粘贴」加任务，<b>自动整理</b>按依赖分层排列</li>
+      <li>已有任务点任务栏 <b>⛓ 编排</b> 进入编排视图：拖线增删依赖实时调整执行顺序（已执行/执行中的任务锁定不可改）</li>
+      <li>习惯写文本也可以：导入时行尾写 <code>←1,2</code>（或 <code>&lt;-1,2</code>）声明依赖同批编号任务，两种方式兼容</li>
+      <li>前置失败则该任务标记「已阻塞」跳过；列表显示 <code>⛓ 等 1,2</code> 徽标；依赖成环或引用缺失编号会拒绝导入并提示</li>
+      <li>例：<code>1.调研</code> + <code>2.收集素材</code> 并行 → <code>3.写初稿 ←1,2</code> → <code>4.排版 ←3</code>，一次导入全自动</li>
     </ul>
   </div>
   <div class="help-sec"><h4>📄 Markdown 预览</h4>

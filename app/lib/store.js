@@ -400,6 +400,8 @@ function saveTasks(tasks) {
 //   支持完整日期（20260818-1307 / 2026-08-18 13:07）与当天时刻（13:07），行末可 @智能体
 // runner='solo' 时任务标记为单聊执行（由 opencode 单体完成，不经管家编排）
 // 返回 {tasks, warnings}
+// 任务 id 生成：毫秒时间戳 + 随机尾巴，避免跨批次同一毫秒内序号重叠导致 id 碰撞
+const TASK_ID_TAIL = () => Math.random().toString(36).slice(2, 8);
 function parseTasksFromText(text, mode, runner, model) {
   mode = mode === 'scheduled' ? 'scheduled' : 'sequential';
   const now = new Date();
@@ -510,7 +512,7 @@ function parseTasksFromText(text, mode, runner, model) {
     }
 
     const rec = {
-      id: `t-${baseTs}-${seq++}`,
+      id: `t-${baseTs}-${TASK_ID_TAIL()}`,
       title: line.slice(0, 500),
       notes: '',
       createdAt,
@@ -549,54 +551,158 @@ function parseTasksFromText(text, mode, runner, model) {
       }
     }
   }
-  // 环检测（仅对依赖声明成功的子图做 Kahn 拓扑排序，DFS 还原环路路径）
+  // 环检测（抽取为 findDepCycle 通用函数，画布导入/依赖编辑复用）
   if (!errors.length) {
-    const indeg = new Map();
-    const adj = new Map();
-    for (const t of parsed) {
-      if (!t.dependsOn) continue;
-      indeg.set(t.id, (t.dependsOn || []).length);
-      for (const d of t.dependsOn) {
-        if (!adj.has(d)) adj.set(d, []);
-        adj.get(d).push(t.id);
-      }
-    }
-    const q = parsed.filter(t => (indeg.get(t.id) || 0) === 0).map(t => t.id);
-    const idToNo = new Map(parsed.map(t => [t.id, t._lineNo]));
-    let visited = 0;
-    while (q.length) {
-      const id = q.shift();
-      visited++;
-      for (const nx of (adj.get(id) || [])) {
-        indeg.set(nx, indeg.get(nx) - 1);
-        if (indeg.get(nx) === 0) q.push(nx);
-      }
-    }
-    if (visited < [...indeg.keys()].length) {
-      // 存在环：从仍入度 >0 的节点 DFS 找一条具体环路路径
-      const remain = parsed.filter(t => (indeg.get(t.id) || 0) > 0);
-      const path = [];
-      const seen = new Set();
-      const dfs = (id) => {
-        if (seen.has(id)) return path.slice(path.indexOf(id));
-        seen.add(id); path.push(id);
-        for (const d of (byIdOf(id).dependsOn || [])) {
-          if ((indeg.get(d) || 0) > 0 || remain.some(t => t.id === d)) {
-            const r = dfs(d);
-            if (r) return r;
-          }
-        }
-        path.pop();
-        seen.delete(id);
-        return null;
-      };
-      const byIdOf = (id) => parsed.find(t => t.id === id);
-      const cycle = dfs(remain[0].id) || remain.map(t => t.id);
+    const cycle = findDepCycle(parsed);
+    if (cycle) {
+      const idToNo = new Map(parsed.map(t => [t.id, t._lineNo]));
       errors.push({ line: idToNo.get(cycle[0]), message: `任务依赖存在环路：${cycle.map(id => idToNo.get(id)).join(' → ')} → ${idToNo.get(cycle[0])}` });
     }
   }
   for (const t of parsed) delete t._lineNo;
   return { tasks: parsed, warnings, errors };
+}
+
+// 依赖图环检测（Kahn 拓扑 + DFS 还原环路路径）：tasks 需含 id/dependsOn，返回环路 id 数组或 null
+function findDepCycle(tasks) {
+  const indeg = new Map();
+  const adj = new Map();
+  const byId = new Map(tasks.map(t => [t.id, t]));
+  for (const t of tasks) {
+    if (!t.dependsOn || !t.dependsOn.length) continue;
+    indeg.set(t.id, t.dependsOn.length);
+    for (const d of t.dependsOn) {
+      if (!adj.has(d)) adj.set(d, []);
+      adj.get(d).push(t.id);
+    }
+  }
+  const q = tasks.filter(t => (indeg.get(t.id) || 0) === 0).map(t => t.id);
+  let visited = 0;
+  while (q.length) {
+    const id = q.shift();
+    visited++;
+    for (const nx of (adj.get(id) || [])) {
+      indeg.set(nx, indeg.get(nx) - 1);
+      if (indeg.get(nx) === 0) q.push(nx);
+    }
+  }
+  // Kahn 判环：visited 与全部节点数比较（indeg 只记录有依赖声明的节点，
+  // 若与 indeg.size 比较则环外任务会虚增 visited 导致漏报环）
+  if (visited >= tasks.length) return null;
+  // 存在环：从仍入度 >0 的节点逐个 DFS 还原一条具体环路路径
+  const remain = tasks.filter(t => (indeg.get(t.id) || 0) > 0);
+  const path = [];
+  const seen = new Set();
+  const dfs = (id) => {
+    if (seen.has(id)) return path.slice(path.indexOf(id));
+    seen.add(id); path.push(id);
+    for (const d of (byId.get(id).dependsOn || [])) {
+      if ((indeg.get(d) || 0) > 0 || remain.some(t => t.id === d)) {
+        const r = dfs(d);
+        if (r) return r;
+      }
+    }
+    path.pop();
+    seen.delete(id);
+    return null;
+  };
+  for (const t of remain) {
+    const r = dfs(t.id);
+    if (r) return r;
+  }
+  return remain.map(t => t.id);
+}
+
+// 可视化画布导入：nodes=[{title, deps:[画布序号(1-based)]}]，结构化直建（不走文本解析），环/引用校验同一套 findDepCycle
+function importTasksCanvas(nodes, mode, runner, model, refs) {
+  const warnings = [];
+  const errors = [];
+  const list = Array.isArray(nodes) ? nodes : [];
+  if (!list.length) errors.push({ node: -1, message: '画布为空，请先添加任务节点' });
+  const parsed = [];
+  list.forEach((n, i) => {
+    const title = String((n && n.title) || '').trim().slice(0, 500);
+    if (!title) { errors.push({ node: i, message: `第 ${i + 1} 个节点的任务标题为空` }); return; }
+    const rec = {
+      id: `t-${Date.now()}-${TASK_ID_TAIL()}`,
+      title,
+      notes: '',
+      createdAt: Date.now() + i * 1000,
+      status: 'pending',
+      assign: null,
+      result: '',
+      kind: mode,
+      runner: runner === 'solo' ? 'solo' : ''
+    };
+    if (runner === 'solo') rec.link = 'new';
+    if (Array.isArray(n.deps) && n.deps.length) rec.depNos = [...new Set(n.deps.map(Number).filter(x => Number.isInteger(x) && x >= 1 && x <= list.length && x !== i + 1))];
+    rec._nodeNo = i + 1;
+    parsed.push(rec);
+  });
+  if (errors.length) return { added: 0, warnings, errors, addedTasks: [] };
+  const byNo = new Map(parsed.map(t => [t._nodeNo, t]));
+  for (const t of parsed) {
+    if (!t.depNos) continue;
+    t.dependsOn = t.depNos.map(no => byNo.get(no).id);
+  }
+  const cycle = findDepCycle(parsed);
+  if (cycle) {
+    const idToNo = new Map(parsed.map(t => [t.id, t._nodeNo]));
+    errors.push({ node: idToNo.get(cycle[0]) - 1, message: `任务依赖存在环路：${cycle.map(id => idToNo.get(id)).join(' → ')} → ${idToNo.get(cycle[0])}` });
+    return { added: 0, warnings, errors, addedTasks: [] };
+  }
+  for (const t of parsed) { delete t._nodeNo; if (t.dependsOn) t.dependsOn = [...new Set(t.dependsOn)]; }
+  const refList = Array.isArray(refs) ? refs.map(r => String(r || '').trim()).filter(Boolean) : [];
+  const tasks = getTasks();
+  let next = 0;
+  for (const t of tasks) { if (t.seq === undefined) t.seq = next++; else next = Math.max(next, t.seq + 1); }
+  for (const t of parsed) { t.seq = next++; if (runner === 'solo' && model) t.model = String(model); if (refList.length) t.refs = refList.slice(); }
+  saveTasks(tasks.concat(parsed));
+  return { added: parsed.length, warnings, errors: [], addedTasks: parsed };
+}
+
+// 画布编辑已有任务依赖：updates=[{id, deps:[任务id]}]，仅允许改动 pending/blocked 任务；
+// 在「应用改动后的全图」上做环检测，任一校验失败则整体不入库
+function updateTaskDeps(updates) {
+  const errors = [];
+  const list = Array.isArray(updates) ? updates : [];
+  const tasks = getTasks();
+  const byId = new Map(tasks.map(t => [t.id, t]));
+  const idToSeqNo = new Map(tasks.map(t => [t.id, (t.seq === undefined ? 0 : t.seq) + 1]));
+  const patchMap = new Map();
+  for (const u of list) {
+    const t = byId.get(u && u.id);
+    if (!t) { errors.push({ id: u.id, message: '任务不存在或已被删除' }); continue; }
+    if (t.status === 'running' || t.status === 'done' || t.status === 'failed') {
+      errors.push({ id: t.id, message: `任务「${String(t.title).slice(0, 30)}」已${t.status === 'running' ? '在执行' : '完成/失败'}，依赖不可修改` });
+      continue;
+    }
+    const deps = [...new Set((Array.isArray(u.deps) ? u.deps : []).filter(d => {
+      const dt = byId.get(d);
+      if (!dt) { errors.push({ id: t.id, message: `依赖的目标任务不存在（已删除）` }); return false; }
+      if (d === t.id) { errors.push({ id: t.id, message: `任务「${String(t.title).slice(0, 30)}」不能依赖自身` }); return false; }
+      return true;
+    }))];
+    patchMap.set(t.id, deps);
+  }
+  if (errors.length) return { updated: 0, errors };
+  // 在副本全图上校验环：未列出的任务保持原 dependsOn
+  const projected = tasks.map(t => ({ id: t.id, dependsOn: patchMap.has(t.id) ? patchMap.get(t.id) : (t.dependsOn || []) }));
+  const cycle = findDepCycle(projected);
+  if (cycle) {
+    const byIdP = new Map(tasks.map(t => [t.id, t]));
+    errors.push({ id: cycle[0], message: `保存后任务依赖存在环路：${cycle.map(id => String((byIdP.get(id) || {}).title || id).slice(0, 20)).join(' → ')} → ${String((byIdP.get(cycle[0]) || {}).title || cycle[0]).slice(0, 20)}` });
+    return { updated: 0, errors };
+  }
+  let updated = 0;
+  for (const [id, deps] of patchMap) {
+    const t = byId.get(id);
+    if (deps.length) { t.dependsOn = deps; t.depNos = deps.map(d => idToSeqNo.get(d)); }
+    else { delete t.dependsOn; delete t.depNos; }
+    updated++;
+  }
+  if (updated) saveTasks(tasks);
+  return { updated, errors: [] };
 }
 
 function importTasks(text, mode, runner, model, refs) {
@@ -1262,6 +1368,9 @@ module.exports = {
   getTasks,
   saveTasks,
   importTasks,
+  importTasksCanvas,
+  updateTaskDeps,
+  findDepCycle,
   reorderTasks,
   deleteTask,
   updateTask,

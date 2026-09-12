@@ -92,6 +92,13 @@ test('校验：菱形（1,2→3→4,5→6）无环', () => {
   assert.strictEqual(r.tasks.filter(t => t.dependsOn).length, 4);
 });
 
+test('校验：环外存在独立任务时仍报环（回归：visited 虚高漏报）', () => {
+  // 4 个无依赖任务 + 2 节点环：旧实现 visited(4) >= indeg.size(2) 误判无环
+  const r = store.parseTasksFromText('1. 独立甲\n2. 独立乙\n3. 独立丙\n4. 独立丁\n5. X ←6\n6. Y ←5', 'sequential', '');
+  assert.strictEqual(r.errors.length, 1);
+  assert.ok(r.errors[0].message.includes('环路'));
+});
+
 // ---------- importTasks 集成 ----------
 
 test('importTasks：校验失败返回 errors 且不入库', () => {

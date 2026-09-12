@@ -140,7 +140,15 @@ function makeRequestApproval(emitFn) {
         store.savePendingApproval(id, { kind, label, taskId: taskId || '', runId: runId || '', createdAt, deadline: new Date(Date.now() + APPROVAL_TIMEOUT_MS).toISOString(), status: 'pending' });
       } catch (e) { console.error('[approval] 落盘失败:', e && e.message); }
       try { if (typeof emitFn === 'function') emitFn()({ type: 'approval_required', approvalId: id, kind, label, taskId: taskId || '', runId: runId || '' }); } catch { /* SSE 已断开：刷新后经 /api/approvals 恢复 */ }
-      try { if (feishu.isRunning()) feishu.notify(`⏸ 待审批 #${seq}\n${label || kind}\n回复 /approve ${seq} 通过，/reject ${seq} 驳回`); } catch { /* 桥接未启用或发送失败均忽略 */ }
+      try {
+        if (feishu.isRunning()) {
+          const card = feishu.buildApprovalCard({ seq, kind, label, timeoutMin: Math.round(APPROVAL_TIMEOUT_MS / 60000) });
+          (async () => {
+            const sent = await feishu.notifyCard(card);
+            if (!sent) await feishu.notify(`⏸ 待审批 #${seq}\n${label || kind}\n回复 /approve ${seq} 通过，/reject ${seq} 驳回`);
+          })().catch(() => { /* 卡片与文本兜底均失败：忽略 */ });
+        }
+      } catch { /* 桥接未启用或构建失败均忽略 */ }
     });
     return Object.assign(p, { approvalId: id });
   };
@@ -309,6 +317,14 @@ const feishuHooks = {
     if (!id) return `未找到编号 #${num} 的待审批（可能已处理或超时），用 /approvals 查看当前列表`;
     finishApproval(id, ok, false);
     return (ok ? '✅ 已通过审批 #' : '🚫 已驳回审批 #') + num;
+  },
+  // 交互卡片按钮回调分发（value={act,...}，见 bridge-feishu dispatchCardAction）
+  cardAction: async (val) => {
+    const act = val && val.act;
+    if (act === 'approve' || act === 'reject') return feishuHooks.resolveApproval(val.n, act === 'approve');
+    if (act === 'status') return feishuHooks.status();
+    if (act === 'stop') return feishuHooks.stop();
+    return '未知操作：' + String(act);
   }
 };
 
@@ -1241,6 +1257,45 @@ ${need}
     return;
   }
 
+  if (p === '/api/tasks/import-canvas' && req.method === 'POST') {
+    // 可视化画布导入：nodes=[{title, deps:[画布序号(1-based)]}]，结构化直建（不走 ← 文本解析）；
+    // 依赖/环校验与文本导入同一套内核（findDepCycle），校验失败整批不入库
+    const body = await readBody(req);
+    const mode = body.mode === 'scheduled' ? 'scheduled' : 'sequential';
+    const runner = body.runner === 'solo' ? 'solo' : '';
+    const { normalizeRefs } = require('./lib/refs');
+    const imported = store.importTasksCanvas(body.nodes, mode, runner, body.model, normalizeRefs(body.refs));
+    const { added, warnings, addedTasks } = imported;
+    if (Array.isArray(imported.errors) && imported.errors.length) {
+      json(res, 400, { success: false, error: '任务依赖校验失败', errors: imported.errors, warnings });
+      return;
+    }
+    let isolated = 0;
+    if (body.isolated && Array.isArray(addedTasks)) {
+      const worktree = require('./lib/worktree');
+      for (const t of addedTasks) {
+        const wt = await worktree.createForTask(t.id);
+        if (wt) { store.updateTask(t.id, { worktree: wt }); isolated++; }
+      }
+      if (!isolated) warnings.push('统一工作目录不是 Git 仓库（或没有任何提交），任务将按共享目录执行');
+    }
+    json(res, 200, { success: true, added, warnings, mode, runner, isolated, tasks: store.getTasks() });
+    return;
+  }
+
+  if (p === '/api/tasks/deps' && req.method === 'POST') {
+    // 画布编辑已有任务依赖：updates=[{id, deps:[任务id]}]，仅 pending/blocked 可改；
+    // 在应用改动后的全图上做环检测，任一失败整体不入库
+    const body = await readBody(req);
+    const r = store.updateTaskDeps(body.updates);
+    if (r.errors.length) {
+      json(res, 400, { success: false, error: '任务依赖校验失败', errors: r.errors });
+      return;
+    }
+    json(res, 200, { success: true, updated: r.updated, tasks: store.getTasks() });
+    return;
+  }
+
   if (p === '/api/tasks/reorder' && req.method === 'POST') {
     // 拖拽排序：按给定 id 顺序重编执行顺序
     const body = await readBody(req);
@@ -1355,7 +1410,22 @@ ${need}
       settleClaim(idem.cid, true, { count: selected.length, scope: soloScope ? 'solo' : 'chat', titles: selected.map(t => t.title).join('、').slice(0, 2000) });
       // 群聊批次整体完成通知（单任务通知由 orchestrator 消息流承担，批次级聚合在此）
       notifyDone({ kind: 'batch', title: `${soloScope ? '单聊' : '群聊'}任务批次（${selected.length} 个）`, status: 'done', snippet: selected.map(t => t.title).join('、') });
-      try { if (feishu.isRunning()) feishu.notify(`✅ 任务批次完成（${selected.length} 个）：\n${selected.map(t => '· ' + t.title).join('\n').slice(0, 800)}`); } catch { /* 推送失败忽略 */ }
+      try {
+        if (feishu.isRunning()) {
+          // 批次后置状态统计（executeTaskBatch 完成后已落库）
+          const after = new Map(store.getTasks().map((t) => [t.id, t.status || 'pending']));
+          const stat = { scope: soloScope ? '单聊' : '群聊', total: selected.length, done: 0, failed: 0, blocked: 0, titles: [] };
+          for (const t of selected) {
+            const s = after.get(t.id) || 'pending';
+            if (s === 'done') stat.done++;
+            else if (s === 'failed') stat.failed++;
+            else if (s === 'blocked') stat.blocked++;
+            stat.titles.push((s === 'done' ? '✅ ' : s === 'failed' ? '❌ ' : s === 'blocked' ? '⛔ ' : '· ') + t.title);
+          }
+          const sent = await feishu.notifyCard(feishu.buildBatchDoneCard(stat));
+          if (!sent) feishu.notify(`✅ 任务批次完成（${selected.length} 个）：\n${selected.map(t => '· ' + t.title).join('\n').slice(0, 800)}`);
+        }
+      } catch { /* 推送失败忽略 */ }
     } catch (err) {
       console.error('[tasks/run] 编排异常:', err && (err.stack || err));
       send({ type: 'error', content: `任务编排异常：${err && err.message || err}` });
