@@ -696,7 +696,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/agents' && req.method === 'GET') {
-    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '', kernel: String(store.getConfig().kernel || 'auto'), approval: approvalSetting() });
+    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '', kernel: String(store.getConfig().kernel || 'auto'), approval: approvalSetting(), execTimeoutSec: store.getConfig().execTimeoutSec ?? null });
     return;
   }
 
@@ -881,8 +881,13 @@ ${need}
     // 审批模式（协作关卡）：off=关闭 / plan=方案后 / verify=交付前 / all=两者
     const approvalIn = String(body.approval || '').toLowerCase();
     const approval = ['off', 'plan', 'verify', 'all'].includes(approvalIn) ? approvalIn : undefined;
-    store.saveAgents(clean, globalCwd, kernel, approval);
-    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '', kernel: String(store.getConfig().kernel || 'auto'), approval: approvalSetting(), warnings: dirWarn });
+    // 执行等待（秒）：0=不限时（默认）；空值/未传=保持原值
+    let execTimeoutSec;
+    if (body.execTimeoutSec !== undefined && body.execTimeoutSec !== null && body.execTimeoutSec !== '') {
+      execTimeoutSec = Math.max(0, Math.min(604800, Math.round(Number(body.execTimeoutSec) || 0)));
+    }
+    store.saveAgents(clean, globalCwd, kernel, approval, execTimeoutSec);
+    json(res, 200, { success: true, agents: store.getAgents(), butlerId: store.BUTLER.id, globalCwd: store.getConfig().globalCwd || '', kernel: String(store.getConfig().kernel || 'auto'), approval: approvalSetting(), warnings: dirWarn, execTimeoutSec: store.getConfig().execTimeoutSec ?? null });
     return;
   }
 

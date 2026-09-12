@@ -619,6 +619,13 @@
         <div class="form-row"><label>提炼目标上限（字符）</label><input id="cfgCompressMax" type="number" min="200" placeholder="2000"></div>
       </div>
 
+      <!-- 区块三：执行等待（AI 执行超时时长） -->
+      <div class="cfg-sec">
+        <div class="cfg-sec-h">⏱ 执行等待</div>
+        <p class="tip">AI 处理长文本、大附件或复杂任务需要更久。超过等待时长后任务会被强制终止并提示超时；设为 <b>0</b> 表示一直等待（默认，不设上限）。</p>
+        <div class="form-row"><label>等待时长（秒）</label><input id="cfgExecTimeout" type="number" min="0" step="30" placeholder="0 = 一直等待（默认）"></div>
+      </div>
+
       <div class="modal-actions">
         <button onclick="closeCfg()">取消</button>
         <button class="primary" id="cfgClearCustomBtn" onclick="clearLlmCustom()">清除自定义接入</button>
@@ -2855,6 +2862,12 @@ async function openCfg() {
     document.getElementById('cfgCompressThreshold').value = c.compressThreshold || '';
     document.getElementById('cfgCompressMax').value = c.compressMax || '';
   } catch (e) { /* 忽略，用占位符 */ }
+  try {
+    const r2 = await fetch('/api/agents');
+    const j2 = await r2.json();
+    const ets = j2 && j2.execTimeoutSec;
+    document.getElementById('cfgExecTimeout').value = (ets === null || ets === undefined) ? '' : String(ets);
+  } catch (e) { /* 忽略，用占位符 */ }
   loadLlmConfig();
 }
 function closeCfg() { document.getElementById('cfgModal').style.display = 'none'; }
@@ -2893,6 +2906,13 @@ async function saveCfg() {
         if (!(j && j.success)) throw new Error('自定义接入保存失败：' + ((j && j.error) || '未知'));
       }
       note = '已全部保存（本地持久化，重启不丢）';
+    }
+    // 4) 执行等待（秒）：0=一直等待；空=保持不变
+    const etsRaw = document.getElementById('cfgExecTimeout').value.trim();
+    if (etsRaw !== '') {
+      r = await fetch('/api/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agents: agents.filter(a => a.id !== 'butler'), globalCwd: globalCwd || '', kernel: configKernel || 'auto', approval: configApproval || 'off', execTimeoutSec: Math.max(0, Math.round(Number(etsRaw) || 0)) }) });
+      j = await r.json();
+      if (!(j && j.success)) throw new Error('执行等待保存失败：' + ((j && j.error) || '未知'));
     }
     msg.style.color = '#07c160'; msg.textContent = note;
     loadLlmConfig();
@@ -5083,7 +5103,7 @@ function openHelp() {
   </div>
   <div class="help-sec"><h4>❓ 常见问题</h4>
     <ul>
-      <li>换端口：编辑启动脚本里的 PORT；单任务超时：.env 中调大 <code>AGENTS_CHAT_TIMEOUT_MS</code>（默认 10 分钟）</li>
+      <li>换端口：编辑启动脚本里的 PORT；执行等待时长：配置页「⏱ 执行等待」调整（默认 0 = 一直等待，不超时）</li>
       <li>自动核查定制：.env 中 <code>AGENTS_CHAT_VERIFY_CMD="npm test"</code> 可让每轮验收前自动跑测试/构建（在产出存档目录执行）；<code>AGENTS_CHAT_AUTOVERIFY=0</code> 关闭全部自动核查</li>
       <li>加/改智能体：「⚙ 智能体配置」可设名称、图标、技能说明、提示词；管家内置不可改；换内核也在该页顶部下拉框</li>
       <li>指定内核完整路径：.env 中设 <code>AGENTS_CHAT_OPENCODE_CMD</code> / <code>AGENTS_CHAT_CLAUDE_CMD</code> / <code>AGENTS_CHAT_CODEX_CMD</code> / <code>AGENTS_CHAT_PI_CMD</code></li>

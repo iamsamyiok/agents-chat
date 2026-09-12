@@ -443,14 +443,12 @@ function spawnKernel(runner, args, prompt, agent, onChunk, scope) {
   let errEvents = [];
   let killed = false;
 
-  // 超时保护：默认 10 分钟，超时强杀整个进程树
-  const timeoutMs = Number(process.env.AGENTS_CHAT_TIMEOUT_MS) > 0
-    ? Number(process.env.AGENTS_CHAT_TIMEOUT_MS)
-    : 600000;
-  const timer = setTimeout(() => {
+  // 超时保护：配置页「执行等待」优先（0=不限时），环境变量兼容旧用法；默认不限时
+  const timeoutMs = storeRef.execTimeoutMs();
+  const timer = timeoutMs > 0 ? setTimeout(() => {
     killed = true;
     killTree(child);
-  }, timeoutMs);
+  }, timeoutMs) : null;
 
   child.stdout.on('data', (data) => {
     stdoutBuf += data.toString();
@@ -478,7 +476,7 @@ function spawnKernel(runner, args, prompt, agent, onChunk, scope) {
     if (child._stopped) {
       error = '已手动停止';
     } else if (killed) {
-      error = `执行超时（超过 ${Math.round(timeoutMs / 1000)} 秒已强制终止）。可在 .env 调大 AGENTS_CHAT_TIMEOUT_MS`;
+      error = `执行超时（超过 ${Math.round(timeoutMs / 1000)} 秒已强制终止）。可在配置页「执行等待」调大时长，或设为 0 关闭超时`;
     } else if (errEvents.length > 0) {
       error = errEvents.join('\n').slice(0, 2000);
     } else if (code !== 0) {

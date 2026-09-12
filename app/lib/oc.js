@@ -9,6 +9,7 @@ const os = require('os');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const { registerChild, describeTool, resolveCwd } = require('./agent');
+const { execTimeoutMs } = require('./store');
 
 const MOCK_SCRIPT = path.join(__dirname, '..', 'mock', 'mock-agent.js');
 
@@ -173,10 +174,9 @@ function spawnSoloRunner(runnerSpec, args, prompt, env, onEvent, finish, scope) 
   let killed = false;
   const state = { ocSessionId: '', errEvents: [], toolSeq: 0, mockText: '', textOrder: [] };
 
-  const timeoutMs = Number(process.env.AGENTS_CHAT_TIMEOUT_MS) > 0
-    ? Number(process.env.AGENTS_CHAT_TIMEOUT_MS)
-    : 600000;
-  const timer = setTimeout(() => { killed = true; killTree(child); }, timeoutMs);
+  // 超时保护：配置页「执行等待」优先（0=不限时），环境变量兼容旧用法；默认不限时，长文本处理可耐心等待
+  const timeoutMs = execTimeoutMs();
+  const timer = timeoutMs > 0 ? setTimeout(() => { killed = true; killTree(child); }, timeoutMs) : null;
 
   const runLine = (line) => {
     if (runnerSpec.json) {
@@ -210,7 +210,7 @@ function spawnSoloRunner(runnerSpec, args, prompt, env, onEvent, finish, scope) 
     if (stdoutBuf.trim()) runLine(stdoutBuf.trim());
     let error;
     if (child._stopped) error = '已手动停止';
-    else if (killed) error = `执行超时（超过 ${Math.round(timeoutMs / 1000)} 秒已强制终止）。可在 .env 调大 AGENTS_CHAT_TIMEOUT_MS`;
+    else if (killed) error = `执行超时（超过 ${Math.round(timeoutMs / 1000)} 秒已强制终止）。可在配置页「执行等待」调大时长，或设为 0 关闭超时`;
     else if (state.errEvents.length) error = state.errEvents.join('\n').slice(0, 2000);
     else if (code !== 0) error = (stderrBuf.trim() || `进程异常退出（退出码 ${code}）`).slice(0, 2000);
     finish(error, state);

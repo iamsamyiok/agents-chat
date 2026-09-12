@@ -102,16 +102,34 @@ function saveConfig(cfg) {
 
 // 保存用户自定义的子智能体列表 + 全局统一工作目录 + 执行内核（管家由内置定义补充，不接受传入）
 // 基于现有配置增量合并，保留 schedEnabled 等其他字段不被覆盖丢失
-function saveAgents(userAgents, globalCwd, kernel, approval) {
+function saveAgents(userAgents, globalCwd, kernel, approval, execTimeoutSec) {
   const cfg = getConfig();
-  saveConfig({
+  const next = {
     ...cfg,
     defaultAgent: '',
     globalCwd: globalCwd !== undefined ? globalCwd : (cfg.globalCwd || ''),
     kernel: kernel !== undefined ? kernel : (cfg.kernel || 'auto'),
     approval: approval !== undefined ? approval : (cfg.approval || ''),
     agents: [BUTLER, ...userAgents]
-  });
+  };
+  // 执行等待（秒）：undefined=保持原值；数字（含 0=不限时）为显式设置
+  if (execTimeoutSec !== undefined) next.execTimeoutSec = execTimeoutSec;
+  saveConfig(next);
+}
+
+// AI 执行等待时长（毫秒，0=不限时）：
+// 1) 配置页「执行等待」显式设置（config.execTimeoutSec，含 0）优先
+// 2) 旧环境变量 AGENTS_CHAT_TIMEOUT_MS 兼容
+// 3) 默认 0：长文本/大附件处理可耐心等待，不强制报错
+function execTimeoutMs() {
+  const v = getConfig().execTimeoutSec;
+  if (v !== undefined && v !== null && v !== '') {
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 0) return Math.min(604800, Math.round(n)) * 1000;
+  }
+  const envMs = Number(process.env.AGENTS_CHAT_TIMEOUT_MS);
+  if (Number.isFinite(envMs) && envMs > 0) return envMs;
+  return 0;
 }
 
 // 定时任务调度总开关（配置页侧栏「启动/关闭定时任务」按钮）
@@ -1123,6 +1141,7 @@ module.exports = {
   getConfig,
   saveConfig,
   saveAgents,
+  execTimeoutMs,
   getSchedEnabled,
   setSchedEnabled,
   getMemoryData,
