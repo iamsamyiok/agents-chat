@@ -1162,11 +1162,36 @@ ${need}
         for (const k of ['mineruBase', 'mineruLang', 'llmBase', 'llmModel', 'llmApiKey']) {
           if (typeof body[k] === 'string') patch[k] = body[k].trim();
         }
+        if (typeof body.llmCompress === 'boolean') patch.llmCompress = body.llmCompress;
+        for (const k of ['compressThreshold', 'compressMax', 'compressTimeoutMs']) {
+          if (body[k] !== undefined && body[k] !== null && String(body[k]) !== '' && !Number.isNaN(Number(body[k]))) patch[k] = Number(body[k]);
+        }
         const saved = attachmentConfig.saveConfig(patch);
         json(res, 200, { success: true, config: saved });
       } else {
-        json(res, 200, { success: true, config: attachmentConfig.loadConfig() });
+        json(res, 200, { success: true, config: attachmentConfig.loadConfig(), accept: attachment.ACCEPT_STR });
       }
+    } catch (e) {
+      json(res, 500, { success: false, error: String((e && e.message) || e) });
+    }
+    return;
+  }
+
+  // 一键升级（前端版本面板触发）：npm 形态后台执行全局安装最新版；exe 形态提示走 GitHub Releases
+  if (p === '/api/update' && req.method === 'POST') {
+    if (IS_STANDALONE) {
+      json(res, 200, { success: true, standalone: true, message: '单文件版请到 GitHub Releases 下载最新版' });
+      return;
+    }
+    try {
+      const child = spawn('npm', ['install', '-g', 'agents-chat-cli@latest'], {
+        detached: true, stdio: 'ignore',
+        shell: process.platform === 'win32', // Windows 下 npm 为 npm.cmd，需经 shell 解析
+        env: process.env
+      });
+      child.on('error', (e) => console.error('[update] 升级进程启动失败:', e.message));
+      child.unref();
+      json(res, 200, { success: true, standalone: false });
     } catch (e) {
       json(res, 500, { success: false, error: String((e && e.message) || e) });
     }
@@ -1229,11 +1254,13 @@ ${need}
     const mentionAgents = resolveMentions(message, agents);
     let clean = stripMentions(message) || message || '（见附件）';
 
-    // 附件解析：在送入内核前把上传文件变为文本（MinerU Flash / Agnes 视觉 / 原生文本）
+    // 附件解析：在送入内核前把上传文件变为文本（MinerU Flash / Agnes 视觉 / 原生文本 / 表格 / LLM 提炼）
     if (hasAttach) {
       try {
         const att = await attachment.parseAttachments(body.attachments, buildAttOpts());
         if (att.text) clean = att.text + '\n\n' + clean;
+        const fails = att.items.filter((it) => it.error).map((it) => `⚠ 附件 ${it.name} 处理失败：${it.error}`);
+        if (fails.length) clean = fails.join('\n') + '\n\n' + clean;
         if (att.skipped) console.warn(`[chat] 忽略 ${att.skipped} 个超限附件`);
         for (const it of att.items) if (it.error) console.warn(`[chat] 附件解析失败 ${it.name}: ${it.error}`);
       } catch (e) {

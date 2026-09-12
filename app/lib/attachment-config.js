@@ -15,7 +15,12 @@ const DEFAULTS = {
   // 图片理解 LLM（Agnes 等，OpenAI 兼容 chat/completions）
   llmBase: 'https://apihub.agnes-ai.com/v1',
   llmModel: 'agnes-2.0-flash',
-  llmApiKey: ''
+  llmApiKey: '',
+  // 长文档 LLM 提炼压缩（复用上面的识别模型配置）
+  llmCompress: true,
+  compressThreshold: 4000,
+  compressMax: 2000,
+  compressTimeoutMs: 30000
 };
 
 function loadConfig() {
@@ -46,7 +51,11 @@ function toOpts(cfg) {
     agnesBase: cfg.llmBase,
     agnesModel: cfg.llmModel,
     mineruBase: cfg.mineruBase,
-    language: cfg.mineruLang
+    language: cfg.mineruLang,
+    llmCompress: cfg.llmCompress !== false,
+    compressThreshold: Number(cfg.compressThreshold) || 4000,
+    compressMax: Number(cfg.compressMax) || 2000,
+    compressTimeoutMs: Number(cfg.compressTimeoutMs) || 30000
   };
 }
 

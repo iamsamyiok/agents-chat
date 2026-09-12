@@ -1004,9 +1004,11 @@ function pruneOldData(days) {
 
 // ---------- 分工职工：独立于群聊智能体的专职角色库（财务/销售/研发/文案/调研员等） ----------
 const STAFF_PATH = path.join(DATA_DIR, 'staff.json');
-// 默认职工：仅一名调研员（用户按需扩充，AI 生成或手动添加）
+// 默认职工：规划者/执行者/验证者三人组（通用任务的完整闭环：拆解 → 落地 → 校验，用户可增删）
 const DEFAULT_STAFF = [
-  { id: 'researcher', name: '调研员', icon: '🔍', desc: '负责信息检索、资料收集与事实核查，为团队提供数据与背景支撑', role: '调研' }
+  { id: 'planner', name: '规划者', icon: '🗺️', desc: '负责任务拆解、方案设计与步骤编排，输出清晰可执行的分工计划', role: '规划' },
+  { id: 'executor', name: '执行者', icon: '🛠️', desc: '负责具体执行与产出落地，按计划完成开发/写作/数据处理等实际工作', role: '执行' },
+  { id: 'verifier', name: '验证者', icon: '✅', desc: '负责成果校验与质量把关，核对执行结果是否符合要求并给出验收结论', role: '验证' }
 ];
 
 function getStaff() {

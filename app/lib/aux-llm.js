@@ -9,9 +9,18 @@ const AUX_KEY = () => String(process.env.AGENTS_CHAT_AUX_API_KEY || '').trim();
 
 const PLACEHOLDER_RE = /^your-api-key|^changeme$/i;
 
-function auxReady() {
-  const base = AUX_BASE(), model = AUX_MODEL(), key = AUX_KEY();
-  return !!(base && model && key && !PLACEHOLDER_RE.test(key));
+// 配置解析：opts 注入优先（附件预处理复用识别模型配置），缺省回落 AUX 环境变量
+function cfgOf(opts) {
+  return {
+    base: String((opts && opts.base) || AUX_BASE() || '').trim().replace(/\/+$/, ''),
+    model: String((opts && opts.model) || AUX_MODEL() || '').trim(),
+    key: String((opts && opts.key) || AUX_KEY() || '').trim()
+  };
+}
+
+function auxReady(opts) {
+  const c = cfgOf(opts);
+  return !!(c.base && c.model && c.key && !PLACEHOLDER_RE.test(c.key));
 }
 
 // 剥离思考型模型的 <think>…</think> 段与首尾空白；未闭合的 <think>（流截断，答案未产出）丢弃其后全部内容
@@ -35,18 +44,19 @@ function pickContent(data) {
 }
 
 async function auxChatOnce(messages, opts, timeoutMs) {
+  const c = cfgOf(opts);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const resp = await fetch(`${AUX_BASE()}/chat/completions`, {
+    const resp = await fetch(`${c.base}/chat/completions`, {
       method: 'POST',
       signal: ctrl.signal,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${AUX_KEY()}`
+        'Authorization': `Bearer ${c.key}`
       },
       body: JSON.stringify({
-        model: AUX_MODEL(),
+        model: c.model,
         messages,
         temperature: opts.temperature !== undefined ? opts.temperature : 0.3,
         max_tokens: opts.maxTokens || 600,
@@ -71,7 +81,7 @@ async function auxChatOnce(messages, opts, timeoutMs) {
 // 可重试：网络错误/超时/429/5xx 重试 1 次；4xx（配置错）不重试
 async function auxChat(messages, opts) {
   const o = opts || {};
-  if (!auxReady()) return { ok: false, error: '辅助模型未配置' };
+  if (!auxReady(o)) return { ok: false, error: '辅助模型未配置' };
   const timeoutMs = o.timeoutMs || 45000;
   let last = null;
   for (let attempt = 0; attempt < 2; attempt++) {

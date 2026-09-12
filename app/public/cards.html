@@ -86,7 +86,7 @@
   .card:hover{border-color:var(--acc);box-shadow:0 3px 10px rgba(0,0,0,.09);transform:translateY(-1px)}
   .card.dragging{opacity:.4}
   .card.drag-over{border-color:var(--acc);border-style:dashed}
-  .card .title{font-weight:600;margin-bottom:6px;line-height:1.4;word-break:break-word;padding-right:150px}
+  .card .title{font-weight:600;margin-bottom:6px;line-height:1.4;word-break:break-word;padding-right:36px}
   .card .meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px}
   .badge{font-size:11px;padding:2px 7px;border-radius:6px;background:#eef0f3;color:var(--dim);border:1px solid var(--line)}
   .badge.prio-high{background:#fdeaea;color:var(--err);border-color:#f3c9c9}
@@ -94,8 +94,10 @@
   .badge.mode-continue{background:#e8f3ff;color:var(--acc2);border-color:#c4e2ff}
   .badge.mode-parallel{background:#f1e9ff;color:#8a6fe8;border-color:#ddd0ff}
   .badge.mode-new{background:#e8f7ed;color:var(--acc);border-color:#c4ecd3}
-  .card .op{position:absolute;top:8px;right:8px;display:none;gap:4px}
+  /* 悬浮操作按钮：hover 时在卡片右缘垂直居中竖排（紧凑工具栏，不挤压标题排版） */
+  .card .op{position:absolute;top:50%;right:6px;transform:translateY(-50%);display:none;flex-direction:column;gap:2px;background:rgba(255,255,255,.97);border:1px solid var(--line);border-radius:9px;padding:3px;box-shadow:0 2px 10px rgba(0,0,0,.12);z-index:5}
   .card:hover .op{display:flex}
+  .card .op .icon-btn{width:21px;height:21px;font-size:11px}
   .icon-btn{background:transparent;border:1px solid var(--line);color:var(--dim);border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:12px;line-height:1}
   .icon-btn:hover{color:var(--acc);border-color:var(--acc)}
   .empty{color:var(--dim);font-size:12px;text-align:center;padding:18px 0}

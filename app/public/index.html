@@ -309,6 +309,8 @@
   .modal textarea { width: 100%; height: 200px; border: 1px solid #ddd; border-radius: 6px; padding: 10px; font-size: 13px; resize: vertical; outline: none; }
   .modal textarea:focus { border-color: #07c160; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
+  /* 超高弹窗（配置/帮助）滚动时按钮栏粘底，随时可保存 */
+  #cfgModal .modal-actions, #helpModal .modal-actions { position: sticky; bottom: -18px; background: #fff; padding: 10px 0 2px; margin: 0; box-shadow: 0 -6px 12px rgba(0,0,0,.06); }
   .modal-actions button { border-radius: 6px; padding: 8px 20px; font-size: 13px; cursor: pointer; border: 1px solid #ddd; background: #fff; }
   .modal-actions .primary { background: #07c160; color: #fff; border-color: #07c160; }
   /* 附件：上传图标按钮 / 配置按钮 / 配置表单 */
@@ -316,7 +318,7 @@
   .ic-btn:hover { color: #07c160; }
   .cfg-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 7px 10px; border: 1px solid #e2e2e2; background: #fff; border-radius: 8px; font-size: 13px; color: #444; cursor: pointer; }
   .cfg-btn:hover { background: #f5f5f5; border-color: #07c160; color: #07c160; }
-  .modal-box { background: #fff; border-radius: 12px; padding: 18px 20px; box-shadow: 0 10px 40px rgba(0,0,0,.25); }
+  .modal-box { background: #fff; border-radius: 12px; padding: 18px 20px; box-shadow: 0 10px 40px rgba(0,0,0,.25); max-height: 88vh; overflow-y: auto; }
   .form-row { margin-bottom: 10px; }
   .form-row label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
   .form-row input { width: 100%; border: 1px solid #ddd; border-radius: 6px; padding: 7px 10px; font-size: 13px; outline: none; box-sizing: border-box; }
@@ -557,14 +559,25 @@
       </button>
       <div class="sf-row">
         <span class="runner-tag" id="runnerTag" style="display:none"></span>
+        <button class="sf-btn" id="verBtn" onclick="showVersion()" title="当前版本，点击检查更新" style="font-size:12px;font-weight:600;color:#4a90d9">v--</button>
         <span style="flex:1"></span>
-        <button class="sf-btn" id="notifyBtn" onclick="toggleSysNotify()" title="系统通知：页面在后台时任务完成弹系统级通知（浏览器授权后生效）">🔔</button>
+        <button class="sf-btn" id="ghBtn" onclick="openGithub()" title="GitHub 仓库">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        </button>
+        <button class="sf-btn" id="mailBtn" onclick="showContact()" title="联系开发者">✉️</button>
         <button class="sf-btn" id="helpBtn" onclick="openHelp()" title="使用帮助">❓</button>
       </div>
     </div>
   </aside>
 
   <!-- 统一配置弹窗（模型与接入 + 附件识别模型，分两区单列） -->
+  <div id="infoModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:95;align-items:center;justify-content:center">
+    <div class="modal-box" style="width:420px">
+      <h3 id="infoTitle"></h3>
+      <div id="infoBody" style="font-size:14px;line-height:1.7"></div>
+      <div class="modal-actions"><button onclick="closeInfo()">关闭</button></div>
+    </div>
+  </div>
   <div id="cfgModal" class="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:90;align-items:center;justify-content:center">
     <div class="modal-box" style="width:560px;max-width:94vw">
       <h3>配置</h3>
@@ -590,12 +603,17 @@
       <!-- 区块二：附件识别模型（单列） -->
       <div class="cfg-sec">
         <div class="cfg-sec-h">📎 附件识别模型</div>
-        <p class="tip">配置 MinerU（文档解析）与图片理解 LLM 的地址与密钥。</p>
+        <p class="tip">配置 MinerU（文档解析）与图片理解 LLM 的地址与密钥；同一 LLM 也用于长文档 AI 提炼。</p>
         <div class="form-row"><label>MinerU 地址（文档解析）</label><input id="cfgMineruBase" placeholder="https://mineru.net/api/v1/agent"></div>
         <div class="form-row"><label>MinerU 识别语言</label><input id="cfgMineruLang" placeholder="ch / en"></div>
         <div class="form-row"><label>图片理解 LLM 地址</label><input id="cfgLlmBase" placeholder="https://apihub.agnes-ai.com/v1"></div>
         <div class="form-row"><label>图片理解 LLM 模型名</label><input id="cfgLlmModel" placeholder="agnes-2.0-flash"></div>
         <div class="form-row"><label>图片理解 LLM API Key</label><input id="cfgLlmApiKey" type="password" placeholder="选填；不填则图片类附件无法解析"></div>
+        <div class="lbl" style="margin-top:12px">✂️ AI 提炼长文档（MinerU/文本/表格解析后自动压缩）</div>
+        <div class="tip">解析出的文本超过触发阈值时，自动用上面的 LLM 提炼为「概览 + 要点 + 关键原文」，避免超长原文占满内核上下文；提炼失败自动回退为头部截断，不阻塞对话。</div>
+        <div class="form-row"><label><input id="cfgLlmCompress" type="checkbox" style="vertical-align:-2px;margin-right:6px">启用 AI 提炼</label></div>
+        <div class="form-row"><label>触发阈值（字符）</label><input id="cfgCompressThreshold" type="number" min="500" placeholder="4000"></div>
+        <div class="form-row"><label>提炼目标上限（字符）</label><input id="cfgCompressMax" type="number" min="200" placeholder="2000"></div>
       </div>
 
       <div class="modal-actions">
@@ -993,7 +1011,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.46.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.47.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -1085,6 +1103,15 @@ function getSess(key) { if (!sessions.has(key)) sessions.set(key, []); return se
 // ---------- 初始化 ----------
 async function init() {
   const [health, ag, st] = await Promise.all([api('/api/health'), api('/api/agents'), api('/api/divide/staff')]);
+  // 文件选择器 accept 与后端支持类型同步（失败静默：accept 缺省仅影响选择器过滤，不影响上传）
+  fetch('/api/attachment/config').then((r) => r.json()).then((j) => {
+    if (j && j.accept) {
+      for (const id of ['fileInput', 'soloFileInput']) {
+        const el = document.getElementById(id);
+        if (el) el.accept = j.accept;
+      }
+    }
+  }).catch(() => {});
   agents = ag.agents || [];
   butlerId = ag.butlerId || 'butler';
   globalCwd = ag.globalCwd || '';
@@ -1093,6 +1120,8 @@ async function init() {
   dvStaff = st.staff || [];
   runnerState = { kind: health.runner || '', label: health.kernelLabel || '', cmd: health.kernelCmd || '', kernels: health.kernels || [] };
   // 内核状态：正常不显示标签；演示/未检测到 属于需要用户知情的状态，保留醒目标注
+  const verBtn = document.getElementById('verBtn');
+  if (verBtn) verBtn.textContent = 'v' + (health.version || '?');
   const tag = document.getElementById('runnerTag');
   if (health.runner === 'demo') {
     tag.textContent = '演示模式';
@@ -1293,6 +1322,12 @@ async function refreshCardsStats() {
     cardsStatsCache = r.success ? r.stats : null;
   } catch { cardsStatsCache = null; }
   if (chatMode === 'cards') markCardsSeen();
+  // 单聊/群聊/分工：进入模式即视为已查阅（完成差值绿点清零）
+  try {
+    if (chatMode === 'solo') localStorage.setItem('acSoloLastSeenDone', String(tasks.filter(t => t.runner === 'solo' && t.status === 'done').length));
+    if (chatMode === 'group') localStorage.setItem('acGroupLastSeenDone', String(tasks.filter(t => t.runner !== 'solo' && t.status === 'done').length));
+    if (chatMode === 'divide') localStorage.setItem('acDivideUnread', '0');
+  } catch { /* ignore */ }
   updateModeBadges();
 }
 
@@ -1309,7 +1344,6 @@ function updateModeBadges() {
     const soloTasks = tasks.filter(t => t.runner === 'solo');
     const groupTasks = tasks.filter(t => t.runner !== 'solo');
     const doneOf = (arr) => arr.filter(t => t.status === 'done').length;
-    const unreadOf = (arr) => arr.filter(t => unreadSess.has(t.id)).length;
     const prog = (el, d, t) => {
       const n = document.getElementById(el);
       if (n) n.textContent = t > 0 ? `✓${d}/${t}` : '';
@@ -1320,14 +1354,25 @@ function updateModeBadges() {
       d.textContent = n > 99 ? '99+' : String(n);
       d.classList.toggle('show', n > 0);
     };
+    // 完成差值提醒（与编排一致的「查阅后消失」机制）：当前完成数 − 上次查阅基准
+    const seenDone = (key, arr) => {
+      let seen = 0;
+      try { seen = parseInt(localStorage.getItem(key), 10) || 0; } catch { /* ignore */ }
+      return Math.max(0, doneOf(arr) - seen);
+    };
+    const markSeen = (key, arr) => { try { localStorage.setItem(key, String(doneOf(arr))); } catch { /* ignore */ } };
     prog('soloProg', doneOf(soloTasks), soloTasks.length);
     prog('groupProg', doneOf(groupTasks), groupTasks.length);
-    let groupUnread = unreadOf(groupTasks);
-    if (chatMode !== 'group') groupUnread += groupMsgUnread; // 非群聊时主会话新消息也提醒
-    dot('soloDot', chatMode === 'solo' ? 0 : unreadOf(soloTasks));
+    // 单聊：新完成任务数（进入单聊即清零）
+    dot('soloDot', chatMode === 'solo' ? 0 : seenDone('acSoloLastSeenDone', soloTasks));
+    // 群聊：新完成任务数 + 非群聊时的主会话新消息
+    let groupUnread = seenDone('acGroupLastSeenDone', groupTasks);
+    if (chatMode !== 'group') groupUnread += groupMsgUnread;
     dot('groupDot', groupUnread);
-    // 分工标签：进行中且已切走时显示绿点提醒
-    dot('divideDot', (typeof dvRunning === 'boolean' && dvRunning && chatMode !== 'divide') ? 1 : 0);
+    // 分工：切走后完成打点（localStorage 位），进入分工即清零
+    let dvUnread = 0;
+    try { dvUnread = parseInt(localStorage.getItem('acDivideUnread'), 10) || 0; } catch { /* ignore */ }
+    dot('divideDot', chatMode === 'divide' ? 0 : dvUnread);
     // 多任务编排：stats 接口 + localStorage 差值
     const st = cardsStatsCache;
     prog('cardsProg', st ? st.done : 0, st ? st.total : 0);
@@ -2758,9 +2803,9 @@ function renderDvRoster() {
   if (!box) return;
   dvList = dvList.filter(id => dvStaff.some(s => s.id === id)); // 清理已删除职工的幽灵 id（chips 数与实际发送保持一致）
   if (!dvList.length) {
-    // 默认仅调研员参与（用户自行增选；无调研员则取第一名职工）
-    const def = dvStaff.find(s => s.id === 'researcher') || dvStaff[0];
-    dvList = def ? [def.id] : [];
+    // 默认名单：规划者/执行者/验证者三人组（缺失的角色忽略，全无则取第一名职工）
+    const defs = ['planner', 'executor', 'verifier'].map(id => dvStaff.find(s => s.id === id)).filter(Boolean);
+    dvList = defs.length ? defs.map(s => s.id) : (dvStaff[0] ? [dvStaff[0].id] : []);
   }
   const inList = dvList.map(id => dvStaff.find(s => s.id === id)).filter(Boolean);
   const rest = dvStaff.filter(s => !dvList.includes(s.id));
@@ -2806,6 +2851,9 @@ async function openCfg() {
     document.getElementById('cfgLlmBase').value = c.llmBase || '';
     document.getElementById('cfgLlmModel').value = c.llmModel || '';
     document.getElementById('cfgLlmApiKey').value = c.llmApiKey || '';
+    document.getElementById('cfgLlmCompress').checked = c.llmCompress !== false;
+    document.getElementById('cfgCompressThreshold').value = c.compressThreshold || '';
+    document.getElementById('cfgCompressMax').value = c.compressMax || '';
   } catch (e) { /* 忽略，用占位符 */ }
   loadLlmConfig();
 }
@@ -2820,7 +2868,10 @@ async function saveCfg() {
       mineruLang: document.getElementById('cfgMineruLang').value.trim(),
       llmBase: document.getElementById('cfgLlmBase').value.trim(),
       llmModel: document.getElementById('cfgLlmModel').value.trim(),
-      llmApiKey: document.getElementById('cfgLlmApiKey').value
+      llmApiKey: document.getElementById('cfgLlmApiKey').value,
+      llmCompress: document.getElementById('cfgLlmCompress').checked,
+      compressThreshold: Number(document.getElementById('cfgCompressThreshold').value) || 4000,
+      compressMax: Number(document.getElementById('cfgCompressMax').value) || 2000
     };
     if (!att.mineruBase && !att.llmBase) throw new Error('附件识别模型至少填写一个地址（MinerU 或 图片理解 LLM）');
     let r = await fetch('/api/attachment/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(att) });
@@ -2947,14 +2998,19 @@ async function send() {
       handleStreamEvent(e);
     });
   } catch (err) {
-    addSys('处理异常：' + (err && err.message || err));
+    addSys('处理异常：' + (err && (err.message || err)));
   } finally {
     if (typing) removeMsg(typing);
     pendingAttachments = [];
     renderAttChips();
     chatBusy = false;
     stopAsked = false;
+    const wasDivide = isDivide;
     dvRunning = false;
+    // 分工执行结束且用户已切走：分工标签打绿点提醒（进入分工模式即清除）
+    if (wasDivide && chatMode !== 'divide') {
+      try { localStorage.setItem('acDivideUnread', '1'); } catch { /* ignore */ }
+    }
     setSendBtn();
     updateModeBadges();
   }
@@ -4012,14 +4068,17 @@ async function loadMessages() {
 let atState = null; // { start, end, items, active }
 
 function handleAtInput() {
+  const pos = input.selectionStart ?? input.value.length;
+  const before = input.value.slice(0, pos);
   const m = before.match(/@([^\s@]*)$/);
   if (!m) { hideAt(); return; }
   const q = m[1].toLowerCase();
-  // 分工模式 @ 只在参与职工内收敛（协作语义限定名单职工）
-  const pool = chatMode === 'divide' ? dvStaff.filter(s => dvList.includes(s.id)) : agents;
-  const items = pool.filter(a =>
-    !q || a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q) || String(a.desc || '').toLowerCase().includes(q)
-  ).slice(0, 8);
+  // 群聊 @ 弹全部智能体；分工 @ 弹全量职工库（后端 resolveMentions 命中后自动并入本轮名单）
+  const pool = chatMode === 'divide' ? dvStaff : agents;
+  // 名称/id 命中排前（点名主意图），仅描述命中殿后
+  const named = pool.filter(a => !q || a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q));
+  const byDesc = pool.filter(a => q && !named.includes(a) && String(a.desc || '').toLowerCase().includes(q));
+  const items = named.concat(byDesc).slice(0, 8);
   if (!items.length) { hideAt(); return; }
   atState = { start: pos - m[0].length, end: pos, items, active: 0 };
   renderAt();
@@ -4045,6 +4104,11 @@ function pickAt(i) {
   const v = input.value;
   input.value = v.slice(0, atState.start) + '@' + a.name + ' ' + v.slice(atState.end);
   const np = atState.start + a.name.length + 2;
+  // 分工模式：@ 选中的职工同步加入参与名单（视觉与发送名单保持一致）
+  if (chatMode === 'divide' && !dvList.includes(a.id) && dvStaff.some(s => s.id === a.id)) {
+    dvList.push(a.id);
+    renderDvRoster();
+  }
   input.focus();
   input.setSelectionRange(np, np);
   hideAt();
@@ -4053,6 +4117,59 @@ function pickAt(i) {
 function hideAt() {
   atState = null;
   document.getElementById('atMenu').style.display = 'none';
+}
+
+// ---------- 版本面板 / 联系开发者 / GitHub 仓库（左栏底部） ----------
+const GITHUB_URL = 'https://github.com/iamsamyiok/agents-chat';
+function openGithub() { window.open(GITHUB_URL, '_blank'); }
+function openInfo(title, html) {
+  document.getElementById('infoTitle').textContent = title;
+  document.getElementById('infoBody').innerHTML = html;
+  document.getElementById('infoModal').style.display = 'flex';
+}
+function closeInfo() { document.getElementById('infoModal').style.display = 'none'; }
+async function showVersion() {
+  let h = {};
+  try { h = await (await fetch('/api/health')).json(); } catch { /* 离线时展示占位 */ }
+  const hasUpdate = !!h.updateAvailable;
+  const body = hasUpdate
+    ? (h.standalone
+      ? `<p>发现新版本 <b style="color:#07c160">v${esc(h.latestVersion)}</b>（当前 v${esc(h.version)}）。</p>
+         <p class="tip" style="margin-top:6px">当前为单文件版，请到 <a href="${GITHUB_URL}/releases" target="_blank">GitHub Releases</a> 下载最新 exe。</p>`
+      : `<p>发现新版本 <b style="color:#07c160">v${esc(h.latestVersion)}</b>（当前 v${esc(h.version)}）。</p>
+         <div style="margin-top:12px"><button class="primary" id="doUpdateBtn" onclick="doUpdate()">一键升级到 v${esc(h.latestVersion)}</button></div>
+         <p class="tip" style="margin-top:8px">也可在终端执行 <code>agents-chat update</code>。升级完成后需重启程序生效。</p>`)
+    : `<p>当前版本 <b>v${esc(h.version || '?')}</b>，已是最新。</p>
+       <p class="tip" style="margin-top:6px">终端可随时执行 <code>agents-chat update</code> 检查升级。</p>`;
+  openInfo('版本', body);
+}
+async function doUpdate() {
+  const btn = document.getElementById('doUpdateBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '升级中，约需 1 分钟…'; }
+  try {
+    const j = await (await fetch('/api/update', { method: 'POST' })).json();
+    if (j && j.success && !j.standalone) {
+      if (btn) btn.textContent = '升级完成，请重启程序';
+      toast('升级完成，重启程序后生效');
+    } else if (j && j.success) {
+      if (btn) btn.textContent = '请到 GitHub Releases 下载';
+    } else {
+      if (btn) btn.textContent = '升级失败，请重试或用 agents-chat update';
+    }
+  } catch (e) {
+    if (btn) btn.textContent = '升级请求失败：' + e.message;
+  }
+  setTimeout(closeInfo, 2600);
+}
+function showContact() {
+  openInfo('联系开发者', `
+    <p>有任何问题或建议，欢迎邮件反馈：</p>
+    <p style="margin:10px 0"><b style="font-size:16px">dkdfban@gmail.com</b></p>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button onclick="location.href='mailto:dkdfban@gmail.com'">✉️ 写邮件</button>
+      <button onclick="copyText('dkdfban@gmail.com');toast('邮箱已复制')">复制邮箱</button>
+      <button onclick="openGithub()">GitHub 仓库</button>
+    </div>`);
 }
 
 // ---------- 智能体配置 ----------
