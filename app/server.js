@@ -31,6 +31,8 @@ const NATIVE_ATT_EXT = new Set([
   'toml', 'ini', 'cfg', 'conf', 'env', 'gitignore', 'dockerfile', 'makefile', 'cmake',
   'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'ico', 'tiff', 'tif', 'svg'
 ]);
+// 需要视觉模型识图的原生扩展（与 attachment.js 的 IMAGE_EXT 保持一致的判定口径）
+const IMAGE_EXT_FOR_ATT = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']);
 function isNativeExt(ext) { return NATIVE_ATT_EXT.has(String(ext || '').toLowerCase()); }
 
 // 单文件 exe 无控制台（--windows-hide-console）时 stdout 可能不可写：
@@ -1440,7 +1442,7 @@ ${need}
       }
       const model = String(body.model || '').trim();
       if (model && !oc.MODEL_RE.test(model)) {
-        json(res, 400, { success: false, error: '模型需形如 provider/model（例：monkeycode-ai/glm-5.3），或留空恢复内核默认' });
+        json(res, 400, { success: false, error: '模型需形如 provider/model（例：monkeycode-ai/glm-5.3，支持多级路径与 @cf 前缀），或留空恢复内核默认' });
         return;
       }
       try {
@@ -1529,9 +1531,12 @@ ${need}
           const ext = (String(it.name || '').toLowerCase().match(/\.([a-z0-9]+)$/) || [])[1] || '';
           if (isNativeExt(ext)) {
             ocFiles.push(fp); // opencode 可直接读取（文本/代码/图片）
-            if (!isOc) { // 非 opencode 内核无 -f：改解析文本注入 prompt
+            // 图片：内核模型可能不支持视觉输入，统一追加识图解析兜底
+            // 成功 → 注入图片描述；失败 → 注入失败原因（让用户能看到 Key 配置问题，而非静默瞎猜）
+            if (IMAGE_EXT_FOR_ATT.has(ext)) {
               const r = await attachment.parseAttachment({ name: it.name, mime: it.mime, data: it.data }, attOpts);
-              if (r.text) chunks.push(`【附件：${it.name}】\n${r.text}`);
+              if (r.text) chunks.push(`【附件：${it.name}（图片内容描述）】\n${r.text}`);
+              else if (r.error) chunks.push(`【附件：${it.name}】⚠ 图片识图失败：${r.error}（请在「配置 → 附件解析」检查 API Key）`);
             }
           } else { // 非原生（PDF/Word/Excel/PPT 等）：解析为文本注入 prompt
             const r = await attachment.parseAttachment({ name: it.name, mime: it.mime, data: it.data }, attOpts);

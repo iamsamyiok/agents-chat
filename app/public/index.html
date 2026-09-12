@@ -475,9 +475,6 @@
   .oc-menu-item.active { background: #e8f5e9; }
   .oc-menu-item.free b { color: #07c160; }
   .oc-menu-empty { padding: 8px; color: #999; font-size: 12px; text-align: center; }
-  #ocModelInput { width: 200px; border: 1px solid #e2e2e2; border-radius: 4px; padding: 4px 10px; font-size: 12px; outline: none; color: #333; background: #fff; }
-  #ocModelInput:focus { border-color: #07c160; }
-  #ocModelInput::placeholder { color: #b2b2b2; }
   #soloMessages { flex: 1; overflow-y: auto; padding: 16px 18px; }
   .solo-empty { text-align: center; color: #b2b2b2; font-size: 13px; padding: 60px 20px; line-height: 2; }
   .avatar.solo-av { background: #10aeff; }
@@ -577,8 +574,9 @@
       <div class="cfg-sec">
         <div class="cfg-sec-h">🤖 模型与接入</div>
         <div class="tip">AI 组队、AI 编排与未单独指定模型的任务都用这里的默认模型执行；单聊工作台与单张任务卡可临时改用其他模型。列表来自 <code>opencode models</code>，也可直接输入 <code>provider/model</code>；留空 = 用内核默认。</div>
-        <div class="form-row"><label>默认模型（LLM）</label><input id="llmModelInput" list="llmModelList" placeholder="provider/model，留空用内核默认" autocomplete="off"></div>
-        <datalist id="llmModelList"></datalist>
+        <div class="form-row" style="position:relative"><label>默认模型（LLM）</label><input id="llmModelInput" placeholder="点击选择或输入 provider/model，留空用内核默认" autocomplete="off" spellcheck="false" onfocus="openLlmModelMenu()" oninput="filterLlmModelMenu()" onblur="hideLlmModelMenu()">
+        <div id="llmModelMenu" onmousedown="event.preventDefault()" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:210;background:#fff;border:1px solid #ddd;border-radius:0 0 8px 8px;max-height:320px;overflow-y:auto;flex-direction:column;box-shadow:0 4px 12px rgba(0,0,0,.12);cursor:pointer"></div>
+        </div>
         <div id="llmAuthTip" class="tip" style="margin-top:2px;color:#999"></div>
 
         <div class="lbl" style="margin-top:12px">🔌 自定义 LLM 接入（自带 API）</div>
@@ -639,12 +637,7 @@
         </div>
       </div>
       <div class="hdr-right">
-    <div class="oc-model-box" id="ocModelBox" style="display:none" title="默认模型：点击展开下拉列表选择，或手动输入 provider/model（如：deepseek/deepseek-chat）">
-      <input id="ocModelInput" placeholder="默认模型" autocomplete="off" spellcheck="false">
-      <datalist id="ocModelList"></datalist>
-      <div id="ocModelMenu" onmousedown="onOcModelMenuMousedown()" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;background:#fff;border:1px solid #ddd;border-top:none;border-radius:0 0 8px 8px;max-height:320px;overflow-y:auto;flex-direction:column;box-shadow:0 4px 12px rgba(0,0,0,.12);cursor:pointer"></div>
-    </div>
-        <button class="cfg-btn" id="newSessBtn" onclick="newSession()">✚ 新会话</button>
+    <button class="cfg-btn" id="newSessBtn" onclick="newSession()">✚ 新会话</button>
         <button class="cfg-btn" id="histBtn" onclick="openHistory()">🕘 历史</button>
         <button class="cfg-btn" id="flowEntryBtn" onclick="openFlow()">🔭 流转</button>
         <button class="cfg-btn" id="agentsCfgBtn" onclick="openAgents()">⚙ 智能体配置</button>
@@ -1000,7 +993,7 @@
 </div>
 
 <script>
-const PAGE_VERSION = '3.45.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
+const PAGE_VERSION = '3.46.0'; // 与服务端 /api/health.version 互检，不一致说明页面缓存过期
 const AV_COLORS = ['#5b8def','#07c160','#fa9d3b','#10aeff','#8a6fe8','#fa5151','#e8a33d','#3aa7a3'];
 const PHASE_LABEL = { plan: '调度规划', work: '执行', review: '验收', report: '汇总', talk: '圆桌发言', task: '任务执行', divide: '分工' };
 // 职业图标库（智能体配置可选）
@@ -1029,10 +1022,6 @@ let ocSessions = [];           // 单聊会话列表（服务端 oc-sessions.jso
 let curOcId = '';              // 当前单聊会话 id（'' = 未选，显示空态引导）
 let soloBusy = false;          // 单聊进行中（发送按钮变「停止」）
 let soloStopAsked = false;
-let ocModels = [];             // 可选模型（opencode models）
-let ocModelDemo = false;       // 演示模式（模型列表为假数据）
-let ocModelNoResume = false;   // 当前内核不支持 -s 续聊（每轮独立对话）
-let curOcModel = '';           // 当前选中模型（localStorage 记忆）
 
 const input = document.getElementById('input');
 
@@ -1178,14 +1167,6 @@ async function init() {
   si.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); soloSend(); }
   });
-
-  // 单聊模型输入框：点击自动刷新列表；仅 change（选择/修改）生效——不绑 blur，
-  // 否则用户只是点开看一眼，自动挑的免费模型就会被写进 localStorage，观感像被锁死
-  const om = document.getElementById('ocModelInput');
-  om.addEventListener('focus', () => { loadOcModels(true); showOcModelMenu(); });
-  om.addEventListener('blur', hideOcModelMenu);
-  om.addEventListener('change', onOcModelPick);
-  om.addEventListener('input', (e) => { showOcModelMenu(); renderOcMenuItems(e.target.value); });
 
 // Markdown 预览：消息中的 .md 路径 / 过程存档行 → 点击打开预览弹窗
 document.addEventListener('click', (e) => {
@@ -1362,84 +1343,61 @@ function updateModeBadges() {
 
 // ==================== 单聊工作台（OpenCode） ====================
 
-// ---------- 模型列表 ----------
+// ---------- 模型列表（供设置弹窗「默认模型」下拉使用） ----------
+// 免费模型（服务端按 cost 判定）置顶；其余按 id 字母序
+function isFreeModel(m) { return !!m.free || /^(opencode|cloudflare-workers-ai|cloudflare-ai-gateway)\//.test(m.id || ''); }
+function freeFirstSort(list) {
+  return [...list].sort((a, b) => {
+    const fa = isFreeModel(a) ? 0 : 1, fb = isFreeModel(b) ? 0 : 1;
+    return fa !== fb ? fa - fb : String(a.id).localeCompare(String(b.id));
+  });
+}
+let llmModels = [];
 async function loadOcModels(refresh) {
   try {
     const r = await api('/api/oc/models' + (refresh ? '?refresh=1' : ''));
     if (!r.success) return;
-    ocModelDemo = !!r.demo;
-    ocModelNoResume = !!r.noResume;
-    ocModels = r.models || [];
-    renderOcModelSel();
+    llmModels = freeFirstSort(r.models || []);
+    renderLlmModelMenu();
   } catch { /* 模型列表加载失败不影响聊天（用默认模型） */ }
 }
-// 渲染输入框 + 下拉菜单（点击/聚焦展开，手输可精确 provider/model，支持搜索）
-function renderOcModelSel() {
-  const dl = document.getElementById('ocModelList');
-  // datalist 兜底（兼容老浏览器显示）：展示过滤候选
-  const filter = (document.getElementById('ocModelInput')?.value || '').toLowerCase();
-  dl.innerHTML = ocModels.map(m => `<option value="${escAttr(m.id)}">${esc(m.label || m.id)}</option>`).join('');
-  renderOcMenuItems(filter);
+function modelMenuItemHtml(m) {
+  const free = isFreeModel(m);
+  const cur = (document.getElementById('llmModelInput')?.value || '').trim();
+  return `<div class="oc-menu-item ${cur === m.id ? 'active' : ''}" data-id="${escAttr(m.id)}" onmousedown="pickLlmModel('${escAttr(m.id)}')" title="${escAttr(m.id)}"><b>${esc(m.label || m.id)}</b><span style="color:#999;font-size:11px;overflow:hidden;text-overflow:ellipsis">${esc(m.id)}</span>${free ? '<span style="margin-left:auto;font-size:10px;color:#07c160;white-space:nowrap">🆓免费</span>' : ''}</div>`;
 }
-function renderOcMenuItems(filter) {
-  const menu = document.getElementById('ocModelMenu');
+function renderLlmModelMenu() {
+  const menu = document.getElementById('llmModelMenu');
   if (!menu) return;
-  const q = (filter || '').toLowerCase();
-  const items = ocModels.filter(m => !q || (m.id || '').toLowerCase().includes(q) || (m.label || '').toLowerCase().includes(q));
-  menu.innerHTML = items.length
-    ? items.map(m => {
-        const free = /free/i.test(m.id) || /free/i.test(m.label || '');
-        return `<div class="oc-menu-item ${curOcModel === m.id ? 'active' : ''} ${free ? 'free' : ''}" data-id="${escAttr(m.id)}" onclick="pickOcModel('${escAttr(m.id)}')" title="${esc(m.label || m.id)}">${esc(m.icon || '⚙️')} <b>${esc(m.name || m.id)}</b>${free ? '<span style="margin-left:auto;font-size:10px;color:#07c160">🆓免费</span>' : ''}</div>`;
-      }).join('')
-    : `<div class="oc-menu-empty">${q ? '无匹配模型' : '无可用模型'}</div>`;
+  menu.innerHTML = llmModels.length
+    ? llmModels.map(modelMenuItemHtml).join('')
+    : `<div class="oc-menu-empty">${llmModels._demo ? '演示模式（无真实列表）' : '无可用模型'}</div>`;
 }
-function pickOcModel(id) {
-  curOcModel = id;
-  localStorage.setItem('ocModel', id);
-  syncOcModelInput();
-  hideOcModelMenuNow();
-  toast('已切换模型为 ' + (ocModels.find(m => m.id === id)?.label || id));
+function filterLlmModelMenu() {
+  const q = (document.getElementById('llmModelInput')?.value || '').toLowerCase();
+  llmModels.filter(m => !q || (m.id || '').toLowerCase().includes(q) || (m.label || '').toLowerCase().includes(q));
+  // 输入过滤：直接重渲列表（数据量 ≤ 几百，无性能压力）
+  const menu = document.getElementById('llmModelMenu');
+  if (!menu || menu.style.display === 'none') return;
+  const items = llmModels.filter(m => !q || (m.id || '').toLowerCase().includes(q) || (m.label || '').toLowerCase().includes(q));
+  menu.innerHTML = items.length ? items.map(modelMenuItemHtml).join('') : `<div class="oc-menu-empty">无匹配模型（可直接使用输入值）</div>`;
 }
-function showOcModelMenu() {
-  const menu = document.getElementById('ocModelMenu');
+function openLlmModelMenu() {
+  const menu = document.getElementById('llmModelMenu');
   if (!menu) return;
+  if (!llmModels.length) { menu.innerHTML = '<div class="oc-menu-empty">模型列表加载中…</div>'; loadOcModels(true); }
   menu.style.display = 'flex';
-  renderOcModelSel();
+  filterLlmModelMenu();
 }
-function hideOcModelMenu() {
-  const menu = document.getElementById('ocModelMenu');
-  if (!menu) return;
-  // 延迟关闭，防止 mousedown 点选时 blur 提前关闭
-  setTimeout(() => { if (!menu.matches(':hover') && !menu.dataset.mouseDown) hideOcModelMenuNow(); }, 150);
+function hideLlmModelMenu() {
+  const menu = document.getElementById('llmModelMenu');
+  if (menu) setTimeout(() => { if (!menu.matches(':hover')) menu.style.display = 'none'; }, 150);
 }
-function hideOcModelMenuNow() {
-  const menu = document.getElementById('ocModelMenu');
-  if (!menu) return;
-  menu.style.display = 'none';
-  menu.dataset.mouseDown = '';
-}
-function onOcModelMenuMousedown(e) {
-  const menu = document.getElementById('ocModelMenu');
-  if (menu) menu.dataset.mouseDown = '1';
-}
-function syncOcModelInput() {
-  const el = document.getElementById('ocModelInput');
-  if (!el) return;
-  if (document.activeElement !== el) el.value = curOcModel || '';
-  el.placeholder = ocModels.length ? '默认模型' : (ocModelDemo ? '默认模型（演示）' : '默认模型（未获取列表）');
-}
-// 输入/选择生效：精确匹配模型 id 或名称；或合法 provider/model 格式；否则回退
-function onOcModelPick() {
-  const el = document.getElementById('ocModelInput');
-  if (!el) return;
-  const v = el.value.trim();
-  if (!v) { curOcModel = ''; localStorage.setItem('ocModel', ''); syncOcModelInput(); return; }
-  const hit = ocModels.find(m => m.id === v || m.label === v);
-  if (hit) { curOcModel = hit.id; }
-  else if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(v)) { curOcModel = v; }
-  else { toast('未匹配到模型，已回退为默认模型'); curOcModel = ''; }
-  localStorage.setItem('ocModel', curOcModel);
-  syncOcModelInput();
+function pickLlmModel(id) {
+  const el = document.getElementById('llmModelInput');
+  if (el) el.value = id;
+  const menu = document.getElementById('llmModelMenu');
+  if (menu) menu.style.display = 'none';
 }
 
 // ---------- 会话管理 ----------
@@ -1520,7 +1478,7 @@ function soloRenderMessages() {
   if (!curOcId) {
     box.innerHTML = `<div class="solo-empty">👋 欢迎使用单聊<br>
       直接在下方输入消息即可开始（自动创建新会话，同会话多轮续聊）<br>
-      顶部输入框可选择默认模型（未选择时自动优先免费模型）</div>`;
+      默认模型在左下角「⚙ 配置」中统一选择（免费模型已置顶标注 🆓）</div>`;
     return;
   }
   box.innerHTML = '';
@@ -1704,8 +1662,6 @@ async function soloSend() {
     } catch { toast('自动新建会话失败'); return; }
   }
   if (soloBusy) return;
-  // 发送前兜底：模型输入框可能刚被修改但 change 尚未触发（如回车直接发送），先同步生效
-  onOcModelPick();
   soloBusy = true;
   soloStopAsked = false;
   updateSoloSendBtn();
@@ -1713,7 +1669,7 @@ async function soloSend() {
   const atts = soloAttachments.slice();
   pushSoloMsg(curOcId, { role: 'user', content: text || '（见附件）', ts: Date.now() });
   try {
-    const chatBody = { sessionId: curOcId, message: text, model: curOcModel, clientSubmitId: genCid() };
+    const chatBody = { sessionId: curOcId, message: text, clientSubmitId: genCid() };
     if (atts.length) chatBody.attachments = atts;
     await streamSSE('/api/oc/chat', chatBody, (e) => {
       if (e.type === 'text') {
@@ -2174,8 +2130,7 @@ function jumpToSession(taskId) {
 }
 
 function renderHeader() {
-  // 顶栏按钮按模式显隐：单聊=模型输入框+新会话+历史+帮助（配置/流转属群聊功能）
-  document.getElementById('ocModelBox').style.display = chatMode === 'solo' ? '' : 'none';
+  // 顶栏按钮按模式显隐：单聊=新会话+历史+帮助（配置/流转属群聊功能）
   document.getElementById('flowEntryBtn').style.display = chatMode === 'group' ? '' : 'none';
   document.getElementById('agentsCfgBtn').style.display = (chatMode === 'group' || chatMode === 'divide') ? '' : 'none';
   if (chatMode === 'solo') {
@@ -3417,7 +3372,7 @@ async function doImport() {
   const data = await api('/api/tasks/import', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      text, mode: importMode, runner: chatMode === 'solo' ? 'solo' : '', model: chatMode === 'solo' ? (curOcModel || '') : '',
+      text, mode: importMode, runner: chatMode === 'solo' ? 'solo' : '',
       isolated: !!(document.getElementById('importIsolated') || {}).checked
     })
   });
@@ -4363,12 +4318,8 @@ async function loadLlmConfig() {
       cKey.placeholder = 'API Key';
       cTip.textContent = '未配置：填好三项保存后，AI 组队 / AI 编排将直接使用你的自有 LLM';
     }
-    // 模型候选复用单聊模型列表（opencode models）
-    fetch('/api/oc/models').then(r => r.json()).then(md => {
-      const ids = (md.models || []).map(m => m.id || m);
-      document.getElementById('llmModelList').innerHTML =
-        ids.map(id => `<option value="${escAttr(id)}"></option>`).join('');
-    }).catch(() => {});
+    // 模型候选：拉取 opencode models 全量列表（免费来源置顶），供下拉选择
+    loadOcModels(false);
   } catch (e) {
     tip.textContent = e.message || '加载失败';
   }

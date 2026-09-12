@@ -5,19 +5,57 @@
 // - 非 opencode 内核（claude/codex/pi）无 -s 续聊能力：单聊退化为一次性对话，每轮全新上下文
 // - 演示模式（AGENTS_CHAT_MOCK=1）走 mock 子进程，输出模拟为快照事件
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn, execFileSync } = require('child_process');
 const { registerChild, describeTool, resolveCwd } = require('./agent');
 
 const MOCK_SCRIPT = path.join(__dirname, '..', 'mock', 'mock-agent.js');
 
-// 模型标识必须形如 provider/model，且只含安全字符（会进入命令行参数）
-const MODEL_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+// 模型标识：provider/model 或多级路径 provider/org/model、@cf/...（会进入命令行参数）
+// 仅允许安全字符且首字符不得为 '-'（防止被解析为命令行选项）
+const MODEL_RE = /^[A-Za-z0-9_@][A-Za-z0-9_@./-]*$/;
 // opencode 会话 ID（ses_ 开头的安全字符序列）
 const OC_SESSION_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
 // ---------- 模型列表：`opencode models` 输出尽力解析（60s 缓存） ----------
 let modelCache = { ts: 0, list: null };
+
+// 冷启动时 `opencode models` 可能只输出本地 custom provider（远端 models.dev 元数据未拉取）。
+// 兜底读 opencode 官方缓存（models.dev 全量元数据），补齐免费/托管模型（zen、cloudflare 系）与已登录 provider
+function ocModelsDevCachePath() {
+  return process.platform === 'win32'
+    ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'opencode', 'models.json')
+    : path.join(os.homedir(), '.cache', 'opencode', 'models.json');
+}
+
+function ocAuthProvidersFromDisk() {
+  try {
+    const base = process.platform === 'win32'
+      ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'opencode')
+      : path.join(os.homedir(), '.local', 'share', 'opencode');
+    const j = JSON.parse(fs.readFileSync(path.join(base, 'auth.json'), 'utf8'));
+    return Object.keys(j || {});
+  } catch { return []; }
+}
+
+function supplementalModels() {
+  try {
+    const j = JSON.parse(fs.readFileSync(ocModelsDevCachePath(), 'utf8'));
+    // 补全范围：opencode zen（含免费模型）+ cloudflare 免费额度系 + 本机已登录 provider
+    const want = new Set(['opencode', 'cloudflare-workers-ai', 'cloudflare-ai-gateway', ...ocAuthProvidersFromDisk()]);
+    const out = [];
+    for (const [pid, p] of Object.entries(j || {})) {
+      if (!want.has(pid) || !p || !p.models) continue;
+      for (const [mid, m] of Object.entries(p.models)) {
+        const cost = m && m.cost || {};
+        const free = !Number(cost.input) && !Number(cost.output);
+        out.push({ id: `${pid}/${mid}`, label: (m && m.name) || mid, free });
+      }
+    }
+    return out;
+  } catch { return []; }
+}
 
 function listOcModels(runner, force) {
   if (!runner || runner.kind !== 'opencode' || !runner.cmd) return [];
@@ -30,14 +68,25 @@ function listOcModels(runner, force) {
       windowsHide: true, cwd: resolveCwd(), maxBuffer: 4 * 1024 * 1024
     });
   } catch (e) {
-    // 失败时仍可能带部分 stdout，尽力解析
+    // 失败时仍可能带部分 stdout，尽力解析；原因落日志便于诊断（如 models.dev 拉取超时）
+    console.error('[oc models] 列表获取失败:', e && e.message ? e.message : e,
+      '| stdout 行数:', e && e.stdout ? String(e.stdout).trim().split('\n').length : 0);
     out = (e && e.stdout) ? String(e.stdout) : '';
   }
   const ids = new Set();
-  for (const m of String(out).match(/[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*/g) || []) {
-    if (MODEL_RE.test(m)) ids.add(m);
+  // 输出每行一个完整模型 id（可能为多级路径，如 cloudflare-workers-ai/@cf/org/model）
+  for (const line of String(out).split(/\r?\n/)) {
+    const m = line.trim().split(/\s+/)[0] || '';
+    if (m.includes('/') && MODEL_RE.test(m)) ids.add(m);
   }
-  const list = [...ids].sort().map(id => ({ id, label: id.split('/').pop() }));
+  // 本地结果过少（冷启动缺远端元数据）→ 用官方缓存补齐免费/托管模型
+  const byId = new Map([...ids].map(id => ({ id, label: id.split('/').pop(), free: false })).map(m => [m.id, m]));
+  if (byId.size < 10) {
+    for (const m of supplementalModels()) {
+      if (MODEL_RE.test(m.id) && !byId.has(m.id)) byId.set(m.id, m);
+    }
+  }
+  const list = [...byId.values()].sort((a, b) => String(a.id).localeCompare(String(b.id)));
   modelCache = { ts: Date.now(), list };
   return list;
 }
